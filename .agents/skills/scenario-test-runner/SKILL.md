@@ -1,6 +1,6 @@
 ---
 name: scenario-test-runner
-description: Use this skill when the user asks to execute a markdown QA scenario against a local project under code/, with environment resolution, code analysis, API and DB verification, and a final report.
+description: Use this skill when the user asks to execute a markdown QA scenario against a local project under code/, with environment resolution, API and DB verification, optional code analysis, and a final report.
 ---
 
 # Purpose
@@ -17,7 +17,7 @@ Use this skill when:
 
 1. The scenario file
 2. `AGENTS.md`
-3. The target project under `code/<project-name>`
+3. The target project under `code/<project-name>` only if needed for clarification, debugging, or expectation validation
 
 # Expected scenario structure
 
@@ -35,10 +35,16 @@ If the scenario is incomplete, do a best-effort run and clearly mark assumptions
 1. Read and understand the scenario.
 2. Identify the target project under `code/`.
 3. Use `env-resolution` to validate execution readiness.
-4. Use `code-analysis` first.
-5. For each API step, use `api-workflow`.
-6. For each DB validation step, use `db-verification`.
-7. Use `reporting` to assemble the final report under `artifacts/agent/`.
+4. Execute API and DB steps directly from the scenario whenever the scenario is sufficiently explicit.
+5. Use `code-analysis` only in the following cases:
+   - the scenario is ambiguous
+   - the expected behavior is unclear
+   - an API/DB result contradicts expectations
+   - additional evidence from code is needed for the final report
+   - debugging is required after a FAIL / ERROR / unexpected response
+6. For each API step, use `api-workflow`.
+7. For each DB validation step, use `db-verification`.
+8. Use `reporting` to assemble the final report under `artifacts/agent/`.
 
 # How to think about execution
 
@@ -49,7 +55,27 @@ For each step:
 - validate expectations against actual outputs
 - record evidence
 
-Do not skip code analysis unless the user explicitly asks to skip it.
+Prefer executing the scenario directly from its declared inputs and expectations.
+Do not scan the codebase by default if the scenario already provides enough information to run.
+Use code inspection only as a fallback or clarification mechanism.
+
+# Code analysis policy
+
+Code analysis is optional, not mandatory.
+
+Use `code-analysis` only as a last resort when:
+- the scenario does not clearly define the expected behavior
+- the correct endpoint, field, table, or side effect is uncertain
+- the environment behaves unexpectedly and root-cause hints are needed
+- DB validation requires confirming how persistence should work
+- the final report would be materially improved by code-backed evidence
+
+Do not perform broad codebase scanning when the scenario already contains:
+- explicit API paths
+- request bodies
+- expected response fields
+- expected DB tables/queries
+- clear success criteria
 
 # Status model
 
@@ -64,13 +90,15 @@ Use these statuses consistently:
 - Never expose secrets.
 - Never run destructive DB queries.
 - Never invent endpoints, tables, or fields without saying so explicitly.
-- Prefer evidence from code and tool outputs over assumptions.
+- Prefer evidence from actual tool outputs over assumptions.
+- Prefer scenario-defined expectations over unnecessary code exploration.
+- If code analysis was skipped because the scenario was sufficiently explicit, say so briefly in the report.
 
 # Completion criteria
 
 This skill is complete only when:
 - environment readiness was checked
-- code analysis was done
-- all executable steps were attempted
+- all executable API/DB steps were attempted
+- code analysis was used only if needed
 - statuses were assigned consistently
 - a final report was produced

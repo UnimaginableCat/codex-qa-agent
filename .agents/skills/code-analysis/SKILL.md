@@ -1,50 +1,65 @@
 ---
 name: code-analysis
-description: Use this skill to map a QA scenario to real implementation paths in a target project under code/, including routes, controllers, services, repositories, entities, serializers, DTOs, tests, and likely side effects.
+description: Use this skill to inspect a target project under code/ only when a QA scenario is ambiguous, runtime results need clarification, or implementation evidence is needed for debugging or reporting.
 ---
 
 # Purpose
 
-This skill analyzes the code before execution so later checks are grounded in the actual implementation.
+This skill provides implementation-backed clarification for QA execution when the scenario alone is not sufficient.
 
 Use this skill when:
-- a scenario references an endpoint or business flow
-- you need to understand what the system is supposed to do
-- you need to identify where DB side effects should appear
-- you need to find likely failure points before runtime checks
+- a scenario references an endpoint or business flow, but the expected behavior is unclear
+- you need to verify which code path is actually responsible for a response or side effect
+- API or DB results contradict scenario expectations
+- you need to identify likely DB side effects that are not explicit in the scenario
+- you need targeted debugging evidence for a FAIL / ERROR / unexpected runtime result
+
+Do not use this skill by default if the scenario already provides:
+- explicit API paths
+- required request fields
+- expected response fields
+- expected DB queries or tables
+- clear success criteria
 
 # Inputs to inspect
 
+Inspect only what is needed for the current ambiguity or failure:
 - the scenario file
 - the target project under `code/<project-name>`
-- routes/controllers/views
-- services/use-cases
-- repositories/DAOs/models/entities
-- serializers/DTOs/schemas
-- existing tests
-- config files if relevant
+- routes/controllers/views if endpoint resolution is needed
+- services/use-cases if business logic is unclear
+- repositories/DAOs/models/entities if DB side effects must be clarified
+- serializers/DTOs/schemas if response/request shape is uncertain
+- existing tests if they can confirm intended behavior
+- config files only if relevant to the issue being investigated
+
+Avoid broad codebase scanning unless absolutely necessary.
 
 # Analysis workflow
 
 1. Identify the target project.
-2. Identify the entry point:
+2. Identify the specific uncertainty or failure that requires code inspection.
+3. Narrow analysis to the smallest relevant implementation area, for example:
    - HTTP route
    - controller/view
    - command handler
    - service method
-3. Trace the main code path.
-4. Identify:
+   - serializer/schema
+   - repository/model
+4. Trace only the relevant code path.
+5. Extract only the evidence needed to guide execution or explain the result:
    - validations
    - auth requirements
    - side effects
    - DB writes/reads
    - expected response shape
-5. Find related tests and compare intended behavior.
-6. Summarize likely execution behavior.
+   - likely failure points
+6. If useful, check related tests for confirmation.
+7. Summarize findings concisely.
 
 # What to extract
 
-Try to answer:
+Try to answer only the questions relevant to the current need:
 - which endpoint or handler is involved
 - which request fields are required
 - which service/use-case executes the business logic
@@ -52,12 +67,16 @@ Try to answer:
 - what response is expected
 - what preconditions are required
 - what failure modes are likely
+- why an observed runtime result may differ from scenario expectations
+
+Do not extract unrelated implementation details.
 
 # Output format
 
 Produce a concise structured summary with:
 - target project
 - scenario step or feature being analyzed
+- reason code analysis was needed
 - probable code path
 - expected DB side effects
 - expected response shape
@@ -70,7 +89,9 @@ Produce a concise structured summary with:
 - If multiple paths are possible, say so explicitly.
 - If you cannot find an implementation detail, mark it as uncertain.
 - Do not claim behavior that is not supported by code or tests.
+- Do not scan large parts of the codebase when a narrow targeted lookup is enough.
+- If the scenario is already explicit enough, skip code analysis.
 
 # Completion criteria
 
-This skill is complete when the later API/DB execution can be guided by concrete implementation evidence rather than vague assumptions.
+This skill is complete when the specific ambiguity, contradiction, or debugging need has been clarified well enough to guide API/DB execution or improve the final report.
