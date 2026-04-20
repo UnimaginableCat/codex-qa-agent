@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.common.statuses import StepStatus
+from tools.scenario_runner.models import ApiStepDefinition, DbStepDefinition, ScenarioStep, ScenarioStepType
+from tools.scenario_runner.validators import ScenarioStepValidator
+
+
+class ScenarioStepValidatorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.validator = ScenarioStepValidator()
+
+    def test_api_supported_object_expectations(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {
+                    "id": 123,
+                    "name": "abc",
+                    "sort_order": 0,
+                    "root_category_id": 10,
+                    "root": {"id": 123},
+                    "items": [{"id": 123}],
+                },
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    "HTTP 200",
+                    "response JSON exists",
+                    "response contains field id",
+                    "response contains field `id`",
+                    'response name = "abc"',
+                    "response sort_order = 0",
+                    "response root_category_id is not null",
+                    "response root.id = 123",
+                    "response items.0.id = 123",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
+    def test_api_supported_array_expectations(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 201,
+                "body": [{"id": 123}, {"id": 456}],
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    "HTTP 200 or HTTP 201",
+                    "response JSON is an array",
+                    "array contains item with id = 123",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
+    def test_db_supported_expectations_use_first_row(self) -> None:
+        payload = {
+            "query": {
+                "row_count": 1,
+                "rows": [
+                    {
+                        "root_category_id": 10,
+                        "parent_id": None,
+                        "is_hidden": False,
+                        "name": "Root category for price list: 123",
+                    }
+                ],
+            }
+        }
+
+        results = self.validator.validate(
+            self._db_step(
+                [
+                    "one row exists",
+                    "root_category_id = 10",
+                    "parent_id is null",
+                    "is_hidden = false",
+                    "name starts with Root category for price list:",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+        self.assertTrue(all("first row" in result.detail.lower() for result in results[1:]), results)
+
+    def test_unsupported_expectation_returns_structured_blocked_result(self) -> None:
+        results = self.validator.validate(self._api_step(["response magically works"]), {"response": {"body": {}}})
+
+        self.assertEqual(results[0].status, StepStatus.BLOCKED)
+        self.assertIn("Unsupported API expectation rule", results[0].detail)
+        self.assertEqual(self.validator.final_status(results), StepStatus.BLOCKED)
+
+    def test_missing_field_path_returns_structured_failure(self) -> None:
+        results = self.validator.validate(
+            self._api_step(["response missing.id = 123"]),
+            {"response": {"body": {"id": 123}}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+        self.assertIn("Missing path segment", results[0].detail)
+
+    def test_scalar_json_where_object_expected_returns_structured_failure(self) -> None:
+        results = self.validator.validate(
+            self._api_step(["response contains field id"]),
+            {"response": {"body": "abc"}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+        self.assertIn("actual type is str", results[0].detail)
+
+    def test_non_array_where_array_expected_returns_structured_failure(self) -> None:
+        results = self.validator.validate(
+            self._api_step(["array contains item with id = 123"]),
+            {"response": {"body": {"id": 123}}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+        self.assertIn("Actual response body type: dict", results[0].detail)
+
+    def test_zero_db_rows_returns_structured_failure_for_field_check(self) -> None:
+        results = self.validator.validate(
+            self._db_step(["parent_id is null"]),
+            {"query": {"row_count": 0, "rows": []}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+        self.assertIn("No DB rows available", results[0].detail)
+
+    @staticmethod
+    def _api_step(expected: list[str]) -> ScenarioStep:
+        return ScenarioStep(
+            step_id="step-api",
+            step_number=1,
+            title="API step",
+            step_type=ScenarioStepType.API,
+            api=ApiStepDefinition(expected=expected),
+        )
+
+    @staticmethod
+    def _db_step(expected: list[str]) -> ScenarioStep:
+        return ScenarioStep(
+            step_id="step-db",
+            step_number=1,
+            title="DB step",
+            step_type=ScenarioStepType.DB,
+            db=DbStepDefinition(expected=expected),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

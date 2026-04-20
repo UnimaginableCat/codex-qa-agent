@@ -5,3 +5,4 @@ artifacts/agent/*
 !artifacts/agent/.gitkeep
 env/*.env
 .idea
+.codex-qa
