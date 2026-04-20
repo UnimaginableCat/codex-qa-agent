@@ -18,7 +18,7 @@ Use this skill when:
 - the scenario environment path
 - `env/<project>.env`
 - prior step outputs
-- code-analysis findings about expected persistence behavior
+- code-analysis findings only if additional clarification is needed
 
 # Execution workflow
 
@@ -27,12 +27,29 @@ Use this skill when:
    - SQL query
    - params
    - dependencies on prior steps
-3. Ensure the query is read-only.
-4. Before execution, use `env-resolution` if the environment path or database connection settings are unclear.
-5. Load the correct env file.
-6. Execute the query through `tools/db/query_check.py`.
-7. Compare returned rows to expected outcomes.
-8. Record the result and supporting evidence.
+3. Resolve scenario variables in SQL and params from:
+   - explicit scenario values
+   - prior captured outputs
+   - environment values if appropriate
+4. Ensure the query is read-only.
+5. Before execution, use `env-resolution` if the environment path or database connection settings are unclear.
+6. Load the correct env file.
+7. Execute the query through `tools/db/query_check.py`.
+8. Compare returned rows to expected outcomes.
+9. Record the result and supporting evidence.
+
+# SQL parameter style policy
+
+Scenario SQL may use a human-friendly named style such as:
+- `:price_list_id`
+
+Scenario params may be provided separately as a JSON object.
+
+Prefer keeping the SQL in the scenario readable and close to business intent.
+Do not rewrite scenario SQL manually unless absolutely necessary.
+
+If the execution tool supports adapting named parameters to the underlying database driver format, use that capability.
+If the execution tool does not support the scenario's parameter style, report this as a tooling limitation instead of silently changing scenario semantics.
 
 # Validation rules
 
@@ -42,21 +59,53 @@ Check as applicable:
 - status fields
 - foreign key relationships
 - timestamps or audit rows if relevant
-- consistency with expected side effects from code analysis
+- consistency with scenario-defined expectations
+- consistency with code-analysis findings only if code-analysis was actually used
 
 # Status rules
 
 - PASS — query executed and returned expected data
 - FAIL — query executed but returned unexpected data
-- BLOCKED — missing DB config/access or disallowed query
+- BLOCKED — missing DB config/access, unresolved required variables, or disallowed query
 - ERROR — tool/runtime/database failure
+
+# Code analysis policy
+
+Code-analysis is optional, not required for normal DB verification.
+
+Use code-analysis only when:
+- the expected persistence behavior is unclear
+- the relevant table/entity is uncertain
+- the query result contradicts the scenario expectation
+- debugging requires implementation evidence
+
+Do not inspect the codebase by default when the scenario already provides:
+- explicit SQL
+- explicit params
+- explicit expected DB outcomes
 
 # Guardrails
 
 - Allow only read-only SELECT queries.
 - Never mutate data.
 - Never mark missing DB access as FAIL.
-- If the SQL is ambiguous or not aligned with the code path, say so clearly.
+- Never invent table names, columns, or relationships without saying so explicitly.
+- If the SQL is ambiguous or not aligned with the scenario, say so clearly.
+- If execution is blocked by a tooling limitation, say so clearly.
+- Do not silently rewrite business expectations just to fit tool limitations.
+
+# Reporting expectations
+
+Record:
+- the executed DB step name
+- the resolved SQL params
+- row count
+- relevant returned evidence
+- whether expectations matched
+- any assumptions or unresolved ambiguities
+- any tooling issues or SQL compatibility workarounds
+
+If a tool-level limitation affected execution, report it separately from the business validation result.
 
 # Completion criteria
 
@@ -64,3 +113,4 @@ This skill is complete when the database verification step has:
 - been executed or clearly marked BLOCKED/ERROR
 - been validated against expectations
 - produced evidence usable in the final report
+- recorded any relevant assumptions or tooling limitations
