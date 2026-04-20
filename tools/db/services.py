@@ -23,12 +23,19 @@ class DatabaseQueryService:
         if not env.is_ready():
             return ExecutionResult(
                 status=StepStatus.BLOCKED,
-                message="Missing DATABASE_URL",
+                message=(
+                    "Missing DB connection settings. Provide DATABASE_URL with embedded "
+                    "credentials, or set DATABASE_URL with DATABASE_USER and DATABASE_PASSWORD."
+                ),
                 details={"sql": step.sql},
             )
 
         try:
-            with psycopg.connect(env.database_url, row_factory=dict_row) as connection:
+            with psycopg.connect(
+                env.database_url,
+                row_factory=dict_row,
+                **env.connection_kwargs(),
+            ) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(step.sql, step.params)
                     rows = list(cursor.fetchall())
