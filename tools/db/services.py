@@ -13,11 +13,15 @@ from tools.common.errors import EnvFileLoadError
 from .errors import SqlSafetyError
 from .loaders import DbEnvLoader, QueryStepLoader
 from .models import DbEnvConfig, QueryData, QueryStep
+from .sql_params import NamedSqlParamConverter
 from .validators import ReadOnlySqlValidator, SqlNormalizer
 
 
 class DatabaseQueryService:
     """Executes read-only database queries."""
+
+    def __init__(self, sql_param_converter: NamedSqlParamConverter) -> None:
+        self._sql_param_converter = sql_param_converter
 
     def execute(self, env: DbEnvConfig, step: QueryStep) -> ExecutionResult:
         if not env.is_ready():
@@ -31,13 +35,22 @@ class DatabaseQueryService:
             )
 
         try:
+            prepared_sql = self._sql_param_converter.prepare(step.sql, step.params)
+        except ValidationError as exc:
+            return ExecutionResult(
+                status=StepStatus.BLOCKED,
+                message=str(exc),
+                details={"sql": step.sql},
+            )
+
+        try:
             with psycopg.connect(
                 env.database_url,
                 row_factory=dict_row,
                 **env.connection_kwargs(),
             ) as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(step.sql, step.params)
+                    cursor.execute(prepared_sql.sql, prepared_sql.params)
                     rows = list(cursor.fetchall())
 
             return ExecutionResult(
@@ -45,6 +58,7 @@ class DatabaseQueryService:
                 message="Query executed successfully",
                 details={
                     "sql": step.sql,
+                    "executed_sql": prepared_sql.sql,
                     "query": QueryData(row_count=len(rows), rows=rows),
                 },
             )
@@ -52,13 +66,19 @@ class DatabaseQueryService:
             return ExecutionResult(
                 status=StepStatus.ERROR,
                 message=f"Database error: {exc}",
-                details={"sql": step.sql},
+                details={
+                    "sql": step.sql,
+                    "executed_sql": prepared_sql.sql,
+                },
             )
         except Exception as exc:  # noqa: BLE001
             return ExecutionResult(
                 status=StepStatus.ERROR,
                 message=f"Runtime error: {exc}",
-                details={"sql": step.sql},
+                details={
+                    "sql": step.sql,
+                    "executed_sql": prepared_sql.sql,
+                },
             )
 
 
@@ -115,5 +135,5 @@ def build_runner() -> DatabaseQueryRunner:
         env_loader=DbEnvLoader(),
         step_loader=QueryStepLoader(),
         sql_validator=ReadOnlySqlValidator(normalizer=SqlNormalizer()),
-        query_service=DatabaseQueryService(),
+        query_service=DatabaseQueryService(sql_param_converter=NamedSqlParamConverter()),
     )

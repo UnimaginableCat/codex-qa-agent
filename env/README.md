@@ -1,3 +1,5 @@
+Use Python 3.14+ for this QA tools workspace.
+
 Each project should have its own env file in this directory, for example `env/my-project.env`.
 
 Expected variables:

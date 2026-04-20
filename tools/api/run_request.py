@@ -11,18 +11,38 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.api import build_runner
 from tools.common import ExecutionResult, StepStatus
+from tools.common.runtime import UnsupportedPythonVersionError, ensure_supported_python_version
+
+
+def _print_error_result(message: str, details: dict[str, object] | None = None) -> int:
+    result = ExecutionResult(
+        status=StepStatus.ERROR,
+        message=message,
+        details=details or {},
+    )
+    print(json.dumps(result.to_dict(), ensure_ascii=False))
+    return 1
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        result = ExecutionResult(
-            status=StepStatus.ERROR,
-            message="Usage: python tools/api/run_request.py <env_file> <step_json>",
+    try:
+        ensure_supported_python_version()
+    except UnsupportedPythonVersionError as exc:
+        return _print_error_result(
+            str(exc),
+            details={
+                "current_python": exc.current_version_text,
+                "requires_python": f">={exc.minimum_version_text}",
+            },
         )
-        print(json.dumps(result.to_dict(), ensure_ascii=False))
-        return 1
+
+    if len(sys.argv) != 3:
+        return _print_error_result(
+            "Usage: python tools/api/run_request.py <env_file> <step_json>"
+        )
+
+    from tools.api import build_runner
 
     env_file = Path(sys.argv[1])
     step_file = Path(sys.argv[2])

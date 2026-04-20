@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-qa-agent-tools"
+version = "0.1.0"
+description = "Local QA tooling workspace for scenario-based API, DB, and reporting flows."
+requires-python = ">=3.14"
+dependencies = [
+    "requests>=2.31,<3",
+    "psycopg[binary]>=3.1,<4",
+    "python-dotenv>=1.0,<2",
+]
+
+[tool.setuptools.packages.find]
+include = ["tools*"]
