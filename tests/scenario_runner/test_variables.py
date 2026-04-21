@@ -266,6 +266,32 @@ class ScenarioVariableTests(unittest.TestCase):
         self.assertEqual(summary.steps[1].details["phase"], "deferred_capture")
         self.assertIn("price_list_id", summary.steps[1].details["unresolved_variables"])
 
+    def test_blocked_producer_marks_dependent_future_step_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "COMPANY_GUID=company-blocked\n")
+            executor = _CapturingExecutorFactory(
+                tool_results=[
+                    {
+                        "status": StepStatus.BLOCKED.value,
+                        "message": "Request failed: DNS lookup failed",
+                        "classification": "connectivity",
+                    }
+                ]
+            )
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(self._captured_variable_scenario(root), workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.BLOCKED)
+        self.assertEqual(summary.steps[0].status, StepStatus.BLOCKED)
+        self.assertEqual(summary.steps[1].status, StepStatus.BLOCKED)
+        self.assertEqual(summary.steps[1].details["phase"], "deferred_capture")
+        self.assertIn("price_list_id", summary.steps[1].details["unresolved_variables"])
+
     @staticmethod
     def _scenario(
         root: Path,

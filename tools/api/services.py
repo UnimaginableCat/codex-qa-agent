@@ -70,9 +70,14 @@ class ApiRequestService:
             response = self._session.request(step.method, prepared_request.url, **request_kwargs)
         except requests.RequestException as exc:
             return ExecutionResult(
-                status=StepStatus.ERROR,
+                status=StepStatus.BLOCKED,
                 message=f"Request failed: {exc}",
-                details={"method": step.method, "url": prepared_request.url},
+                details={
+                    "method": step.method,
+                    "url": prepared_request.url,
+                    "error_type": type(exc).__name__,
+                    "classification": "connectivity",
+                },
             )
         except Exception as exc:  # noqa: BLE001
             return ExecutionResult(
@@ -86,6 +91,18 @@ class ApiRequestService:
             headers=dict(response.headers),
             body=self._parse_response_body(response),
         )
+
+        if response.status_code in {502, 503, 504}:
+            return ExecutionResult(
+                status=StepStatus.BLOCKED,
+                message=f"Remote service unavailable: HTTP {response.status_code}",
+                details={
+                    "method": step.method,
+                    "url": prepared_request.url,
+                    "response": response_data,
+                    "classification": "service_unavailable",
+                },
+            )
 
         return ExecutionResult(
             status=StepStatus.PASS,
