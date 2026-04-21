@@ -133,6 +133,42 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
         self.assertTrue(all("first row" in result.detail.lower() for result in results[1:]), results)
 
+    def test_db_expectations_normalize_inline_code_rules_fields_and_values(self) -> None:
+        payload = {
+            "query": {
+                "row_count": 1,
+                "rows": [
+                    {
+                        "price_list_name": "AUTOTEST Attributes Flow run-123",
+                        "root_category_id": 233573,
+                        "sort_order": 0,
+                        "default_measurement_unit_id": 7,
+                        "root_parent_id": None,
+                        "root_is_root": True,
+                        "root_is_hidden": False,
+                    }
+                ],
+            }
+        }
+
+        results = self.validator.validate(
+            self._db_step(
+                [
+                    "`price_list_name = AUTOTEST Attributes Flow run-123`",
+                    "`root_category_id = 233573`",
+                    "`sort_order = 0`",
+                    "`default_measurement_unit_id is not null`",
+                    "`root_parent_id is null`",
+                    "`root_is_root = true`",
+                    "`root_is_hidden = false`",
+                    "`price_list_name` = `AUTOTEST Attributes Flow run-123`",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
     def test_unsupported_expectation_returns_structured_blocked_result(self) -> None:
         results = self.validator.validate(self._api_step(["response magically works"]), {"response": {"body": {}}})
 

@@ -175,14 +175,15 @@ class ScenarioStepValidator:
         rows = query.get("rows") if isinstance(query, dict) else None
         row_count = query.get("row_count") if isinstance(query, dict) else None
         first_row_result = self._first_db_row(rows)
-        normalized_expectation = self._normalize_keyword(expectation)
+        db_expectation = self._normalize_db_expectation_rule(expectation)
+        normalized_expectation = self._normalize_keyword(db_expectation)
 
         if normalized_expectation == "one row exists":
             actual_row_count = row_count if isinstance(row_count, int) else len(rows) if isinstance(rows, list) else None
             passed = actual_row_count == 1
             return self._result(expectation, passed, f"Actual row_count: {actual_row_count}")
 
-        if match := _DB_IS_NULL_RE.fullmatch(expectation):
+        if match := _DB_IS_NULL_RE.fullmatch(db_expectation):
             field_path = self._parse_field_path(match.group(1))
             lookup = self._try_get_path(first_row_result.value, field_path) if first_row_result.exists else first_row_result
             return self._result(
@@ -191,7 +192,7 @@ class ScenarioStepValidator:
                 f"Checked first row. Actual value: {lookup.value!r}. {lookup.detail}",
             )
 
-        if match := _DB_IS_NOT_NULL_RE.fullmatch(expectation):
+        if match := _DB_IS_NOT_NULL_RE.fullmatch(db_expectation):
             field_path = self._parse_field_path(match.group(1))
             lookup = self._try_get_path(first_row_result.value, field_path) if first_row_result.exists else first_row_result
             return self._result(
@@ -200,7 +201,7 @@ class ScenarioStepValidator:
                 f"Checked first row. Actual value: {lookup.value!r}. {lookup.detail}",
             )
 
-        if match := _DB_STARTS_WITH_RE.fullmatch(expectation):
+        if match := _DB_STARTS_WITH_RE.fullmatch(db_expectation):
             field_path = self._parse_field_path(match.group(1))
             expected_prefix = str(self._parse_literal(match.group(2)))
             lookup = self._try_get_path(first_row_result.value, field_path) if first_row_result.exists else first_row_result
@@ -211,7 +212,7 @@ class ScenarioStepValidator:
                 f"Checked first row. Expected prefix: {expected_prefix!r}. Actual value: {lookup.value!r}. {lookup.detail}",
             )
 
-        if match := _DB_EQUALS_RE.fullmatch(expectation):
+        if match := _DB_EQUALS_RE.fullmatch(db_expectation):
             field_path = self._parse_field_path(match.group(1))
             expected_value = self._parse_literal(match.group(2))
             lookup = self._try_get_path(first_row_result.value, field_path) if first_row_result.exists else first_row_result
@@ -325,6 +326,14 @@ class ScenarioStepValidator:
     @classmethod
     def _parse_field_path(cls, raw_field_path: str) -> str:
         return cls._strip_wrapping_quotes(raw_field_path.strip()).strip()
+
+    @classmethod
+    def _normalize_db_expectation_rule(cls, expectation: str) -> str:
+        normalized = expectation.strip()
+        if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'", "`"}:
+            if normalized.count(normalized[0]) == 2:
+                return normalized[1:-1].strip()
+        return normalized
 
     @classmethod
     def _split_field_path(cls, field_path: str) -> list[str]:
