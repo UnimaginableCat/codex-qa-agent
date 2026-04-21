@@ -27,6 +27,8 @@ def build_scenario_summary(
     preflight_checks: list[dict] | None = None,
 ) -> ScenarioExecutionSummary:
     step_results = list(run_context.step_results)
+    parse_warnings = [str(item) for item in scenario_definition.metadata.get("parse_warnings", [])]
+    warnings = parse_warnings + list(extra_tooling_issues or [])
     final_status = resolve_final_status(
         [step_result.status for step_result in step_results]
         + list(preflight_statuses or [])
@@ -81,6 +83,7 @@ def build_scenario_summary(
             "preflight_checks": preflight_checks or [],
             "finalization_statuses": [status.value for status in finalization_statuses or []],
             "variable_keys": sorted(run_context.variables.keys()),
+            "warnings": warnings,
             "artifact_policy": "Artifacts are immutable outputs/evidence only; never write source code into artifacts/.",
         },
     )

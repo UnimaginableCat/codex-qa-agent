@@ -32,6 +32,13 @@ _RUNTIME_VALUE_RE = re.compile(
     r"^(?P<source>generated|runtime):(?P<name>[A-Za-z_][A-Za-z0-9_]*)$",
     re.IGNORECASE,
 )
+_LOOSE_VARIABLE_NAME_RE = re.compile(r"^`?(?P<name>[A-Za-z_][A-Za-z0-9_]*)`?(?:\s+|$)")
+_BACKTICK_VARIABLE_NAME_RE = re.compile(r"`(?P<name>[A-Za-z_][A-Za-z0-9_]*)`")
+_KNOWN_BEST_EFFORT_VARIABLE_NAMES = {
+    "company_guid",
+    "generated_price_list_name",
+    "run_suffix",
+}
 _SCENARIO_TITLE_RE = re.compile(r"^#\s+Scenario:\s*(?P<name>.+?)\s*$")
 _SLUG_INVALID_CHARS_RE = re.compile(r"[^a-z0-9]+")
 _KNOWN_STEP_FIELDS = {
@@ -85,6 +92,7 @@ class MarkdownScenarioParser:
         sections = self._split_sections(raw_lines)
 
         warnings: list[str] = []
+        variable_warnings: list[str] = []
         scenario_definition = ScenarioDefinition(
             scenario_path=resolved_scenario_path,
             scenario_slug=self._build_scenario_slug(title, resolved_scenario_path),
@@ -101,9 +109,10 @@ class MarkdownScenarioParser:
                 continue
 
             if normalized_name == "variables":
-                variable_definitions, variable_warnings = self._parse_variables(section_lines)
+                variable_definitions, section_variable_warnings = self._parse_variables(section_lines)
                 scenario_definition.variables = variable_definitions
-                warnings.extend(variable_warnings)
+                variable_warnings.extend(section_variable_warnings)
+                warnings.extend(section_variable_warnings)
                 continue
 
             if normalized_name in self._simple_sections:
@@ -133,6 +142,7 @@ class MarkdownScenarioParser:
 
         scenario_definition.metadata = {
             "parse_warnings": warnings,
+            "variables_parse_warnings": variable_warnings,
             "source_format": "markdown",
         }
         return scenario_definition
@@ -254,22 +264,70 @@ class MarkdownScenarioParser:
             if stripped_line.startswith("- "):
                 stripped_line = stripped_line[2:].strip()
 
-            variable_match = _VARIABLE_RE.match(stripped_line)
-            if not variable_match:
+            parsed_variable = self._parse_variable_line(stripped_line)
+            if parsed_variable is None:
                 warnings.append(
                     f"Variables section contains unrecognized content at relative line {line_number}: "
                     f"{line.strip()!r}"
                 )
                 continue
 
-            variable_name = variable_match.group("name").strip()
-            raw_value = (variable_match.group("value") or "").strip()
+            variable_name, raw_value, used_best_effort = parsed_variable
             if variable_name in seen_names:
-                raise ScenarioParseError(f"Variables section is malformed: duplicate variable '{variable_name}'.")
+                warnings.append(
+                    f"Variables section contains duplicate variable '{variable_name}' at relative line "
+                    f"{line_number}; first definition was kept."
+                )
+                continue
             seen_names.add(variable_name)
+            if used_best_effort:
+                warnings.append(
+                    f"Variables section used best-effort parsing for '{variable_name}' at relative line "
+                    f"{line_number}."
+                )
             variables.append(self._build_variable_definition(variable_name, raw_value))
 
         return variables, warnings
+
+    def _parse_variable_line(self, stripped_line: str) -> tuple[str, str, bool] | None:
+        variable_match = _VARIABLE_RE.match(stripped_line)
+        if variable_match:
+            variable_name = variable_match.group("name").strip()
+            raw_value = (variable_match.group("value") or "").strip()
+            return variable_name, raw_value, False
+
+        table_variable = self._parse_variable_table_line(stripped_line)
+        if table_variable is not None:
+            return table_variable
+
+        backtick_match = _BACKTICK_VARIABLE_NAME_RE.search(stripped_line)
+        if backtick_match:
+            return backtick_match.group("name").strip(), "", True
+
+        loose_match = _LOOSE_VARIABLE_NAME_RE.match(stripped_line)
+        if loose_match and loose_match.group("name").strip() in _KNOWN_BEST_EFFORT_VARIABLE_NAMES:
+            return loose_match.group("name").strip(), "", True
+        return None
+
+    @staticmethod
+    def _parse_variable_table_line(stripped_line: str) -> tuple[str, str, bool] | None:
+        if not stripped_line.startswith("|") or not stripped_line.endswith("|"):
+            return None
+
+        cells = [cell.strip() for cell in stripped_line.strip("|").split("|")]
+        if not cells or all(not cell for cell in cells):
+            return None
+        if all(set(cell) <= {"-", ":"} for cell in cells if cell):
+            return None
+
+        variable_name = cells[0].strip("` ")
+        if variable_name.lower() in {"name", "variable", "key"}:
+            return None
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable_name):
+            return None
+
+        raw_value = cells[1].strip() if len(cells) > 1 else ""
+        return variable_name, raw_value, True
 
     def _build_variable_definition(self, variable_name: str, raw_value: str) -> ScenarioVariableDefinition:
         env_match = _ENV_VALUE_RE.fullmatch(raw_value)
@@ -294,6 +352,13 @@ class MarkdownScenarioParser:
                 name=variable_name,
                 raw_value=raw_value or "generated:run_suffix",
                 source=ScenarioVariableSource.RUNTIME,
+            )
+
+        if variable_name == "generated_price_list_name" and not raw_value:
+            return ScenarioVariableDefinition(
+                name=variable_name,
+                raw_value="AUTOTEST Attributes Flow {{run_suffix}}",
+                source=ScenarioVariableSource.TEMPLATE,
             )
 
         if not raw_value:

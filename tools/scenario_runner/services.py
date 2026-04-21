@@ -127,7 +127,9 @@ class ScenarioRunnerService:
             )
 
         try:
-            run_context.variables = build_initial_variables(run_context, scenario_definition)
+            initial_variables = build_initial_variables(run_context, scenario_definition)
+            run_context.variables = initial_variables.variables
+            tooling_issues.extend(initial_variables.warnings)
             write_context_json(run_context)
             write_journal_entry(
                 run_context,
@@ -135,9 +137,11 @@ class ScenarioRunnerService:
                     "event": "initial_context_built",
                     "run_id": run_context.run_id,
                     "variable_keys": sorted(run_context.variables.keys()),
+                    "warnings": list(initial_variables.warnings),
                 },
             )
         except VariableResolutionError as exc:
+            tooling_issues.extend(exc.warnings)
             if scenario_definition.steps:
                 blocked_result = self._build_initial_context_blocked_result(
                     scenario_definition.steps[0],

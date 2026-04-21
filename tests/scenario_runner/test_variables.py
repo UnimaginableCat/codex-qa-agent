@@ -91,6 +91,69 @@ class ScenarioVariableTests(unittest.TestCase):
             f"AUTOTEST Attributes Flow {executor.run_variables['run_suffix']}",
         )
 
+    def test_partially_parsed_variables_warn_but_do_not_block_fallback_resolution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "COMPANY_GUID=company-partial\n")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Partial Variables
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - company_guid comes from environment
+                - run_suffix generated dynamically
+                - generated_price_list_name derived from run suffix
+                - @@@ this is not a variable definition
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: create price list
+                Method: POST
+                Path: /companies/{{company_guid}}/price-lists
+                Headers:
+                ```json
+                {"X-Company-Guid": "{{company_guid}}"}
+                ```
+                Params:
+                ```json
+                {"companyGuid": "{{company_guid}}"}
+                ```
+                Body:
+                ```json
+                {"name": "{{generated_price_list_name}}"}
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertTrue(scenario.metadata["variables_parse_warnings"])
+        self.assertTrue(any("Variables section" in issue for issue in summary.tooling_issues))
+        self.assertTrue(any("Variables section" in warning for warning in summary.details["warnings"]))
+        self.assertEqual(executor.run_variables["company_guid"], "company-partial")
+        self.assertIn("run_suffix", executor.run_variables)
+        self.assertEqual(
+            executor.run_variables["generated_price_list_name"],
+            f"AUTOTEST Attributes Flow {executor.run_variables['run_suffix']}",
+        )
+        self.assertEqual(executor.step_payload["path"], "/companies/company-partial/price-lists")
+
     def test_step_one_payload_interpolates_path_headers_body_and_params_from_initial_variables(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -117,16 +180,8 @@ class ScenarioVariableTests(unittest.TestCase):
             root = Path(tmp)
             self._prepare_env(root, "COMPANY_GUID=company-789\n")
             executor = _CapturingExecutorFactory()
-            scenario = self._scenario(
-                root,
-                variables=[
-                    ScenarioVariableDefinition(
-                        name="bad_name",
-                        raw_value="prefix {{missing_variable}}",
-                        source=ScenarioVariableSource.TEMPLATE,
-                    )
-                ],
-            )
+            scenario = self._scenario(root)
+            scenario.steps[0].api.body["missing"] = "{{missing_variable}}"
             service = ScenarioRunnerService(
                 step_executor_factory=executor,
                 preflight_checker=_PassingPreflightChecker(),

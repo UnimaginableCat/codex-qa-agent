@@ -2,22 +2,40 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from typing import Any, Protocol
 
 from tools.common.errors import EnvFileLoadError, ValidationError
 
-from .interpolator import PlaceholderInterpolator, UnresolvedPlaceholderError
+from .interpolator import PLACEHOLDER_PATTERN, PlaceholderInterpolator, UnresolvedPlaceholderError
 from .models import RunContext, ScenarioDefinition, ScenarioVariableDefinition, ScenarioVariableSource
 
 
-class VariableResolutionError(ValidationError):
-    """Raised when scenario variables cannot be resolved into initial context."""
+_GENERATED_TEMPLATE_FALLBACKS = {
+    "generated_price_list_name": "AUTOTEST Attributes Flow {{run_suffix}}",
+}
 
-    def __init__(self, message: str, unresolved_variables: list[str] | None = None) -> None:
+
+class VariableResolutionError(ValidationError):
+    """Raised when required scenario placeholders cannot be resolved."""
+
+    def __init__(
+        self,
+        message: str,
+        unresolved_variables: list[str] | None = None,
+        warnings: list[str] | None = None,
+    ) -> None:
         self.unresolved_variables = unresolved_variables or []
+        self.warnings = warnings or []
         super().__init__(message)
+
+
+@dataclass(slots=True)
+class InitialVariableResolution:
+    variables: dict[str, Any]
+    warnings: list[str] = field(default_factory=list)
 
 
 class EnvValueLoader(Protocol):
@@ -30,41 +48,179 @@ def build_initial_variables(
     scenario_definition: ScenarioDefinition,
     dotenv_loader: EnvValueLoader | None = None,
     interpolator: PlaceholderInterpolator | None = None,
-) -> dict[str, Any]:
-    """Build the initial execution context before any step captures exist."""
+) -> InitialVariableResolution:
+    """Build initial execution context using best-effort variable fallbacks."""
 
     definitions = list(scenario_definition.variables)
     resolved: dict[str, Any] = dict(run_context.variables)
-    if not definitions:
-        return resolved
-
-    loader = dotenv_loader or _default_env_loader()
+    warnings: list[str] = []
     env_values: dict[str, str | None] | None = None
+    env_loaded = False
     placeholder_interpolator = interpolator or PlaceholderInterpolator()
+    required_placeholders = _collect_required_step_placeholders(scenario_definition)
+    template_dependencies = _collect_template_dependency_placeholders(definitions)
+    for fallback_name, template_value in _GENERATED_TEMPLATE_FALLBACKS.items():
+        if fallback_name in required_placeholders:
+            template_dependencies.update(_collect_placeholder_names(template_value))
 
-    for definition in _definitions_by_source(definitions, ScenarioVariableSource.RUNTIME):
-        resolved[definition.name] = _resolve_runtime_variable(definition, run_context, resolved)
-
-    for definition in _definitions_by_source(definitions, ScenarioVariableSource.ENV):
-        if env_values is None:
+    def load_env_values() -> dict[str, str | None]:
+        nonlocal env_loaded, env_values
+        if env_loaded:
+            return env_values or {}
+        env_loaded = True
+        loader = dotenv_loader or _default_env_loader()
+        try:
             env_values = _load_env_values(run_context.workspace_root, scenario_definition.environment, loader)
-        resolved[definition.name] = _resolve_env_variable(definition, env_values)
+        except VariableResolutionError as exc:
+            warnings.append(str(exc))
+            env_values = {}
+        return env_values
 
     for definition in _definitions_by_source(definitions, ScenarioVariableSource.LITERAL):
-        resolved[definition.name] = definition.raw_value
+        _set_if_absent(resolved, definition.name, definition.raw_value)
+
+    for definition in _definitions_by_source(definitions, ScenarioVariableSource.ENV):
+        if definition.name in resolved:
+            continue
+        value = _lookup_env_variable(definition.name, definition.env_name, load_env_values())
+        if value is None:
+            warnings.append(
+                f"Variable '{definition.name}' was declared as env-backed but could not be resolved."
+            )
+            continue
+        resolved[definition.name] = value
+
+    for definition in _definitions_by_source(definitions, ScenarioVariableSource.RUNTIME):
+        if definition.name in resolved:
+            continue
+        runtime_value = _resolve_runtime_variable(definition, run_context, resolved)
+        if runtime_value is None:
+            warnings.append(
+                f"Variable '{definition.name}' declared unsupported runtime value "
+                f"'{_runtime_name(definition)}'."
+            )
+            continue
+        resolved[definition.name] = runtime_value
+
+    for name in sorted(required_placeholders | template_dependencies):
+        if name in resolved:
+            continue
+        value = _lookup_env_variable(name, None, load_env_values())
+        if value is not None:
+            resolved[name] = value
+
+    runtime_names = (
+        required_placeholders
+        | template_dependencies
+        | {definition.name for definition in _definitions_by_source(definitions, ScenarioVariableSource.RUNTIME)}
+    )
+    for name in sorted(runtime_names):
+        if name in resolved:
+            continue
+        runtime_value = _resolve_known_runtime_name(name, run_context, resolved)
+        if runtime_value is not None:
+            resolved[name] = runtime_value
 
     for definition in _definitions_by_source(definitions, ScenarioVariableSource.TEMPLATE):
-        try:
-            resolved[definition.name] = placeholder_interpolator.interpolate(definition.raw_value, resolved)
-        except UnresolvedPlaceholderError as exc:
-            missing_names = sorted(dict.fromkeys(exc.placeholder_names))
-            raise VariableResolutionError(
-                f"Variable '{definition.name}' could not be resolved: missing "
-                f"{', '.join(missing_names)}.",
-                unresolved_variables=[definition.name, *missing_names],
-            ) from exc
+        if definition.name in resolved:
+            continue
+        template_value = _resolve_template_variable(
+            definition.name,
+            definition.raw_value,
+            resolved,
+            placeholder_interpolator,
+            required_placeholders,
+            warnings,
+        )
+        if template_value is not None:
+            resolved[definition.name] = template_value
 
-    return resolved
+    for name, template_value in _GENERATED_TEMPLATE_FALLBACKS.items():
+        if name in resolved or name not in required_placeholders:
+            continue
+        fallback_value = _resolve_template_variable(
+            name,
+            template_value,
+            resolved,
+            placeholder_interpolator,
+            required_placeholders,
+            warnings,
+        )
+        if fallback_value is not None:
+            resolved[name] = fallback_value
+
+    unresolved_required = sorted(name for name in required_placeholders if name not in resolved)
+    if unresolved_required:
+        raise VariableResolutionError(
+            "Required placeholders could not be resolved after Variables, env, generated, and template "
+            f"fallbacks: {', '.join(unresolved_required)}.",
+            unresolved_variables=unresolved_required,
+            warnings=warnings,
+        )
+
+    return InitialVariableResolution(variables=resolved, warnings=warnings)
+
+
+def _resolve_template_variable(
+    name: str,
+    template_value: str,
+    resolved: dict[str, Any],
+    interpolator: PlaceholderInterpolator,
+    required_placeholders: set[str],
+    warnings: list[str],
+) -> Any | None:
+    try:
+        return interpolator.interpolate(template_value, resolved)
+    except UnresolvedPlaceholderError as exc:
+        missing_names = sorted(dict.fromkeys(exc.placeholder_names))
+        message = f"Variable '{name}' could not be derived because {', '.join(missing_names)} is unresolved."
+        warnings.append(message)
+        if name in required_placeholders:
+            raise VariableResolutionError(
+                message,
+                unresolved_variables=[name, *missing_names],
+                warnings=warnings,
+            ) from exc
+    return None
+
+
+def _collect_required_step_placeholders(scenario_definition: ScenarioDefinition) -> set[str]:
+    names: set[str] = set()
+    for step in scenario_definition.steps:
+        if step.api is not None:
+            names.update(_collect_placeholder_names(step.api.method))
+            names.update(_collect_placeholder_names(step.api.path))
+            names.update(_collect_placeholder_names(step.api.headers))
+            names.update(_collect_placeholder_names(step.api.params))
+            names.update(_collect_placeholder_names(step.api.body))
+        if step.db is not None:
+            names.update(_collect_placeholder_names(step.db.sql))
+            names.update(_collect_placeholder_names(step.db.params))
+    return names
+
+
+def _collect_template_dependency_placeholders(definitions: list[ScenarioVariableDefinition]) -> set[str]:
+    names: set[str] = set()
+    for definition in _definitions_by_source(definitions, ScenarioVariableSource.TEMPLATE):
+        names.update(_collect_placeholder_names(definition.raw_value))
+    return names
+
+
+def _collect_placeholder_names(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return set(PLACEHOLDER_PATTERN.findall(value))
+    if isinstance(value, dict):
+        names: set[str] = set()
+        for key, item in value.items():
+            names.update(_collect_placeholder_names(key))
+            names.update(_collect_placeholder_names(item))
+        return names
+    if isinstance(value, list | tuple):
+        names: set[str] = set()
+        for item in value:
+            names.update(_collect_placeholder_names(item))
+        return names
+    return set()
 
 
 def _definitions_by_source(
@@ -74,20 +230,23 @@ def _definitions_by_source(
     return [definition for definition in definitions if definition.source == source]
 
 
+def _set_if_absent(target: dict[str, Any], key: str, value: Any) -> None:
+    if key not in target:
+        target[key] = value
+
+
 def _resolve_runtime_variable(
     definition: ScenarioVariableDefinition,
     run_context: RunContext,
     resolved: dict[str, Any],
-) -> Any:
-    runtime_name = _runtime_name(definition)
-    if runtime_name == "run_suffix":
+) -> Any | None:
+    return _resolve_known_runtime_name(_runtime_name(definition), run_context, resolved)
+
+
+def _resolve_known_runtime_name(name: str, run_context: RunContext, resolved: dict[str, Any]) -> Any | None:
+    if name == "run_suffix":
         return run_context.run_id.removeprefix("run-")
-    if runtime_name in resolved:
-        return resolved[runtime_name]
-    raise VariableResolutionError(
-        f"Variable '{definition.name}' could not be resolved: unsupported runtime value '{runtime_name}'.",
-        unresolved_variables=[definition.name],
-    )
+    return resolved.get(name)
 
 
 def _runtime_name(definition: ScenarioVariableDefinition) -> str:
@@ -96,7 +255,7 @@ def _runtime_name(definition: ScenarioVariableDefinition) -> str:
         return raw_value.split(":", 1)[1].strip()
     if definition.name == "run_suffix":
         return "run_suffix"
-    return raw_value
+    return raw_value or definition.name
 
 
 def _load_env_values(
@@ -113,20 +272,33 @@ def _load_env_values(
         ) from exc
 
 
-def _resolve_env_variable(
-    definition: ScenarioVariableDefinition,
+def _lookup_env_variable(
+    variable_name: str,
+    declared_env_name: str | None,
     env_values: dict[str, str | None],
-) -> str:
-    env_name = definition.env_name or definition.name.upper()
-    env_value = env_values.get(env_name)
-    if env_value is None:
-        env_value = os.environ.get(env_name)
-    if env_value is None:
-        raise VariableResolutionError(
-            f"Variable '{definition.name}' could not be resolved from environment key '{env_name}'.",
-            unresolved_variables=[definition.name],
+) -> str | None:
+    candidate_names = _env_candidate_names(variable_name, declared_env_name)
+    for candidate_name in candidate_names:
+        env_value = env_values.get(candidate_name)
+        if env_value is not None:
+            return env_value
+        process_value = os.environ.get(candidate_name)
+        if process_value is not None:
+            return process_value
+    return None
+
+
+def _env_candidate_names(variable_name: str, declared_env_name: str | None) -> list[str]:
+    names = [
+        candidate
+        for candidate in (
+            declared_env_name,
+            variable_name,
+            variable_name.upper(),
         )
-    return env_value
+        if candidate
+    ]
+    return list(dict.fromkeys(names))
 
 
 def _resolve_environment_path(workspace_root: Path, environment_path: str) -> Path:
