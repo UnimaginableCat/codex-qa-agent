@@ -40,6 +40,43 @@ FORBIDDEN_ARTIFACT_SUFFIXES = {
     ".sh",
     ".ps1",
 }
+RUN_STATE_NETWORK_DEBUG_KEYS = {
+    "api_request_debug",
+    "request_debug",
+    "dns_precheck",
+    "resolver_debug",
+    "process_debug",
+    "resolv_conf",
+    "getent_hosts",
+    "nslookup",
+    "ping",
+    "hosts_file",
+    "resolver_comparison",
+    "getaddrinfo",
+    "gethostbyname",
+    "getfqdn",
+    "hostname_value",
+    "hostname_repr",
+    "final_url_value",
+    "final_url_repr",
+    "base_url_value",
+    "base_url_repr",
+    "normalized_base_url_value",
+    "normalized_base_url_repr",
+    "env_base_url_raw_value",
+    "env_base_url_raw_repr",
+    "env_base_url_normalized_value",
+    "env_base_url_normalized_repr",
+    "parsed_hostname",
+    "parsed_netloc",
+    "parsed_port",
+    "parsed_scheme",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "REQUESTS_CA_BUNDLE",
+    "SSL_CERT_FILE",
+}
 
 
 class ArtifactPolicyError(ToolingError):
@@ -117,13 +154,13 @@ def create_report_path(run_context: RunContext) -> Path:
 
 def write_context_json(run_context: RunContext) -> Path:
     target_path = run_context.run_state_dir / CONTEXT_FILENAME
-    _write_json_file(target_path, run_context.to_dict())
+    _write_json_file(target_path, _strip_run_state_network_debug(run_context.to_dict()))
     return target_path
 
 
 def write_summary_json(run_context: RunContext, summary: ScenarioExecutionSummary) -> Path:
     target_path = run_context.run_state_dir / SUMMARY_FILENAME
-    _write_json_file(target_path, summary.to_dict())
+    _write_json_file(target_path, _strip_run_state_network_debug(summary.to_dict()))
     return target_path
 
 
@@ -156,3 +193,15 @@ def ensure_artifact_output_path(path: Path, artifacts_root_dir: Path) -> Path:
 def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
     safe_payload = redact_sensitive_data(payload)
     write_text_file(path, json.dumps(safe_payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _strip_run_state_network_debug(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_run_state_network_debug(item)
+            for key, item in value.items()
+            if str(key) not in RUN_STATE_NETWORK_DEBUG_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_run_state_network_debug(item) for item in value]
+    return value

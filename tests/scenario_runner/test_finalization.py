@@ -14,10 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
 from tools.scenario_runner.cli import main as cli_main
+from tools.scenario_runner.artifacts import write_context_json, write_summary_json
 from tools.scenario_runner.executors import StepExecutionOutcome
 from tools.scenario_runner.models import (
     ApiStepDefinition,
+    RunContext,
     ScenarioDefinition,
+    ScenarioExecutionSummary,
     ScenarioStep,
     ScenarioStepType,
     StepExecutionResult,
@@ -135,6 +138,45 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
         self.assertEqual(persisted_summary["final_status"], cli_payload["final_status"])
         self.assertIn(f"- Final status: `{cli_payload['final_status']}`", report_content)
 
+    def test_context_and_summary_omit_network_debug_details(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_context = self._run_context_with_network_debug(root)
+            summary = ScenarioExecutionSummary(
+                scenario="Demo Scenario",
+                project="demo-project",
+                environment="env/demo.env",
+                run_id=run_context.run_id,
+                scenario_path=run_context.scenario_path,
+                final_status=StepStatus.PASS,
+                message="ok",
+                run_state_dir=run_context.run_state_dir,
+                artifact_dir=run_context.artifact_dir,
+                started_at=run_context.started_at,
+                finished_at=run_context.started_at,
+                steps=list(run_context.step_results),
+            )
+
+            context_path = write_context_json(run_context)
+            summary_path = write_summary_json(run_context, summary)
+
+            context_payload = json.loads(context_path.read_text(encoding="utf-8"))
+            summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+        for payload in (context_payload, summary_payload):
+            serialized = json.dumps(payload)
+            self.assertNotIn("api_request_debug", serialized)
+            self.assertNotIn("request_debug", serialized)
+            self.assertNotIn("dns_precheck", serialized)
+            self.assertNotIn("resolver_debug", serialized)
+            self.assertNotIn("HTTP_PROXY", serialized)
+            self.assertNotIn("HTTPS_PROXY", serialized)
+            self.assertNotIn("NO_PROXY", serialized)
+            self.assertNotIn("REQUESTS_CA_BUNDLE", serialized)
+            self.assertNotIn("SSL_CERT_FILE", serialized)
+            self.assertIn("capture_keys", serialized)
+            self.assertIn("interpreter_path", serialized)
+
     def _run_service_with_status(self, status: StepStatus):
         with TemporaryDirectory() as tmp:
             service = ScenarioRunnerService(
@@ -188,6 +230,53 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
             "print(json.dumps({'status': 'PASS', 'message': 'ok', "
             "'response': {'http_status': 200, 'body': {'ok': True}}}))\n",
             encoding="utf-8",
+        )
+
+    @staticmethod
+    def _run_context_with_network_debug(root: Path) -> RunContext:
+        run_state_dir = root / ".codex-qa" / "runs" / "test-run"
+        artifact_dir = root / "artifacts" / "agent" / "test-run"
+        run_state_dir.mkdir(parents=True)
+        artifact_dir.mkdir(parents=True)
+        return RunContext(
+            run_id="test-run",
+            workspace_root=root,
+            scenario_path=root / "scenario.md",
+            scenario_slug="demo-scenario",
+            scenario_name="Demo Scenario",
+            parsed_plans_dir=root / ".codex-qa" / "parsed-plans",
+            compiled_plan_path=root / ".codex-qa" / "parsed-plans" / "demo-scenario.json",
+            runs_root_dir=root / ".codex-qa" / "runs",
+            run_state_dir=run_state_dir,
+            artifacts_root_dir=root / "artifacts" / "agent",
+            artifact_dir=artifact_dir,
+            started_at="2026-04-21T00:00:00+00:00",
+            step_results=[
+                StepExecutionResult(
+                    step_id="step-1",
+                    step_number=1,
+                    step_type=ScenarioStepType.API,
+                    status=StepStatus.PASS,
+                    message="ok",
+                    details={
+                        "capture_keys": ["id"],
+                        "tool_debug": {
+                            "interpreter_path": "python",
+                            "HTTP_PROXY": "http://proxy.local:8080",
+                            "HTTPS_PROXY": "https://proxy.local:8443",
+                            "NO_PROXY": "localhost",
+                            "REQUESTS_CA_BUNDLE": "/tmp/ca.pem",
+                            "SSL_CERT_FILE": "/tmp/ssl.pem",
+                        },
+                        "api_request_debug": {
+                            "final_url_value": "https://app2.101-group.ru/api/demo",
+                            "hostname_value": "app2.101-group.ru",
+                            "dns_precheck": {"getaddrinfo": {"status": "PASS"}},
+                            "resolver_debug": {"getent_hosts": {"status": "PASS"}},
+                        },
+                    },
+                )
+            ],
         )
 
 
