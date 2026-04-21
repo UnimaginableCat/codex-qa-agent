@@ -317,6 +317,7 @@ class ApiStepExecutor(_BaseStepExecutor):
             "method": self._interpolator.interpolate(step.api.method, run_context.variables),
             "path": self._interpolator.interpolate(step.api.path, run_context.variables),
             "headers": self._interpolator.interpolate(step.api.headers, run_context.variables),
+            "query_params": self._interpolator.interpolate(step.api.params, run_context.variables),
             "body": self._interpolator.interpolate(step.api.body, run_context.variables),
         }
 

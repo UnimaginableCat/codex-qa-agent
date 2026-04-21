@@ -19,6 +19,7 @@ from .models import RunContext, ScenarioDefinition, ScenarioExecutionSummary, Sc
 from .preflight import PreflightCheckResult, ScenarioPreflightChecker
 from .summary import build_scenario_summary
 from .validators import ExpectationValidationError, ScenarioStepValidator
+from .variables import VariableResolutionError, build_initial_variables
 
 
 class ScenarioRunnerService:
@@ -125,6 +126,63 @@ class ScenarioRunnerService:
                 preflight_checks=preflight_checks,
             )
 
+        try:
+            run_context.variables = build_initial_variables(run_context, scenario_definition)
+            write_context_json(run_context)
+            write_journal_entry(
+                run_context,
+                {
+                    "event": "initial_context_built",
+                    "run_id": run_context.run_id,
+                    "variable_keys": sorted(run_context.variables.keys()),
+                },
+            )
+        except VariableResolutionError as exc:
+            if scenario_definition.steps:
+                blocked_result = self._build_initial_context_blocked_result(
+                    scenario_definition.steps[0],
+                    exc,
+                )
+                run_context.step_results.append(blocked_result)
+            else:
+                preflight_statuses.append(StepStatus.BLOCKED)
+            tooling_issues.append(str(exc))
+            self._try_write_context(run_context, tooling_issues, finalization_statuses)
+            step_summary = build_scenario_summary(
+                run_context,
+                scenario_definition,
+                extra_tooling_issues=tooling_issues,
+                finalization_statuses=finalization_statuses,
+                preflight_statuses=preflight_statuses,
+                preflight_checks=[check.to_dict() for check in preflight_checks],
+            )
+            self._try_write_summary(run_context, step_summary, tooling_issues, finalization_statuses)
+            return self._finalize_run(
+                run_context=run_context,
+                scenario_definition=scenario_definition,
+                tooling_issues=tooling_issues,
+                finalization_statuses=finalization_statuses,
+                allow_report=True,
+                preflight_statuses=preflight_statuses,
+                preflight_checks=preflight_checks,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._record_finalization_error(
+                tooling_issues=tooling_issues,
+                finalization_statuses=finalization_statuses,
+                phase="initial context construction",
+                exc=exc,
+            )
+            return self._finalize_run(
+                run_context=run_context,
+                scenario_definition=scenario_definition,
+                tooling_issues=tooling_issues,
+                finalization_statuses=finalization_statuses,
+                allow_report=True,
+                preflight_statuses=preflight_statuses,
+                preflight_checks=preflight_checks,
+            )
+
         for step in scenario_definition.steps:
             try:
                 step_executor = self._step_executor_factory.create(step, run_context.workspace_root)
@@ -156,15 +214,7 @@ class ScenarioRunnerService:
 
             run_context.step_results.append(outcome.step_result)
             run_context.variables.update(outcome.captured_values)
-            try:
-                write_context_json(run_context)
-            except Exception as exc:  # noqa: BLE001
-                self._record_finalization_error(
-                    tooling_issues=tooling_issues,
-                    finalization_statuses=finalization_statuses,
-                    phase="context persistence",
-                    exc=exc,
-                )
+            if not self._try_write_context(run_context, tooling_issues, finalization_statuses):
                 break
 
             step_summary = build_scenario_summary(
@@ -370,6 +420,23 @@ class ScenarioRunnerService:
         )
 
     @staticmethod
+    def _build_initial_context_blocked_result(
+        step: ScenarioStep,
+        exc: VariableResolutionError,
+    ) -> StepExecutionResult:
+        return StepExecutionResult(
+            step_id=step.step_id,
+            step_number=step.step_number,
+            step_type=step.step_type,
+            status=StepStatus.BLOCKED,
+            message=f"Initial variable resolution blocked: {exc}",
+            details={
+                "phase": "initial_context",
+                "unresolved_variables": list(exc.unresolved_variables),
+            },
+        )
+
+    @staticmethod
     def _record_finalization_error(
         tooling_issues: list[str],
         finalization_statuses: list[StepStatus],
@@ -394,6 +461,24 @@ class ScenarioRunnerService:
                 tooling_issues=tooling_issues,
                 finalization_statuses=finalization_statuses,
                 phase="summary persistence",
+                exc=exc,
+            )
+            return False
+
+    def _try_write_context(
+        self,
+        run_context: RunContext,
+        tooling_issues: list[str],
+        finalization_statuses: list[StepStatus],
+    ) -> bool:
+        try:
+            write_context_json(run_context)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self._record_finalization_error(
+                tooling_issues=tooling_issues,
+                finalization_statuses=finalization_statuses,
+                phase="context persistence",
                 exc=exc,
             )
             return False

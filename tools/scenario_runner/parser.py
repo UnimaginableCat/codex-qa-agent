@@ -17,11 +17,21 @@ from .models import (
     ScenarioDefinition,
     ScenarioStep,
     ScenarioStepType,
+    ScenarioVariableDefinition,
+    ScenarioVariableSource,
 )
 
 _SECTION_RE = re.compile(r"^##\s+(?P<name>.+?)\s*$")
 _STEP_RE = re.compile(r"^###\s+Step\s+(?P<number>\d+)\s*$", re.IGNORECASE)
 _FIELD_RE = re.compile(r"^(?P<name>[A-Za-z ]+):(?:\s*(?P<value>.*))?$")
+_VARIABLE_RE = re.compile(
+    r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:(?:\s*=|\s*:)\s*(?P<value>.*))?$"
+)
+_ENV_VALUE_RE = re.compile(r"^env:(?P<name>[A-Za-z_][A-Za-z0-9_]*)$", re.IGNORECASE)
+_RUNTIME_VALUE_RE = re.compile(
+    r"^(?P<source>generated|runtime):(?P<name>[A-Za-z_][A-Za-z0-9_]*)$",
+    re.IGNORECASE,
+)
 _SCENARIO_TITLE_RE = re.compile(r"^#\s+Scenario:\s*(?P<name>.+?)\s*$")
 _SLUG_INVALID_CHARS_RE = re.compile(r"[^a-z0-9]+")
 _KNOWN_STEP_FIELDS = {
@@ -88,6 +98,12 @@ class MarkdownScenarioParser:
                 step_definitions, step_warnings = self._parse_steps(section_lines, resolved_scenario_path)
                 scenario_definition.steps = step_definitions
                 warnings.extend(step_warnings)
+                continue
+
+            if normalized_name == "variables":
+                variable_definitions, variable_warnings = self._parse_variables(section_lines)
+                scenario_definition.variables = variable_definitions
+                warnings.extend(variable_warnings)
                 continue
 
             if normalized_name in self._simple_sections:
@@ -226,6 +242,81 @@ class MarkdownScenarioParser:
         ]
         return steps, warnings
 
+    def _parse_variables(self, lines: list[str]) -> tuple[list[ScenarioVariableDefinition], list[str]]:
+        variables: list[ScenarioVariableDefinition] = []
+        warnings: list[str] = []
+        seen_names: set[str] = set()
+
+        for line_number, line in enumerate(lines, start=1):
+            stripped_line = line.strip()
+            if not stripped_line:
+                continue
+            if stripped_line.startswith("- "):
+                stripped_line = stripped_line[2:].strip()
+
+            variable_match = _VARIABLE_RE.match(stripped_line)
+            if not variable_match:
+                warnings.append(
+                    f"Variables section contains unrecognized content at relative line {line_number}: "
+                    f"{line.strip()!r}"
+                )
+                continue
+
+            variable_name = variable_match.group("name").strip()
+            raw_value = (variable_match.group("value") or "").strip()
+            if variable_name in seen_names:
+                raise ScenarioParseError(f"Variables section is malformed: duplicate variable '{variable_name}'.")
+            seen_names.add(variable_name)
+            variables.append(self._build_variable_definition(variable_name, raw_value))
+
+        return variables, warnings
+
+    def _build_variable_definition(self, variable_name: str, raw_value: str) -> ScenarioVariableDefinition:
+        env_match = _ENV_VALUE_RE.fullmatch(raw_value)
+        if env_match:
+            return ScenarioVariableDefinition(
+                name=variable_name,
+                raw_value=raw_value,
+                source=ScenarioVariableSource.ENV,
+                env_name=env_match.group("name"),
+            )
+
+        runtime_match = _RUNTIME_VALUE_RE.fullmatch(raw_value)
+        if runtime_match:
+            return ScenarioVariableDefinition(
+                name=variable_name,
+                raw_value=raw_value,
+                source=ScenarioVariableSource.RUNTIME,
+            )
+
+        if variable_name == "run_suffix" and raw_value.lower() in {"", "generated", "runtime"}:
+            return ScenarioVariableDefinition(
+                name=variable_name,
+                raw_value=raw_value or "generated:run_suffix",
+                source=ScenarioVariableSource.RUNTIME,
+            )
+
+        if not raw_value:
+            return ScenarioVariableDefinition(
+                name=variable_name,
+                raw_value=raw_value,
+                source=ScenarioVariableSource.ENV,
+                env_name=variable_name.upper(),
+            )
+
+        if "{{" in raw_value and "}}" in raw_value:
+            return ScenarioVariableDefinition(
+                name=variable_name,
+                raw_value=raw_value,
+                source=ScenarioVariableSource.TEMPLATE,
+            )
+
+        return ScenarioVariableDefinition(
+            name=variable_name,
+            raw_value=raw_value,
+            source=ScenarioVariableSource.LITERAL,
+        )
+
     def _parse_step_block(
         self,
         step_number: int,
@@ -336,6 +427,11 @@ class MarkdownScenarioParser:
                     draft.fields.get("headers"),
                     step_number=draft.step_number,
                     field_name="headers",
+                ),
+                params=self._normalize_mapping(
+                    draft.fields.get("params"),
+                    step_number=draft.step_number,
+                    field_name="params",
                 ),
                 body=draft.fields.get("body"),
                 capture=capture,

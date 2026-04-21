@@ -15,6 +15,21 @@ class ScenarioStepType(StrEnum):
     DB = "db"
 
 
+class ScenarioVariableSource(StrEnum):
+    RUNTIME = "runtime"
+    ENV = "env"
+    LITERAL = "literal"
+    TEMPLATE = "template"
+
+
+@dataclass(slots=True)
+class ScenarioVariableDefinition:
+    name: str
+    raw_value: str = ""
+    source: ScenarioVariableSource = ScenarioVariableSource.LITERAL
+    env_name: str | None = None
+
+
 @dataclass(slots=True)
 class ApiStepDefinition:
     name: str = ""
@@ -22,6 +37,7 @@ class ApiStepDefinition:
     path: str = ""
     description: str = ""
     headers: dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     body: Any = None
     capture: list[str] = field(default_factory=list)
     expected: list[str] = field(default_factory=list)
@@ -60,6 +76,7 @@ class ScenarioDefinition:
     notes: str = ""
     final_expectations: list[str] = field(default_factory=list)
     report_output: str = ""
+    variables: list[ScenarioVariableDefinition] = field(default_factory=list)
     steps: list[ScenarioStep] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
