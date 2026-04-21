@@ -17,6 +17,7 @@ from tools.common.statuses import StepStatus
 from .artifacts import write_step_artifact_json
 from .interpolator import InterpolationError, PlaceholderInterpolator
 from .models import RunContext, ScenarioDefinition, ScenarioStep, ScenarioStepType, StepExecutionResult
+from .path_lookup import resolve_path
 
 
 class CaptureResolutionError(Exception):
@@ -246,31 +247,10 @@ class _BaseStepExecutor:
         elif expression.startswith("response.json."):
             expression = "response.body." + expression.removeprefix("response.json.")
 
-        current: Any = payload
-        for segment in expression.split("."):
-            if isinstance(current, dict):
-                if segment not in current:
-                    raise CaptureResolutionError(
-                        f"Capture source '{expression}' could not be resolved: missing key '{segment}'."
-                    )
-                current = current[segment]
-                continue
-            if isinstance(current, list):
-                if not segment.isdigit():
-                    raise CaptureResolutionError(
-                        f"Capture source '{expression}' could not be resolved: expected numeric list index at '{segment}'."
-                    )
-                index = int(segment)
-                if index >= len(current):
-                    raise CaptureResolutionError(
-                        f"Capture source '{expression}' could not be resolved: list index {index} is out of range."
-                    )
-                current = current[index]
-                continue
-            raise CaptureResolutionError(
-                f"Capture source '{expression}' could not be resolved beyond segment '{segment}'."
-            )
-        return current
+        lookup = resolve_path(payload, expression)
+        if not lookup.exists:
+            raise CaptureResolutionError(f"Capture source '{expression}' could not be resolved: {lookup.detail}")
+        return lookup.value
 
     @staticmethod
     def _parse_capture_rule(capture_rule: str) -> tuple[str, str]:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
 from typing import Any
 
@@ -11,6 +10,8 @@ from tools.common.statuses import StepStatus
 
 from .interpolator import InterpolationError, PlaceholderInterpolator
 from .models import ExpectationCheckResult, ScenarioStep, ScenarioStepType
+from .path_lookup import PathLookupResult as _PathLookupResult
+from .path_lookup import resolve_path
 
 _HTTP_EXPECTATION_RE = re.compile(r"^\s*HTTP\s+(\d{3})(?:\s+or\s+HTTP\s+(\d{3}))?\s*$", re.IGNORECASE)
 _RESPONSE_CONTAINS_FIELD_RE = re.compile(r"^\s*response\s+contains(?:\s+field)?\s+(.+?)\s*$", re.IGNORECASE)
@@ -34,13 +35,6 @@ _VALIDATION_STATUS_PRIORITY = {
 
 class ExpectationValidationError(ValidationError):
     """Raised when an expectation rule is malformed or unsupported."""
-
-
-@dataclass(frozen=True, slots=True)
-class _PathLookupResult:
-    exists: bool
-    value: Any = None
-    detail: str = ""
 
 
 class ScenarioStepValidator:
@@ -248,51 +242,7 @@ class ScenarioStepValidator:
 
     @classmethod
     def _try_get_path(cls, root: Any, field_path: str) -> _PathLookupResult:
-        path_segments = cls._split_field_path(field_path)
-        if not path_segments:
-            return _PathLookupResult(False, None, "Field path is empty.")
-        if root is None:
-            return _PathLookupResult(False, None, "Root value is missing.")
-
-        current = root
-        traversed: list[str] = []
-        for segment in path_segments:
-            if not segment:
-                return _PathLookupResult(False, None, f"Field path '{field_path}' contains an empty segment.")
-            current_location = ".".join(traversed) if traversed else "<root>"
-            if isinstance(current, dict):
-                if segment not in current:
-                    return _PathLookupResult(
-                        False,
-                        None,
-                        f"Missing path segment '{segment}' at {current_location}.",
-                    )
-                current = current[segment]
-                traversed.append(segment)
-                continue
-            if isinstance(current, list):
-                if not segment.isdigit():
-                    return _PathLookupResult(
-                        False,
-                        None,
-                        f"Expected numeric list index at segment '{segment}' in path '{field_path}'.",
-                    )
-                index = int(segment)
-                if index >= len(current):
-                    return _PathLookupResult(
-                        False,
-                        None,
-                        f"List index {index} is out of range at {current_location}.",
-                    )
-                current = current[index]
-                traversed.append(segment)
-                continue
-            return _PathLookupResult(
-                False,
-                None,
-                f"Cannot resolve segment '{segment}' at {current_location}; actual type is {type(current).__name__}.",
-            )
-        return _PathLookupResult(True, current, f"Resolved path '{field_path}'.")
+        return resolve_path(root, field_path)
 
     @staticmethod
     def _parse_literal(raw_value: str) -> Any:
@@ -334,16 +284,6 @@ class ScenarioStepValidator:
             if normalized.count(normalized[0]) == 2:
                 return normalized[1:-1].strip()
         return normalized
-
-    @classmethod
-    def _split_field_path(cls, field_path: str) -> list[str]:
-        normalized_path = cls._parse_field_path(field_path)
-        if not normalized_path:
-            return []
-        return [
-            cls._strip_wrapping_quotes(segment.strip()).strip()
-            for segment in normalized_path.split(".")
-        ]
 
     @staticmethod
     def _strip_wrapping_quotes(value: str) -> str:

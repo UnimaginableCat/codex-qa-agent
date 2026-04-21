@@ -220,6 +220,39 @@ class ScenarioVariableTests(unittest.TestCase):
         self.assertEqual(executor.step_payloads[1]["path"], "/price-lists/123")
         self.assertFalse(any(step.details.get("phase") == "initial_context" for step in summary.steps))
 
+    def test_bracket_index_capture_updates_variables_for_next_step(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "COMPANY_GUID=company-attributes\n")
+            executor = _CapturingExecutorFactory(
+                tool_results=[
+                    self._api_result(
+                        {
+                            "attributes": [
+                                {"id": 29, "name": "Brand"},
+                                {"id": 32, "name": "Season"},
+                            ]
+                        }
+                    ),
+                    self._api_result({"ok": True}),
+                ]
+            )
+            scenario = self._captured_variable_scenario(root)
+            scenario.steps[0].api.capture = ["response.body.attributes[0].id -> brand_attribute_id"]
+            scenario.steps[0].api.expected = []
+            scenario.steps[1].api.path = "/attributes/{{brand_attribute_id}}"
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.execute_count, 2)
+        self.assertEqual(executor.step_payloads[1]["path"], "/attributes/29")
+        self.assertEqual(summary.steps[0].details["capture_keys"], ["brand_attribute_id"])
+
     def test_later_step_placeholder_is_deferred_until_that_step_is_active(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
