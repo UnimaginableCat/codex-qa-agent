@@ -60,11 +60,47 @@ class ScenarioStepValidatorTests(unittest.TestCase):
             self._api_step(
                 [
                     "response attributes length = 6",
+                    "response attributes length >= 6",
+                    "response attributes length<7",
                     "response attributes[3].options length = 3",
                     "response attributes.3.options length = 3",
                 ]
             ),
             payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
+    def test_api_comparison_operators_support_response_fields_and_placeholders(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {
+                    "id": 1929529,
+                    "root_category_id": 233585,
+                    "price": 5900.0,
+                    "quantity": 7,
+                    "name": "AUTOTEST Tire Copy",
+                },
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    "response id != {{source_position_id}}",
+                    "response root_category_id = {{duplicated_price_list_root_category_id}}",
+                    "response price >= 5900",
+                    "response quantity>5",
+                    "response quantity <= 7",
+                    'response name != "Original exact name"',
+                ]
+            ),
+            payload,
+            variables={
+                "source_position_id": 1929528,
+                "duplicated_price_list_root_category_id": 233585,
+            },
         )
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
@@ -285,6 +321,36 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
         self.assertTrue(all("first row" in result.detail.lower() for result in results[1:]), results)
 
+    def test_db_comparison_operators_support_scalar_fields(self) -> None:
+        payload = {
+            "query": {
+                "row_count": 1,
+                "rows": [
+                    {
+                        "duplicated_attr_value_count": 6,
+                        "same_attr_code_count": 0,
+                        "copied_position_id": 1929529,
+                        "source_position_id": 1929528,
+                    }
+                ],
+            }
+        }
+
+        results = self.validator.validate(
+            self._db_step(
+                [
+                    "duplicated_attr_value_count >= 5",
+                    "same_attr_code_count=0",
+                    "copied_position_id!=1929528",
+                    "duplicated_attr_value_count<7",
+                    "duplicated_attr_value_count <= 6",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
     def test_db_expectations_normalize_inline_code_rules_fields_and_values(self) -> None:
         payload = {
             "query": {
@@ -325,8 +391,18 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         results = self.validator.validate(self._api_step(["response magically works"]), {"response": {"body": {}}})
 
         self.assertEqual(results[0].status, StepStatus.BLOCKED)
-        self.assertIn("Unsupported API expectation rule", results[0].detail)
+        self.assertIn("Unsupported expectation rule: response magically works", results[0].detail)
         self.assertEqual(self.validator.final_status(results), StepStatus.BLOCKED)
+
+    def test_unsupported_comparison_syntax_does_not_become_missing_path(self) -> None:
+        results = self.validator.validate(
+            self._api_step(["response id ! = 123", "response name is not equal to original exact name"]),
+            {"response": {"body": {"id": 123, "name": "copy"}}},
+        )
+
+        self.assertTrue(all(result.status == StepStatus.BLOCKED for result in results), results)
+        self.assertTrue(all("Unsupported expectation rule" in result.detail for result in results), results)
+        self.assertTrue(all("Missing path segment" not in result.detail for result in results), results)
 
     def test_missing_field_path_returns_structured_failure(self) -> None:
         results = self.validator.validate(

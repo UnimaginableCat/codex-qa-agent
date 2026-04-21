@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from numbers import Number
 import re
 from typing import Any
@@ -17,23 +18,34 @@ from .path_lookup import resolve_path
 
 _HTTP_EXPECTATION_RE = re.compile(r"^\s*HTTP\s+(\d{3})(?:\s+or\s+HTTP\s+(\d{3}))?\s*$", re.IGNORECASE)
 _RESPONSE_CONTAINS_FIELD_RE = re.compile(r"^\s*response\s+contains(?:\s+field)?\s+(.+?)\s*$", re.IGNORECASE)
-_RESPONSE_LENGTH_RE = re.compile(r"^\s*response\s+(.+?)\s+length\s*=\s*(.+?)\s*$", re.IGNORECASE)
-_RESPONSE_EQUALS_RE = re.compile(r"^\s*response\s+(.+?)\s*=\s*(.+?)\s*$", re.IGNORECASE)
+_RESPONSE_LENGTH_RE = re.compile(
+    r"^\s*response\s+(.+?)\s+length\s*(>=|<=|!=|=|>|<)\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+_RESPONSE_VALUE_RE = re.compile(r"^\s*response\s+(.+?)\s*$", re.IGNORECASE)
 _RESPONSE_NOT_NULL_RE = re.compile(r"^\s*response\s+(.+?)\s+is\s+not\s+null\s*$", re.IGNORECASE)
 _ARRAY_CONTAINS_RE = re.compile(
     r"^\s*array\s+contains\s+item\s+with\s+(.+?)\s*=\s*(.+?)\s*$",
     re.IGNORECASE,
 )
-_DB_EQUALS_RE = re.compile(r"^\s*(.+?)\s*=\s*(.+?)\s*$", re.IGNORECASE)
 _DB_IS_NULL_RE = re.compile(r"^\s*(.+?)\s+is\s+null\s*$", re.IGNORECASE)
 _DB_IS_NOT_NULL_RE = re.compile(r"^\s*(.+?)\s+is\s+not\s+null\s*$", re.IGNORECASE)
 _DB_STARTS_WITH_RE = re.compile(r"^\s*(.+?)\s+starts\s+with\s+(.+?)\s*$", re.IGNORECASE)
+_COMPARISON_OPERATORS = (">=", "<=", "!=", "=", ">", "<")
+_COMPARISON_OPERATOR_CHARS = frozenset("!<=>")
 _VALIDATION_STATUS_PRIORITY = {
     StepStatus.PASS: 0,
     StepStatus.FAIL: 1,
     StepStatus.BLOCKED: 2,
     StepStatus.ERROR: 3,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class _ComparisonRule:
+    left: str
+    operator: str
+    right: str
 
 
 class ExpectationValidationError(ValidationError):
@@ -131,7 +143,8 @@ class ScenarioStepValidator:
 
         if match := _RESPONSE_LENGTH_RE.fullmatch(expectation):
             field_path = self._parse_field_path(match.group(1))
-            expected_length = self._parse_literal(match.group(2))
+            operator = match.group(2)
+            expected_length = self._parse_literal(match.group(3))
             lookup = self._try_get_path(response_body, field_path)
             if not lookup.exists:
                 return self._result(expectation, False, f"Field path: {field_path}. {lookup.detail}")
@@ -148,22 +161,39 @@ class ScenarioStepValidator:
                     f"Value at '{field_path}' has no length; actual type is {type(lookup.value).__name__}.",
                 )
             actual_length = len(lookup.value)
+            passed, comparison_detail = self._compare_values(actual_length, expected_length, operator)
             return self._result(
                 expectation,
-                actual_length == expected_length,
-                f"Field path: {field_path}. Expected length: {expected_length}. Actual length: {actual_length}. {lookup.detail}",
+                passed,
+                (
+                    f"Field path: {field_path}. Operator: {operator}. Expected length: {expected_length}. "
+                    f"Actual length: {actual_length}. {comparison_detail} {lookup.detail}"
+                ),
             )
 
-        if match := _RESPONSE_EQUALS_RE.fullmatch(expectation):
-            field_path = self._parse_field_path(match.group(1))
-            raw_rhs = self._raw_api_equals_rhs(raw_expectation)
-            expected_value = self._parse_api_expected_value(match.group(2), raw_rhs, variables)
-            lookup = self._try_get_path(response_body, field_path)
-            return self._result(
-                expectation,
-                lookup.exists and self._values_equal(lookup.value, expected_value),
-                f"Expected value: {expected_value!r}. Actual value: {lookup.value!r}. {lookup.detail}",
-            )
+        if match := _RESPONSE_VALUE_RE.fullmatch(expectation):
+            comparison_rule = self._split_comparison_rule(match.group(1))
+            if comparison_rule is None:
+                comparison_rule = self._raw_api_typed_comparison_rule(raw_expectation, variables)
+            if comparison_rule is not None:
+                field_path = self._parse_field_path(comparison_rule.left)
+                raw_rhs = self._raw_api_comparison_rhs(raw_expectation, comparison_rule.operator)
+                expected_value = self._parse_api_expected_value(comparison_rule.right, raw_rhs, variables)
+                lookup = self._try_get_path(response_body, field_path)
+                passed, comparison_detail = self._compare_values(
+                    lookup.value,
+                    expected_value,
+                    comparison_rule.operator,
+                )
+                return self._result(
+                    expectation,
+                    lookup.exists and passed,
+                    (
+                        f"Field path: {field_path}. Operator: {comparison_rule.operator}. "
+                        f"Expected value: {expected_value!r}. Actual value: {lookup.value!r}. "
+                        f"{comparison_detail} {lookup.detail}"
+                    ),
+                )
 
         if match := _RESPONSE_NOT_NULL_RE.fullmatch(expectation):
             field_path = self._parse_field_path(match.group(1))
@@ -197,6 +227,9 @@ class ScenarioStepValidator:
                 passed,
                 f"Searched field: {field_path}. Expected value: {expected_value!r}. {last_detail}",
             )
+
+        if self._looks_like_malformed_comparison(expectation):
+            return self._unsupported_result(expectation, "API")
 
         return self._unsupported_result(expectation, "API")
 
@@ -246,15 +279,24 @@ class ScenarioStepValidator:
                 f"Checked first row. Expected prefix: {expected_prefix!r}. Actual value: {lookup.value!r}. {lookup.detail}",
             )
 
-        if match := _DB_EQUALS_RE.fullmatch(db_expectation):
-            field_path = self._parse_field_path(match.group(1))
-            expected_value = self._parse_literal(match.group(2))
+        comparison_rule = self._split_comparison_rule(db_expectation)
+        if comparison_rule is not None:
+            field_path = self._parse_field_path(comparison_rule.left)
+            expected_value = self._parse_literal(comparison_rule.right)
             lookup = self._try_get_path(first_row_result.value, field_path) if first_row_result.exists else first_row_result
+            passed, comparison_detail = self._compare_values(lookup.value, expected_value, comparison_rule.operator)
             return self._result(
                 expectation,
-                lookup.exists and self._values_equal(lookup.value, expected_value),
-                f"Checked first row. Expected value: {expected_value!r}. Actual value: {lookup.value!r}. {lookup.detail}",
+                lookup.exists and passed,
+                (
+                    f"Checked first row. Field path: {field_path}. Operator: {comparison_rule.operator}. "
+                    f"Expected value: {expected_value!r}. Actual value: {lookup.value!r}. "
+                    f"{comparison_detail} {lookup.detail}"
+                ),
             )
+
+        if self._looks_like_malformed_comparison(db_expectation):
+            return self._unsupported_result(expectation, "DB")
 
         return self._unsupported_result(expectation, "DB")
 
@@ -277,7 +319,7 @@ class ScenarioStepValidator:
         return ExpectationCheckResult(
             rule=rule,
             status=StepStatus.BLOCKED,
-            detail=f"Unsupported {step_type} expectation rule.",
+            detail=f"Unsupported expectation rule: {rule} ({step_type}).",
         )
 
     @classmethod
@@ -329,12 +371,36 @@ class ScenarioStepValidator:
         match = EXACT_PLACEHOLDER_PATTERN.fullmatch(normalized)
         return match.group(1) if match else None
 
-    @staticmethod
-    def _raw_api_equals_rhs(raw_expectation: str | None) -> str | None:
+    @classmethod
+    def _raw_api_comparison_rhs(cls, raw_expectation: str | None, operator: str) -> str | None:
         if raw_expectation is None:
             return None
-        match = _RESPONSE_EQUALS_RE.fullmatch(raw_expectation)
-        return match.group(2) if match else None
+        match = _RESPONSE_VALUE_RE.fullmatch(raw_expectation)
+        if match is None:
+            return None
+        comparison_rule = cls._split_comparison_rule(match.group(1))
+        if comparison_rule is None or comparison_rule.operator != operator:
+            return None
+        return comparison_rule.right
+
+    @classmethod
+    def _raw_api_typed_comparison_rule(
+        cls,
+        raw_expectation: str | None,
+        variables: dict[str, Any] | None,
+    ) -> _ComparisonRule | None:
+        if raw_expectation is None or variables is None:
+            return None
+        match = _RESPONSE_VALUE_RE.fullmatch(raw_expectation)
+        if match is None:
+            return None
+        comparison_rule = cls._split_comparison_rule(match.group(1))
+        if comparison_rule is None:
+            return None
+        variable_name = cls._typed_placeholder_variable_name(comparison_rule.right)
+        if variable_name is None or variable_name not in variables:
+            return None
+        return comparison_rule
 
     @classmethod
     def _values_equal(cls, actual_value: Any, expected_value: Any) -> bool:
@@ -343,6 +409,66 @@ class ScenarioStepValidator:
         if isinstance(actual_value, Number) and isinstance(expected_value, Number):
             return actual_value == expected_value
         return actual_value == expected_value
+
+    @classmethod
+    def _compare_values(cls, actual_value: Any, expected_value: Any, operator: str) -> tuple[bool, str]:
+        if operator == "=":
+            return cls._values_equal(actual_value, expected_value), "Compared by equality."
+        if operator == "!=":
+            return not cls._values_equal(actual_value, expected_value), "Compared by inequality."
+
+        if not cls._is_non_bool_number(actual_value) or not cls._is_non_bool_number(expected_value):
+            return (
+                False,
+                (
+                    f"Operator {operator!r} requires numeric values; actual type is "
+                    f"{type(actual_value).__name__}, expected type is {type(expected_value).__name__}."
+                ),
+            )
+
+        if operator == ">":
+            return actual_value > expected_value, "Compared numerically."
+        if operator == ">=":
+            return actual_value >= expected_value, "Compared numerically."
+        if operator == "<":
+            return actual_value < expected_value, "Compared numerically."
+        if operator == "<=":
+            return actual_value <= expected_value, "Compared numerically."
+        return False, f"Unsupported comparison operator: {operator!r}."
+
+    @staticmethod
+    def _is_non_bool_number(value: Any) -> bool:
+        return isinstance(value, Number) and not isinstance(value, bool)
+
+    @classmethod
+    def _split_comparison_rule(cls, rule: str) -> _ComparisonRule | None:
+        normalized = rule.strip()
+        quote_char: str | None = None
+
+        for index, char in enumerate(normalized):
+            if quote_char is not None:
+                if char == quote_char:
+                    quote_char = None
+                continue
+            if char in {'"', "'", "`"}:
+                quote_char = char
+                continue
+            for operator in _COMPARISON_OPERATORS:
+                if not normalized.startswith(operator, index):
+                    continue
+                left = normalized[:index].strip()
+                right = normalized[index + len(operator) :].strip()
+                if not left or not right:
+                    return None
+                if left[-1] in _COMPARISON_OPERATOR_CHARS:
+                    return None
+                return _ComparisonRule(left=left, operator=operator, right=right)
+        return None
+
+    @staticmethod
+    def _looks_like_malformed_comparison(rule: str) -> bool:
+        stripped = rule.strip()
+        return any(char in stripped for char in _COMPARISON_OPERATOR_CHARS)
 
     @classmethod
     def _parse_field_path(cls, raw_field_path: str) -> str:
