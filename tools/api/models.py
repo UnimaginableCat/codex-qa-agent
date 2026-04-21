@@ -23,6 +23,7 @@ class EnvConfig:
     api_username: str | None = None
     api_password: str | None = None
     api_base_url_key: str = "API_BASE_URL"
+    api_base_url_raw: str | None = None
 
     @classmethod
     def from_mapping(cls, values: dict[str, str | None]) -> "EnvConfig":
@@ -43,6 +44,7 @@ class EnvConfig:
             api_username=_first_present(values, "API_USERNAME", "API_BASIC_USERNAME", "BASIC_AUTH_USERNAME"),
             api_password=_first_present(values, "API_PASSWORD", "API_BASIC_PASSWORD", "BASIC_AUTH_PASSWORD"),
             api_base_url_key="API_BASE_URL",
+            api_base_url_raw=values.get("__RAW_API_BASE_URL") or values.get("API_BASE_URL"),
         )
 
     def is_ready(self) -> bool:
@@ -125,6 +127,7 @@ class PreparedRequest:
     url: str
     headers: dict[str, str]
     base_url: str = ""
+    base_url_raw: str | None = None
     path: str = ""
     base_url_key: str = "API_BASE_URL"
     auth: Any = None

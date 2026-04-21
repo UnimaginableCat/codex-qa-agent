@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import sys
@@ -15,6 +16,7 @@ from tools.scenario_runner.executors import ApiStepExecutor
 from tools.scenario_runner.interpolator import PlaceholderInterpolator
 from tools.scenario_runner.models import (
     ApiStepDefinition,
+    RunContext,
     ScenarioDefinition,
     ScenarioStep,
     ScenarioStepType,
@@ -84,6 +86,40 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
         self.assertEqual(result["debug"]["VIRTUAL_ENV"], str(root / ".venv"))
         self.assertEqual(result["debug"]["NO_PROXY"], "localhost,127.0.0.1")
 
+    def test_api_executor_copies_request_diagnostics_to_step_details(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_context = self._run_context(root)
+            scenario = self._scenario(root)
+            executor = _InspectableApiStepExecutor(root)
+            api_request_debug = {
+                "final_url_value": "https://app2.101-group.ru/api/price_list/",
+                "hostname_value": "app2.101-group.ru",
+                "dns_precheck": {"getaddrinfo": {"status": "PASS"}},
+                "resolver_debug": {"getent_hosts": {"available": False}},
+            }
+
+            def fake_run(command, **kwargs):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "status": "PASS",
+                            "message": "ok",
+                            "request_debug": api_request_debug,
+                        }
+                    )
+                    + "\n",
+                    stderr="",
+                )
+
+            with patch("tools.scenario_runner.executors.subprocess.run", side_effect=fake_run):
+                outcome = executor.execute(run_context, scenario, scenario.steps[0])
+
+        self.assertEqual(outcome.step_result.status, StepStatus.PASS)
+        self.assertEqual(outcome.step_result.details["api_request_debug"], api_request_debug)
+        self.assertEqual(outcome.journal_details["api_request_debug"], api_request_debug)
+
     @staticmethod
     def _scenario(root: Path) -> ScenarioDefinition:
         return ScenarioDefinition(
@@ -101,6 +137,25 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
                     api=ApiStepDefinition(method="GET", path="/smoke"),
                 )
             ],
+        )
+
+    @staticmethod
+    def _run_context(root: Path) -> RunContext:
+        run_state_dir = root / ".codex-qa" / "runs" / "test-run"
+        artifact_dir = root / "artifacts" / "agent" / "api-error-mapping-test-run"
+        return RunContext(
+            run_id="test-run",
+            workspace_root=root,
+            scenario_path=root / "scenario.md",
+            scenario_slug="api-error-mapping",
+            scenario_name="API Error Mapping",
+            parsed_plans_dir=root / ".codex-qa" / "parsed-plans",
+            compiled_plan_path=root / ".codex-qa" / "parsed-plans" / "plan.json",
+            runs_root_dir=root / ".codex-qa" / "runs",
+            run_state_dir=run_state_dir,
+            artifacts_root_dir=root / "artifacts" / "agent",
+            artifact_dir=artifact_dir,
+            started_at="2026-04-21T00:00:00+00:00",
         )
 
 

@@ -92,7 +92,12 @@ class ApiConnectivityClassificationTests(unittest.TestCase):
 
         self.assertEqual(result.status, StepStatus.BLOCKED)
         self.assertEqual(result.details["classification"], "connectivity")
+        self.assertEqual(
+            result.details["request_debug"]["dns_precheck"]["getaddrinfo"]["status"],
+            StepStatus.BLOCKED.value,
+        )
         self.assertEqual(result.details["request_debug"]["getaddrinfo"]["status"], StepStatus.BLOCKED.value)
+        self.assertEqual(result.details["request_debug"]["hostname_value"], "api.example.invalid")
         self.assertEqual(result.details["request_debug"]["hostname_repr"], "'api.example.invalid'")
 
     def test_connection_timeout_is_blocked(self) -> None:
