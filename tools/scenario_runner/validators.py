@@ -15,6 +15,7 @@ from .path_lookup import resolve_path
 
 _HTTP_EXPECTATION_RE = re.compile(r"^\s*HTTP\s+(\d{3})(?:\s+or\s+HTTP\s+(\d{3}))?\s*$", re.IGNORECASE)
 _RESPONSE_CONTAINS_FIELD_RE = re.compile(r"^\s*response\s+contains(?:\s+field)?\s+(.+?)\s*$", re.IGNORECASE)
+_RESPONSE_LENGTH_RE = re.compile(r"^\s*response\s+(.+?)\s+length\s*=\s*(.+?)\s*$", re.IGNORECASE)
 _RESPONSE_EQUALS_RE = re.compile(r"^\s*response\s+(.+?)\s*=\s*(.+?)\s*$", re.IGNORECASE)
 _RESPONSE_NOT_NULL_RE = re.compile(r"^\s*response\s+(.+?)\s+is\s+not\s+null\s*$", re.IGNORECASE)
 _ARRAY_CONTAINS_RE = re.compile(
@@ -113,6 +114,31 @@ class ScenarioStepValidator:
                 expectation,
                 lookup.exists,
                 f"Field path: {field_path}. {lookup.detail}",
+            )
+
+        if match := _RESPONSE_LENGTH_RE.fullmatch(expectation):
+            field_path = self._parse_field_path(match.group(1))
+            expected_length = self._parse_literal(match.group(2))
+            lookup = self._try_get_path(response_body, field_path)
+            if not lookup.exists:
+                return self._result(expectation, False, f"Field path: {field_path}. {lookup.detail}")
+            if not isinstance(expected_length, int) or isinstance(expected_length, bool):
+                return self._result(
+                    expectation,
+                    False,
+                    f"Expected length must be an integer. Parsed expected value: {expected_length!r}.",
+                )
+            if not hasattr(lookup.value, "__len__") or isinstance(lookup.value, (bool, int, float)):
+                return self._result(
+                    expectation,
+                    False,
+                    f"Value at '{field_path}' has no length; actual type is {type(lookup.value).__name__}.",
+                )
+            actual_length = len(lookup.value)
+            return self._result(
+                expectation,
+                actual_length == expected_length,
+                f"Field path: {field_path}. Expected length: {expected_length}. Actual length: {actual_length}. {lookup.detail}",
             )
 
         if match := _RESPONSE_EQUALS_RE.fullmatch(expectation):

@@ -53,6 +53,33 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
 
+    def test_api_response_length_expectations_support_nested_bracket_paths(self) -> None:
+        payload = self._category_create_payload()
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    "response attributes length = 6",
+                    "response attributes[3].options length = 3",
+                    "response attributes.3.options length = 3",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
+    def test_api_response_length_expectation_bad_path_fails_clearly(self) -> None:
+        payload = self._category_create_payload()
+
+        results = self.validator.validate(
+            self._api_step(["response attributes[9].options length = 3"]),
+            payload,
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+        self.assertIn("index 9 is out of range", results[0].detail)
+
     def test_api_expectation_placeholders_are_interpolated_before_validation(self) -> None:
         payload = {
             "response": {
@@ -231,6 +258,32 @@ class ScenarioStepValidatorTests(unittest.TestCase):
             step_type=ScenarioStepType.DB,
             db=DbStepDefinition(expected=expected),
         )
+
+    @staticmethod
+    def _category_create_payload() -> dict:
+        return {
+            "response": {
+                "http_status": 201,
+                "body": {
+                    "attributes": [
+                        {"id": 10, "name": "Brand"},
+                        {"id": 11, "name": "Color"},
+                        {"id": 12, "name": "Size"},
+                        {
+                            "id": 13,
+                            "name": "Season",
+                            "options": [
+                                {"id": 1, "name": "Spring"},
+                                {"id": 2, "name": "Summer"},
+                                {"id": 3, "name": "Winter"},
+                            ],
+                        },
+                        {"id": 14, "name": "Material"},
+                        {"id": 15, "name": "Country"},
+                    ]
+                },
+            }
+        }
 
 
 if __name__ == "__main__":
