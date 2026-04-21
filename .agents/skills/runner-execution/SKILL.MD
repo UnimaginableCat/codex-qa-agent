@@ -83,6 +83,42 @@ Before reporting missing Python dependencies:
 
 A failed venv lookup is not valid unless explicit path checks were performed.
 
+# Scenario variable resolution policy
+
+Some scenario variables may come from the environment file rather than being written as literal values in the scenario.
+
+When the scenario references variables, resolve them using this priority:
+
+1. captured values from previous executed steps
+2. explicit scenario-defined variables
+3. environment-backed variables from the resolved env file
+4. generated runtime variables
+5. derived or template variables built from already resolved values
+
+Environment-backed variables are allowed and expected.
+
+Typical examples:
+- `company_guid`
+- `auth_login`
+- `auth_password`
+- `auth_token`
+- base URLs
+- service-specific identifiers
+
+If a scenario variable is marked or described as coming from environment or config, try to resolve it from the env file before treating it as missing.
+
+Do not assume that every variable must be declared literally inside the scenario body.
+
+If a variable is not present in the scenario text but exists in the env file and is clearly relevant to execution, it may be used as the resolved value.
+
+Examples:
+- `company_guid` may come from `env/<project>.env`
+- `auth_login` and `auth_password` may come from env for Basic Auth
+- `run_suffix` may be generated at runtime
+- `generated_price_list_name` may be derived from `AUTOTEST Attributes Flow {{run_suffix}}`
+
+Never print raw secret values when reading variables from env.
+
 # Default execution policy
 
 The runner is the primary execution mechanism.
@@ -92,12 +128,13 @@ Default flow:
 2. confirm the scenario path
 3. identify the runner CLI command
 4. resolve the Python interpreter, preferring local venv
-5. execute the scenario through the runner
-6. inspect produced artifacts:
+5. load the env file and resolve initial variables
+6. execute the scenario through the runner
+7. inspect produced artifacts:
    - `summary.json`
    - `report.md`
    - step artifacts if needed
-7. return the final outcome
+8. return the final outcome
 
 # Required behavior
 
@@ -142,6 +179,21 @@ Before concluding that dependencies are missing or the runner is broken:
 - verify whether a local venv exists
 - retry with the local venv interpreter if available
 
+## 5. Resolve scenario variables before step execution
+
+Before running the scenario:
+- load the resolved env file
+- identify which scenario variables may be satisfied from env
+- build initial runtime context from:
+  - scenario variables
+  - env-backed variables
+  - generated variables
+  - derived variables
+
+Do not wait until Step 1 fails on an unresolved placeholder if the value can be resolved from env beforehand.
+
+Do not mark a variable as missing until both the scenario-defined variables and the resolved env file were checked.
+
 # Execution workflow
 
 1. read the scenario file
@@ -157,12 +209,18 @@ Before concluding that dependencies are missing or the runner is broken:
 7. resolve the Python interpreter with this priority:
    - local venv python
    - system python fallback
-8. execute the runner against the scenario
-9. read the final outputs:
+8. load the env file
+9. resolve initial variables from:
+   - scenario-defined variables
+   - env-backed values
+   - generated runtime values
+   - derived or template variables
+10. execute the runner against the scenario
+11. read the final outputs:
    - final status
    - summary
    - report
-10. return:
+12. return:
    - final status
    - short summary
    - key blockers or failures
@@ -217,12 +275,15 @@ If runner output and artifacts disagree, say so explicitly.
 - Do not report missing dependencies until you have checked whether a local venv exists.
 - Do not treat a failed system-python attempt as conclusive if a local venv is available.
 - Do not claim that no venv exists unless explicit path checks were performed.
+- Do not mark a variable as unresolved until scenario variables and env-backed values were both checked.
+- Do not print secrets loaded from env.
 
 # Completion criteria
 
 This skill is complete when:
 - the runner was executed or a clear reason was given why it could not be executed
 - the interpreter choice was explicit
+- initial variable resolution was attempted from both scenario and env
 - final artifacts were inspected
 - the user received the final status and artifact paths
 - any fallback investigation was clearly marked as fallback or debug behavior
