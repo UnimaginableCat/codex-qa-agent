@@ -8,6 +8,7 @@ from tools.common.statuses import StepStatus
 
 from .artifacts import (
     create_report_path,
+    write_bundle_compiled_plan_json,
     write_compiled_plan_json,
     write_context_json,
     write_journal_entry,
@@ -52,6 +53,7 @@ class ScenarioRunnerService:
 
         try:
             write_compiled_plan_json(run_context.compiled_plan_path, scenario_definition)
+            write_bundle_compiled_plan_json(run_context, scenario_definition)
             write_context_json(run_context)
             write_journal_entry(
                 run_context,

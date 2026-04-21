@@ -19,6 +19,8 @@ ARTIFACTS_DIRNAME = Path("artifacts/agent")
 CONTEXT_FILENAME = "context.json"
 SUMMARY_FILENAME = "summary.json"
 JOURNAL_FILENAME = "journal.jsonl"
+COMPILED_PLAN_FILENAME = "compiled-plan.json"
+MANIFEST_FILENAME = "manifest.json"
 FORBIDDEN_ARTIFACT_SUFFIXES = {
     ".py",
     ".pyi",
@@ -127,6 +129,16 @@ def write_compiled_plan_json(parsed_plan_path: Path, scenario_definition: Scenar
     return parsed_plan_path
 
 
+def write_bundle_compiled_plan_json(run_context: RunContext, scenario_definition: ScenarioDefinition) -> Path:
+    target_path = ensure_artifact_output_path(
+        run_context.artifact_dir / COMPILED_PLAN_FILENAME,
+        run_context.artifacts_root_dir,
+    )
+    _write_json_file(target_path, scenario_definition.to_dict())
+    _write_manifest_json(run_context)
+    return target_path
+
+
 def create_step_artifact_path(
     run_context: RunContext,
     step_id: str,
@@ -154,24 +166,28 @@ def create_report_path(run_context: RunContext) -> Path:
 
 def write_context_json(run_context: RunContext) -> Path:
     target_path = run_context.run_state_dir / CONTEXT_FILENAME
-    _write_json_file(target_path, _strip_run_state_network_debug(run_context.to_dict()))
+    payload = _strip_run_state_network_debug(run_context.to_dict())
+    _write_json_file(target_path, payload)
+    _write_json_file(_bundle_file_path(run_context, CONTEXT_FILENAME), payload)
+    _write_manifest_json(run_context)
     return target_path
 
 
 def write_summary_json(run_context: RunContext, summary: ScenarioExecutionSummary) -> Path:
     target_path = run_context.run_state_dir / SUMMARY_FILENAME
-    _write_json_file(target_path, _strip_run_state_network_debug(summary.to_dict()))
+    payload = _strip_run_state_network_debug(summary.to_dict())
+    _write_json_file(target_path, payload)
+    _write_json_file(_bundle_file_path(run_context, SUMMARY_FILENAME), payload)
+    _write_manifest_json(run_context)
     return target_path
 
 
 def write_journal_entry(run_context: RunContext, entry: dict[str, Any]) -> Path:
     target_path = run_context.run_state_dir / JOURNAL_FILENAME
     serialized_entry = json.dumps(redact_sensitive_data(entry), ensure_ascii=False)
-    if target_path.exists():
-        with target_path.open("a", encoding="utf-8") as handle:
-            handle.write(serialized_entry + "\n")
-    else:
-        write_text_file(target_path, serialized_entry + "\n")
+    _append_jsonl(target_path, serialized_entry)
+    _append_jsonl(_bundle_file_path(run_context, JOURNAL_FILENAME), serialized_entry)
+    _write_manifest_json(run_context)
     return target_path
 
 
@@ -193,6 +209,48 @@ def ensure_artifact_output_path(path: Path, artifacts_root_dir: Path) -> Path:
 def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
     safe_payload = redact_sensitive_data(payload)
     write_text_file(path, json.dumps(safe_payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _append_jsonl(path: Path, serialized_entry: str) -> None:
+    if path.exists():
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(serialized_entry + "\n")
+    else:
+        write_text_file(path, serialized_entry + "\n")
+
+
+def _bundle_file_path(run_context: RunContext, filename: str) -> Path:
+    return ensure_artifact_output_path(run_context.artifact_dir / filename, run_context.artifacts_root_dir)
+
+
+def _write_manifest_json(run_context: RunContext) -> Path:
+    target_path = _bundle_file_path(run_context, MANIFEST_FILENAME)
+    payload = {
+        "run_id": run_context.run_id,
+        "scenario": run_context.scenario_name,
+        "scenario_slug": run_context.scenario_slug,
+        "scenario_path": str(run_context.scenario_path),
+        "workspace_root": str(run_context.workspace_root),
+        "run_state_dir": str(run_context.run_state_dir),
+        "artifact_dir": str(run_context.artifact_dir),
+        "legacy_compiled_plan_path": str(run_context.compiled_plan_path),
+        "bundle": {
+            "manifest_path": str(target_path),
+            "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),
+            "summary_path": str(run_context.artifact_dir / SUMMARY_FILENAME),
+            "journal_path": str(run_context.artifact_dir / JOURNAL_FILENAME),
+            "compiled_plan_path": str(run_context.artifact_dir / COMPILED_PLAN_FILENAME),
+            "report_path": str(run_context.artifact_dir / "report.md"),
+            "steps_dir": str(run_context.artifact_dir / "steps"),
+        },
+        "legacy_run_state": {
+            "context_path": str(run_context.run_state_dir / CONTEXT_FILENAME),
+            "summary_path": str(run_context.run_state_dir / SUMMARY_FILENAME),
+            "journal_path": str(run_context.run_state_dir / JOURNAL_FILENAME),
+        },
+    }
+    _write_json_file(target_path, payload)
+    return target_path
 
 
 def _strip_run_state_network_debug(value: Any) -> Any:

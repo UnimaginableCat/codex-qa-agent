@@ -132,11 +132,52 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
             report_path = Path(cli_payload["report_path"])
             persisted_summary = json.loads(summary_path.read_text(encoding="utf-8"))
             report_content = report_path.read_text(encoding="utf-8")
+            bundle_summary_path = Path(cli_payload["artifact_dir"]) / "summary.json"
+            bundle_manifest_path = Path(cli_payload["artifact_dir"]) / "manifest.json"
+            bundle_summary_exists = bundle_summary_path.exists()
+            bundle_manifest_exists = bundle_manifest_path.exists()
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(cli_payload["final_status"], StepStatus.PASS.value)
         self.assertEqual(persisted_summary["final_status"], cli_payload["final_status"])
+        self.assertTrue(bundle_summary_exists)
+        self.assertTrue(bundle_manifest_exists)
         self.assertIn(f"- Final status: `{cli_payload['final_status']}`", report_content)
+
+    def test_run_bundle_contains_state_plan_journal_report_and_steps(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            service = ScenarioRunnerService(
+                step_executor_factory=_FakeStepExecutorFactory([self._step_outcome(StepStatus.PASS)]),
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(self._scenario(root, with_step=True), workspace_root=root)
+            bundle_dir = summary.artifact_dir
+            manifest = json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
+            bundle_context_exists = (bundle_dir / "context.json").exists()
+            bundle_summary_exists = (bundle_dir / "summary.json").exists()
+            bundle_journal_exists = (bundle_dir / "journal.jsonl").exists()
+            bundle_plan_exists = (bundle_dir / "compiled-plan.json").exists()
+            bundle_report_exists = (bundle_dir / "report.md").exists()
+            bundle_summary_content = (bundle_dir / "summary.json").read_text(encoding="utf-8")
+
+        self.assertEqual(manifest["run_id"], summary.run_id)
+        self.assertEqual(Path(manifest["artifact_dir"]), bundle_dir)
+        self.assertTrue(bundle_context_exists)
+        self.assertTrue(bundle_summary_exists)
+        self.assertTrue(bundle_journal_exists)
+        self.assertTrue(bundle_plan_exists)
+        self.assertTrue(bundle_report_exists)
+        self.assertTrue(bundle_summary_content)
+        self.assertEqual(
+            Path(manifest["bundle"]["summary_path"]),
+            bundle_dir / "summary.json",
+        )
+        self.assertEqual(
+            Path(manifest["legacy_run_state"]["summary_path"]),
+            summary.run_state_dir / "summary.json",
+        )
 
     def test_context_and_summary_omit_network_debug_details(self) -> None:
         with TemporaryDirectory() as tmp:
