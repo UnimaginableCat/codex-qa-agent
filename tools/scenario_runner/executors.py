@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from tempfile import mkstemp
@@ -186,9 +187,11 @@ class _BaseStepExecutor:
             "cwd": str(self._workspace_root),
             "VIRTUAL_ENV": child_env.get("VIRTUAL_ENV"),
             "PATH": child_env.get("PATH"),
-            "HTTP_PROXY": child_env.get("HTTP_PROXY"),
-            "HTTPS_PROXY": child_env.get("HTTPS_PROXY"),
+            "HTTP_PROXY": _safe_child_env_debug_value(child_env, "HTTP_PROXY"),
+            "HTTPS_PROXY": _safe_child_env_debug_value(child_env, "HTTPS_PROXY"),
             "NO_PROXY": child_env.get("NO_PROXY"),
+            "REQUESTS_CA_BUNDLE": child_env.get("REQUESTS_CA_BUNDLE"),
+            "SSL_CERT_FILE": child_env.get("SSL_CERT_FILE"),
         }
 
     def _parse_tool_payload(self, stdout: str, stderr: str, returncode: int) -> dict[str, Any]:
@@ -361,3 +364,12 @@ class DbStepExecutor(_BaseStepExecutor):
 
     def _capture_rules(self, step: ScenarioStep) -> list[str]:
         return [] if step.db is None else list(step.db.capture)
+
+
+def _safe_child_env_debug_value(env: dict[str, str], key: str) -> str | None:
+    value = env.get(key)
+    if value is None:
+        return None
+    if key.upper() in {"HTTP_PROXY", "HTTPS_PROXY"}:
+        return re.sub(r"(?<=://)[^/@]+@", "<redacted>@", value)
+    return value

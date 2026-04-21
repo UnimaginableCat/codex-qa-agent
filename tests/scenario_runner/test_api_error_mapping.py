@@ -71,6 +71,8 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
                     "HTTP_PROXY": "http://proxy.local:8080",
                     "HTTPS_PROXY": "https://proxy.local:8443",
                     "NO_PROXY": "localhost,127.0.0.1",
+                    "REQUESTS_CA_BUNDLE": "/tmp/ca.pem",
+                    "SSL_CERT_FILE": "/tmp/ssl.pem",
                 },
             ):
                 with patch("tools.scenario_runner.executors.subprocess.run", side_effect=fake_run):
@@ -85,6 +87,33 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
         self.assertEqual(result["debug"]["cwd"], str(root))
         self.assertEqual(result["debug"]["VIRTUAL_ENV"], str(root / ".venv"))
         self.assertEqual(result["debug"]["NO_PROXY"], "localhost,127.0.0.1")
+        self.assertEqual(result["debug"]["REQUESTS_CA_BUNDLE"], "/tmp/ca.pem")
+        self.assertEqual(result["debug"]["SSL_CERT_FILE"], "/tmp/ssl.pem")
+
+    def test_local_tool_subprocess_debug_redacts_proxy_credentials(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = _InspectableApiStepExecutor(root)
+
+            def fake_run(command, **kwargs):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout='{"status": "PASS", "message": "ok"}\n',
+                    stderr="",
+                )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "HTTP_PROXY": "http://user:secret@proxy.local:8080",
+                    "HTTPS_PROXY": "https://user:secret@proxy.local:8443",
+                },
+            ):
+                with patch("tools.scenario_runner.executors.subprocess.run", side_effect=fake_run):
+                    result = executor.invoke_cli_for_test(root / "env" / "demo.env", root / "step.json")
+
+        self.assertEqual(result["debug"]["HTTP_PROXY"], "http://<redacted>@proxy.local:8080")
+        self.assertEqual(result["debug"]["HTTPS_PROXY"], "https://<redacted>@proxy.local:8443")
 
     def test_api_executor_copies_request_diagnostics_to_step_details(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -96,7 +125,12 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
                 "final_url_value": "https://app2.101-group.ru/api/price_list/",
                 "hostname_value": "app2.101-group.ru",
                 "dns_precheck": {"getaddrinfo": {"status": "PASS"}},
-                "resolver_debug": {"getent_hosts": {"available": False}},
+                "resolver_debug": {
+                    "getent_hosts": {"available": False},
+                    "nslookup": {"available": False},
+                    "ping": {"available": False},
+                    "comparison": {"system_getent_status": "NOT_AVAILABLE"},
+                },
             }
 
             def fake_run(command, **kwargs):

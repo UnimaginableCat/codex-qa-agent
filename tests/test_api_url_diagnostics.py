@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 import types
 import unittest
@@ -137,6 +138,10 @@ class ApiUrlDiagnosticsTests(unittest.TestCase):
             "process_debug",
             "resolv_conf",
             "getent_hosts",
+            "nslookup",
+            "ping",
+            "hosts_file",
+            "resolver_comparison",
         ):
             self.assertIn(key, debug)
         self.assertEqual(debug["base_url_env_key"], "API_BASE_URL")
@@ -148,14 +153,24 @@ class ApiUrlDiagnosticsTests(unittest.TestCase):
         self.assertIn("sample_results", debug["dns_precheck"]["getaddrinfo"])
         self.assertIn("resolved_addresses", debug["dns_precheck"]["getaddrinfo"])
         self.assertIn("sys_executable", debug["process_debug"])
+        self.assertIn("hostname", debug["process_debug"])
+        self.assertIn("fqdn", debug["process_debug"])
         self.assertIn("resolv_conf", debug["resolver_debug"])
+        self.assertIn("nslookup", debug["resolver_debug"])
+        self.assertIn("ping", debug["resolver_debug"])
+        self.assertIn("hosts_file", debug["resolver_debug"])
+        self.assertEqual(debug["resolver_comparison"]["python_getaddrinfo"], "see request_debug.dns_precheck.getaddrinfo")
 
     def test_hostname_precheck_failure_returns_blocked_with_structured_diagnostics(self) -> None:
         env = EnvConfig.from_mapping({"API_BASE_URL": "https://bad.example.local"})
         step = RequestStep(method="GET", path="/api/price_list/")
         prepared = self._builder().build(env, step)
 
-        result = ApiRequestService(session=_RecordingSession(), resolver=_failing_resolver).execute(step, prepared)
+        result = ApiRequestService(
+            session=_RecordingSession(),
+            resolver=_failing_resolver,
+            system_resolver_diagnostics=False,
+        ).execute(step, prepared)
 
         self.assertEqual(result.status, StepStatus.BLOCKED)
         debug = result.details["request_debug"]
@@ -166,6 +181,23 @@ class ApiUrlDiagnosticsTests(unittest.TestCase):
         self.assertEqual(debug["dns_precheck"]["status"], StepStatus.BLOCKED.value)
         self.assertEqual(debug["getaddrinfo"]["status"], StepStatus.BLOCKED.value)
         self.assertEqual(debug["getaddrinfo"]["error_type"], "OSError")
+
+    def test_resolver_command_results_are_structured(self) -> None:
+        env = EnvConfig.from_mapping({"API_BASE_URL": "https://app2.101-group.ru"})
+        step = RequestStep(method="GET", path="/api/price_list/")
+        prepared = self._builder().build(env, step)
+
+        with patch("tools.api.services.shutil.which", side_effect=_fake_which):
+            with patch("tools.api.services.subprocess.run", side_effect=_fake_subprocess_run):
+                result = ApiRequestService(session=_RecordingSession(), resolver=_passing_resolver).execute(step, prepared)
+
+        debug = result.details["request_debug"]
+        self.assertEqual(debug["getent_hosts"]["status"], StepStatus.PASS.value)
+        self.assertEqual(debug["nslookup"]["status"], StepStatus.PASS.value)
+        self.assertEqual(debug["ping"]["status"], StepStatus.BLOCKED.value)
+        self.assertEqual(debug["resolver_comparison"]["system_getent_status"], StepStatus.PASS.value)
+        self.assertEqual(debug["resolver_comparison"]["system_nslookup_status"], StepStatus.PASS.value)
+        self.assertEqual(debug["resolver_comparison"]["system_ping_status"], StepStatus.BLOCKED.value)
 
     def test_request_debug_does_not_include_auth_secrets(self) -> None:
         env = EnvConfig.from_mapping(
@@ -184,7 +216,11 @@ class ApiUrlDiagnosticsTests(unittest.TestCase):
             "os.environ",
             {"HTTP_PROXY": "http://proxy-user:proxy-password@proxy.local:8080"},
         ):
-            result = ApiRequestService(session=_RecordingSession(), resolver=_passing_resolver).execute(step, prepared)
+            result = ApiRequestService(
+                session=_RecordingSession(),
+                resolver=_passing_resolver,
+                system_resolver_diagnostics=False,
+            ).execute(step, prepared)
 
         debug_text = json.dumps(result.details["request_debug"], ensure_ascii=False)
         self.assertNotIn("very-secret-token", debug_text)
@@ -197,7 +233,11 @@ class ApiUrlDiagnosticsTests(unittest.TestCase):
         env = EnvConfig.from_mapping({"API_BASE_URL": raw_base_url, "API_AUTH_TYPE": "none"})
         step = RequestStep(method="GET", path="/api/price_list/")
         prepared = self._builder().build(env, step)
-        return ApiRequestService(session=_RecordingSession(), resolver=_passing_resolver).execute(step, prepared)
+        return ApiRequestService(
+            session=_RecordingSession(),
+            resolver=_passing_resolver,
+            system_resolver_diagnostics=False,
+        ).execute(step, prepared)
 
     @staticmethod
     def _builder() -> ApiRequestBuilder:
@@ -219,6 +259,22 @@ def _passing_resolver(hostname, port):
 
 def _failing_resolver(hostname, port):
     raise OSError("mock getaddrinfo failure")
+
+
+def _fake_which(command: str) -> str | None:
+    if command in {"getent", "nslookup", "ping"}:
+        return f"/usr/bin/{command}"
+    return None
+
+
+def _fake_subprocess_run(command, **kwargs):
+    if command[0].endswith("getent"):
+        return SimpleNamespace(returncode=0, stdout="203.0.113.30 app2.101-group.ru\n", stderr="")
+    if command[0].endswith("nslookup"):
+        return SimpleNamespace(returncode=0, stdout="Name: app2.101-group.ru\nAddress: 203.0.113.30\n", stderr="")
+    if command[0].endswith("ping"):
+        return SimpleNamespace(returncode=2, stdout="", stderr="ping: app2.101-group.ru: Temporary failure\n")
+    return SimpleNamespace(returncode=127, stdout="", stderr="not found")
 
 
 if __name__ == "__main__":

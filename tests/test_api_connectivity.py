@@ -85,6 +85,7 @@ class ApiConnectivityClassificationTests(unittest.TestCase):
         result = ApiRequestService(
             session=_ResponseSession(200),
             resolver=_failing_resolver,
+            system_resolver_diagnostics=False,
         ).execute(
             self._step(),
             self._prepared_request(),
@@ -121,7 +122,11 @@ class ApiConnectivityClassificationTests(unittest.TestCase):
         self.assertEqual(result.details["error_type"], "SSLError")
 
     def test_service_unavailable_response_is_blocked(self) -> None:
-        result = ApiRequestService(session=_ResponseSession(503), resolver=_passing_resolver).execute(
+        result = ApiRequestService(
+            session=_ResponseSession(503),
+            resolver=_passing_resolver,
+            system_resolver_diagnostics=False,
+        ).execute(
             self._step(),
             self._prepared_request(),
         )
@@ -137,7 +142,11 @@ class ApiConnectivityClassificationTests(unittest.TestCase):
         self.assertNotEqual(result.details.get("classification"), "connectivity")
 
     def _run_with_exception(self, exc: Exception):
-        return ApiRequestService(session=_ExceptionSession(exc), resolver=_passing_resolver).execute(
+        return ApiRequestService(
+            session=_ExceptionSession(exc),
+            resolver=_passing_resolver,
+            system_resolver_diagnostics=False,
+        ).execute(
             self._step(),
             self._prepared_request(),
         )

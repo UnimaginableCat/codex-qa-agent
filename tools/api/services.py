@@ -64,9 +64,15 @@ class ApiRequestBuilder:
 class ApiRequestService:
     """Executes HTTP requests for scenario API steps."""
 
-    def __init__(self, session: requests.Session | None = None, resolver=None) -> None:
+    def __init__(
+        self,
+        session: requests.Session | None = None,
+        resolver=None,
+        system_resolver_diagnostics: bool = True,
+    ) -> None:
         self._session = session or requests.Session()
         self._resolver = resolver or socket.getaddrinfo
+        self._system_resolver_diagnostics = system_resolver_diagnostics
 
     def execute(self, step: RequestStep, prepared_request: PreparedRequest) -> ExecutionResult:
         request_debug = dict(prepared_request.request_debug or build_request_debug(prepared_request))
@@ -78,6 +84,10 @@ class ApiRequestService:
         request_debug["process_debug"] = resolver_debug.get("process")
         request_debug["resolv_conf"] = resolver_debug.get("resolv_conf")
         request_debug["getent_hosts"] = resolver_debug.get("getent_hosts")
+        request_debug["nslookup"] = resolver_debug.get("nslookup")
+        request_debug["ping"] = resolver_debug.get("ping")
+        request_debug["hosts_file"] = resolver_debug.get("hosts_file")
+        request_debug["resolver_comparison"] = resolver_debug.get("comparison")
         request_debug["getaddrinfo"] = dns_precheck["getaddrinfo"]
         request_debug["gethostbyname"] = dns_precheck["gethostbyname"]
         request_debug["getfqdn"] = dns_precheck["getfqdn"]
@@ -262,11 +272,23 @@ class ApiRequestService:
         }
 
     def _resolver_debug(self, hostname: str | None) -> dict[str, Any]:
+        if self._system_resolver_diagnostics:
+            getent_hosts = _run_getent_hosts(hostname)
+            nslookup = _run_nslookup(hostname)
+            ping = _run_ping(hostname)
+        else:
+            getent_hosts = _resolver_command_not_run("getent_hosts")
+            nslookup = _resolver_command_not_run("nslookup")
+            ping = _resolver_command_not_run("ping")
+        hosts_file = _read_hosts_file(hostname)
+
         return {
             "process": {
                 "sys_executable": sys.executable,
                 "cwd": os.getcwd(),
                 "platform": platform.platform(),
+                "hostname": _safe_socket_call(socket.gethostname),
+                "fqdn": _safe_socket_call(socket.getfqdn),
                 "socket_default_timeout": socket.getdefaulttimeout(),
                 "env": {
                     "VIRTUAL_ENV": _safe_env_debug_value("VIRTUAL_ENV"),
@@ -279,7 +301,19 @@ class ApiRequestService:
                 },
             },
             "resolv_conf": _read_resolv_conf(),
-            "getent_hosts": _run_getent_hosts(hostname),
+            "hosts_file": hosts_file,
+            "getent_hosts": getent_hosts,
+            "nslookup": nslookup,
+            "ping": ping,
+            "comparison": {
+                "python_getaddrinfo": "see request_debug.dns_precheck.getaddrinfo",
+                "python_gethostbyname": "see request_debug.dns_precheck.gethostbyname",
+                "system_getent_status": _command_status(getent_hosts),
+                "system_nslookup_status": _command_status(nslookup),
+                "system_ping_status": _command_status(ping),
+                "hosts_file_status": hosts_file.get("status"),
+                "child_env": "see request_debug.process_debug.env",
+            },
         }
 
     @staticmethod
@@ -349,6 +383,19 @@ def _safe_env_debug_value(key: str) -> str | None:
     return value
 
 
+def _safe_socket_call(callback) -> dict[str, Any]:
+    try:
+        return {"status": StepStatus.PASS.value, "value": callback()}
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": StepStatus.BLOCKED.value,
+            "value": None,
+            "error_type": type(exc).__name__,
+            "errno": getattr(exc, "errno", None),
+            "message": str(exc),
+        }
+
+
 def _read_resolv_conf() -> dict[str, Any]:
     resolv_path = Path("/etc/resolv.conf")
     if not resolv_path.exists():
@@ -365,16 +412,67 @@ def _read_resolv_conf() -> dict[str, Any]:
     return {"exists": True, "first_lines": first_lines}
 
 
-def _run_getent_hosts(hostname: str | None) -> dict[str, Any]:
-    if not hostname:
-        return {"available": False, "reason": "missing hostname"}
-    getent_path = shutil.which("getent")
-    if getent_path is None:
-        return {"available": False, "reason": "getent not found"}
+def _read_hosts_file(hostname: str | None) -> dict[str, Any]:
+    hosts_path = Path("/etc/hosts")
+    if not hosts_path.exists():
+        return {"exists": False, "status": "NOT_AVAILABLE", "path": str(hosts_path), "matching_lines": []}
 
     try:
+        lines = hosts_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return {
+            "exists": True,
+            "status": StepStatus.BLOCKED.value,
+            "path": str(hosts_path),
+            "matching_lines": [],
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+        }
+
+    matching_lines = []
+    if hostname:
+        hostname_lower = hostname.lower()
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            tokens = stripped.split()
+            if any(token.lower() == hostname_lower for token in tokens[1:]):
+                matching_lines.append(stripped)
+
+    return {
+        "exists": True,
+        "status": StepStatus.PASS.value if matching_lines else "NOT_FOUND",
+        "path": str(hosts_path),
+        "matching_lines": matching_lines[:20],
+    }
+
+
+def _run_getent_hosts(hostname: str | None) -> dict[str, Any]:
+    return _run_resolver_command("getent_hosts", ["getent", "hosts", hostname] if hostname else None)
+
+
+def _run_nslookup(hostname: str | None) -> dict[str, Any]:
+    return _run_resolver_command("nslookup", ["nslookup", hostname] if hostname else None)
+
+
+def _run_ping(hostname: str | None) -> dict[str, Any]:
+    return _run_resolver_command("ping", ["ping", "-c", "1", hostname] if hostname else None)
+
+
+def _run_resolver_command(name: str, command: list[str | None] | None) -> dict[str, Any]:
+    if not command or not command[-1]:
+        return {"available": False, "reason": "missing hostname", "status": "NOT_AVAILABLE"}
+
+    executable_name = str(command[0])
+    executable_path = shutil.which(executable_name)
+    if executable_path is None:
+        return {"available": False, "reason": f"{executable_name} not found", "status": "NOT_AVAILABLE"}
+
+    resolved_command = [executable_path, *[str(part) for part in command[1:]]]
+    try:
         completed = subprocess.run(
-            [getent_path, "hosts", hostname],
+            resolved_command,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -384,18 +482,30 @@ def _run_getent_hosts(hostname: str | None) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {
             "available": True,
-            "command": [getent_path, "hosts", hostname],
+            "name": name,
+            "command": resolved_command,
+            "status": StepStatus.BLOCKED.value,
             "error_type": type(exc).__name__,
             "message": str(exc),
         }
 
     return {
         "available": True,
-        "command": [getent_path, "hosts", hostname],
+        "name": name,
+        "command": resolved_command,
+        "status": StepStatus.PASS.value if completed.returncode == 0 else StepStatus.BLOCKED.value,
         "returncode": completed.returncode,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }
+
+
+def _command_status(result: dict[str, Any]) -> str | None:
+    return result.get("status")
+
+
+def _resolver_command_not_run(name: str) -> dict[str, Any]:
+    return {"available": False, "name": name, "status": "NOT_RUN", "reason": "system resolver diagnostics disabled"}
 
 
 def _parsed_port(parsed_url) -> int | None:
