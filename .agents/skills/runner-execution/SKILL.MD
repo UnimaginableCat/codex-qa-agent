@@ -119,6 +119,69 @@ Examples:
 
 Never print raw secret values when reading variables from env.
 
+# Network and sandbox policy
+
+Runner results must be interpreted in the context of the actual execution environment.
+
+Before concluding that a scenario is blocked by the target system, first verify whether the current agent session itself has outbound DNS and HTTPS access from the same execution context that will run the scenario.
+
+## When this check is required
+
+Run the network precheck before rerunning the scenario if any of the following is true:
+- previous runner output failed on DNS resolution
+- previous runner output failed on connection setup before any HTTP response
+- the session appears to be sandboxed or restricted
+- the workspace config indicates sandboxed execution, such as `sandbox_mode = "workspace-write"`
+- outbound network access may be unavailable or policy-restricted
+
+## Required precheck context
+
+The checks must run from the same interpreter and environment that will execute the runner:
+- use the resolved local venv interpreter if available
+- use the same working directory
+- do not run the checks from a different shell, host, or interpreter and assume equivalence
+
+## Required network checks
+
+For the target API hostname, run:
+
+1. Python DNS resolution:
+   - `socket.gethostbyname(hostname)`
+   - `socket.getaddrinfo(hostname, port)`
+
+2. HTTPS probe with requests:
+   - `requests.get(url, timeout=15, verify=False)`
+
+3. System resolver check:
+   - `getent hosts <hostname>`
+
+4. Report execution context indicators:
+   - whether sandbox/network access appears restricted
+   - whether proxy variables are present
+   - which interpreter path was used
+
+## How to interpret the result
+
+If DNS and HTTPS both fail from the same runner execution context, and the session is sandboxed or network-restricted, treat this as strong evidence that the BLOCKED result is caused by the agent environment rather than the target API itself.
+
+In that case:
+- do not over-diagnose the application
+- do not claim the target host is definitively down
+- say clearly that the runner result is explained by environment/network restriction in the current agent session
+- say that a rerun from a context with outbound network access is required for a meaningful application-level result
+
+If DNS works and HTTPS reaches the host, then continue with normal runner execution and interpret the runner result as a scenario/system outcome.
+
+## Sandbox-specific rule
+
+If the session indicates restricted network access, for example:
+- sandboxed execution
+- `sandbox_mode = "workspace-write"`
+- explicit restricted network policy
+- direct DNS/HTTPS probe failures from the runner interpreter
+
+then do not present the runner BLOCKED status as evidence of an application bug unless there is additional proof from a non-restricted environment.
+
 # Default execution policy
 
 The runner is the primary execution mechanism.
@@ -129,12 +192,13 @@ Default flow:
 3. identify the runner CLI command
 4. resolve the Python interpreter, preferring local venv
 5. load the env file and resolve initial variables
-6. execute the scenario through the runner
-7. inspect produced artifacts:
+6. if needed, run network/sandbox reachability precheck from the same execution context
+7. execute the scenario through the runner
+8. inspect produced artifacts:
    - `summary.json`
    - `report.md`
    - step artifacts if needed
-8. return the final outcome
+9. return the final outcome
 
 # Required behavior
 
@@ -179,55 +243,44 @@ Before concluding that dependencies are missing or the runner is broken:
 - verify whether a local venv exists
 - retry with the local venv interpreter if available
 
-## 5. Resolve scenario variables before step execution
+## 5. Treat agent network reachability as part of execution correctness
 
-Before running the scenario:
-- load the resolved env file
-- identify which scenario variables may be satisfied from env
-- build initial runtime context from:
-  - scenario variables
-  - env-backed variables
-  - generated variables
-  - derived variables
+If the scenario depends on outbound API access, network reachability from the current session is part of execution correctness.
 
-Do not wait until Step 1 fails on an unresolved placeholder if the value can be resolved from env beforehand.
+Before treating DNS or connection failures as application failures:
+- verify DNS from the runner interpreter
+- verify HTTPS connectivity from the runner interpreter
+- verify whether the session is sandboxed or network-restricted
 
-Do not mark a variable as missing until both the scenario-defined variables and the resolved env file were checked.
+A runner result that is blocked by sandbox DNS failure is not a meaningful business-flow result.
 
 # Execution workflow
 
-1. read the scenario file
-2. resolve:
+1. Read the scenario file.
+2. Resolve:
    - scenario name
    - target project
    - env path
    - report path if declared
-3. determine the workspace root explicitly
-4. run venv path checks relative to the workspace root
-5. if needed, run secondary checks relative to the parent directory
-6. locate the runner command
-7. resolve the Python interpreter with this priority:
+3. Locate the runner command.
+4. Resolve the Python interpreter with this priority:
    - local venv python
    - system python fallback
-8. load the env file
-9. resolve initial variables from:
-   - scenario-defined variables
-   - env-backed values
-   - generated runtime values
-   - derived or template variables
-10. execute the runner against the scenario
-11. read the final outputs:
+5. Load env-backed variables and generated runtime variables.
+6. If previous evidence suggests connectivity issues, run DNS/HTTPS precheck from the same execution context.
+7. Execute the runner against the scenario.
+8. Read the final outputs:
    - final status
    - summary
    - report
-12. return:
+9. Return:
    - final status
    - short summary
-   - key blockers or failures
+   - key blockers/failures
    - exact artifact paths
    - which Python interpreter was used
-
-Do not rely only on the current shell directory if paths suggest a nested workspace.
+   - whether network access was verified
+   - whether the result may be explained by sandbox restrictions
 
 # Expected artifacts to inspect
 
@@ -248,9 +301,13 @@ Provide a concise factual result with:
 - target project
 - final status
 - short explanation
-- key failed or blocked steps if any
+- key failed/blocked steps if any
 - exact paths to summary and report
 - interpreter used for execution
+- whether DNS worked
+- whether HTTPS worked
+- whether outbound network appears restricted
+- whether that explains the runner result
 
 # Status interpretation
 
@@ -261,8 +318,9 @@ Interpret runner output using these statuses:
 - ERROR
 
 Do not override the runner’s final status unless you have strong evidence that the runner itself is incorrect.
-
 If runner output and artifacts disagree, say so explicitly.
+
+If the runner says BLOCKED because of DNS/connectivity failure and the same failure is reproducible from the agent execution context, report that the scenario is BLOCKED in this environment and that the result is environment-constrained.
 
 # Guardrails
 
@@ -272,18 +330,5 @@ If runner output and artifacts disagree, say so explicitly.
 - Do not manually execute destructive DB queries.
 - Do not claim a scenario passed without checking runner output artifacts.
 - Do not perform broad codebase scanning by default.
-- Do not report missing dependencies until you have checked whether a local venv exists.
-- Do not treat a failed system-python attempt as conclusive if a local venv is available.
-- Do not claim that no venv exists unless explicit path checks were performed.
-- Do not mark a variable as unresolved until scenario variables and env-backed values were both checked.
-- Do not print secrets loaded from env.
-
-# Completion criteria
-
-This skill is complete when:
-- the runner was executed or a clear reason was given why it could not be executed
-- the interpreter choice was explicit
-- initial variable resolution was attempted from both scenario and env
-- final artifacts were inspected
-- the user received the final status and artifact paths
-- any fallback investigation was clearly marked as fallback or debug behavior
+- Do not claim the target API is broken when the current agent session has restricted network access.
+- Do not treat repr-style quotes in diagnostics as proof that real URL values contain quotes; compare raw value and normalized value separately.
