@@ -15,6 +15,11 @@ class AuthType(StrEnum):
     BASIC = "basic"
 
 
+SAFE_RETRY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+DEFAULT_RETRY_REASONS = ("read_timeout", "connect_timeout", "connection_error")
+SUPPORTED_RETRY_REASONS = frozenset(DEFAULT_RETRY_REASONS)
+
+
 @dataclass(slots=True)
 class EnvConfig:
     api_base_url: str
@@ -77,6 +82,7 @@ class RequestStep:
     body: Any = None
     query_params: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: int = 30
+    retry_policy: "RequestRetryPolicy" = field(default_factory=lambda: RequestRetryPolicy(configured=False))
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "RequestStep":
@@ -112,7 +118,75 @@ class RequestStep:
             body=payload.get("body"),
             query_params=query_params_raw,
             timeout_seconds=timeout_seconds,
+            retry_policy=RequestRetryPolicy.from_mapping(payload.get("retry")),
         )
+
+
+@dataclass(slots=True)
+class RequestRetryPolicy:
+    configured: bool = False
+    enabled: bool | None = None
+    max_attempts: int = 3
+    backoff_seconds: float = 1.0
+    backoff_multiplier: float = 2.0
+    retry_on: tuple[str, ...] = DEFAULT_RETRY_REASONS
+    retry_on_statuses: tuple[int, ...] = ()
+    allow_retry_on_non_idempotent_methods: bool = False
+
+    @classmethod
+    def from_mapping(cls, payload: Any) -> "RequestRetryPolicy":
+        if payload is None:
+            return cls(configured=False)
+        if not isinstance(payload, dict):
+            raise ValidationError("Step field 'retry' must be an object")
+
+        enabled = _optional_bool(payload.get("enabled"), "retry.enabled")
+        max_attempts = _positive_int(payload.get("max_attempts", 3), "retry.max_attempts")
+        backoff_seconds = _non_negative_float(payload.get("backoff_seconds", 1.0), "retry.backoff_seconds")
+        backoff_multiplier = _positive_float(payload.get("backoff_multiplier", 2.0), "retry.backoff_multiplier")
+        allow_non_idempotent = _bool_value(
+            payload.get("allow_retry_on_non_idempotent_methods", False),
+            "retry.allow_retry_on_non_idempotent_methods",
+        )
+
+        retry_on_raw = payload.get("retry_on", list(DEFAULT_RETRY_REASONS))
+        retry_on = _string_tuple(retry_on_raw, "retry.retry_on")
+        unsupported_reasons = [reason for reason in retry_on if reason not in SUPPORTED_RETRY_REASONS]
+        if unsupported_reasons:
+            raise ValidationError(
+                "Step field 'retry.retry_on' contains unsupported value(s): "
+                + ", ".join(sorted(unsupported_reasons))
+            )
+
+        retry_statuses = _status_tuple(payload.get("retry_on_statuses", []), "retry.retry_on_statuses")
+
+        return cls(
+            configured=True,
+            enabled=enabled,
+            max_attempts=max_attempts,
+            backoff_seconds=backoff_seconds,
+            backoff_multiplier=backoff_multiplier,
+            retry_on=retry_on,
+            retry_on_statuses=retry_statuses,
+            allow_retry_on_non_idempotent_methods=allow_non_idempotent,
+        )
+
+    def is_enabled_for_method(self, method: str) -> bool:
+        normalized_method = method.upper()
+        if self.enabled is False:
+            return False
+        if normalized_method in SAFE_RETRY_METHODS:
+            return True if self.enabled is None else self.enabled
+        if self.enabled is True:
+            return True
+        return self.allow_retry_on_non_idempotent_methods
+
+    def source_for_method(self, method: str) -> str:
+        if not self.configured and method.upper() in SAFE_RETRY_METHODS:
+            return "default_safe_method"
+        if self.configured:
+            return "step_retry_config"
+        return "disabled_non_idempotent_method"
 
 
 @dataclass(slots=True)
@@ -135,3 +209,66 @@ class PreparedRequest:
     query_params: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: int = 30
     request_debug: dict[str, Any] = field(default_factory=dict)
+
+
+def _optional_bool(value: Any, field_name: str) -> bool | None:
+    if value is None:
+        return None
+    return _bool_value(value, field_name)
+
+
+def _bool_value(value: Any, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    raise ValidationError(f"Step field '{field_name}' must be a boolean")
+
+
+def _positive_int(value: Any, field_name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"Step field '{field_name}' must be an integer") from exc
+    if parsed <= 0:
+        raise ValidationError(f"Step field '{field_name}' must be greater than 0")
+    return parsed
+
+
+def _non_negative_float(value: Any, field_name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"Step field '{field_name}' must be a number") from exc
+    if parsed < 0:
+        raise ValidationError(f"Step field '{field_name}' must be greater than or equal to 0")
+    return parsed
+
+
+def _positive_float(value: Any, field_name: str) -> float:
+    parsed = _non_negative_float(value, field_name)
+    if parsed <= 0:
+        raise ValidationError(f"Step field '{field_name}' must be greater than 0")
+    return parsed
+
+
+def _string_tuple(value: Any, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ValidationError(f"Step field '{field_name}' must be an array")
+    return tuple(str(item).strip().lower() for item in value if str(item).strip())
+
+
+def _status_tuple(value: Any, field_name: str) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        raise ValidationError(f"Step field '{field_name}' must be an array")
+    statuses: list[int] = []
+    for item in value:
+        status = _positive_int(item, field_name)
+        if status < 100 or status > 599:
+            raise ValidationError(f"Step field '{field_name}' must contain HTTP status codes")
+        statuses.append(status)
+    return tuple(statuses)

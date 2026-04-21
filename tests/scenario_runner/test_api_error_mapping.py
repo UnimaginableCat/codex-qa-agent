@@ -141,6 +141,14 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
                             "status": "PASS",
                             "message": "ok",
                             "request_debug": api_request_debug,
+                            "retry": {
+                                "enabled": True,
+                                "attempt_count": 2,
+                                "attempts": [
+                                    {"attempt": 1, "reason": "read_timeout", "will_retry": True},
+                                    {"attempt": 2, "reason": "http_200", "will_retry": False},
+                                ],
+                            },
                         }
                     )
                     + "\n",
@@ -153,6 +161,8 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
         self.assertEqual(outcome.step_result.status, StepStatus.PASS)
         self.assertEqual(outcome.step_result.details["api_request_debug"], api_request_debug)
         self.assertEqual(outcome.journal_details["api_request_debug"], api_request_debug)
+        self.assertEqual(outcome.step_result.details["api_retry"]["attempt_count"], 2)
+        self.assertEqual(outcome.journal_details["api_retry"]["attempt_count"], 2)
 
     @staticmethod
     def _scenario(root: Path) -> ScenarioDefinition:

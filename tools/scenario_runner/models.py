@@ -39,6 +39,7 @@ class ApiStepDefinition:
     headers: dict[str, Any] = field(default_factory=dict)
     params: dict[str, Any] = field(default_factory=dict)
     body: Any = None
+    retry: dict[str, Any] | None = None
     capture: list[str] = field(default_factory=list)
     expected: list[str] = field(default_factory=list)
 

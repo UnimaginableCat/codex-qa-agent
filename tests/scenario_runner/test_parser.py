@@ -58,6 +58,57 @@ class MarkdownScenarioParserTests(unittest.TestCase):
         self.assertEqual(scenario.steps[0].api.headers["X-Note"], "## Not a section")
         self.assertEqual(scenario.steps[0].api.body["nested"]["value"], 1)
 
+    def test_api_retry_block_is_parsed_as_step_config(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = self._write_scenario(
+                Path(tmp),
+                """
+                # Scenario: Retry Config
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: duplicate position
+                Method: POST
+                Path: /positions/1/duplicate/
+                Retry:
+                  enabled: true
+                  max_attempts: 3
+                  backoff_seconds: 2
+                  backoff_multiplier: 2
+                  retry_on:
+                    - read_timeout
+                    - connect_timeout
+                    - connection_error
+                  retry_on_statuses:
+                    - 502
+                    - 503
+                    - 504
+                """,
+            )
+
+            scenario = self.parser.parse(scenario_path)
+
+        retry = scenario.steps[0].api.retry
+        self.assertEqual(
+            retry,
+            {
+                "enabled": True,
+                "max_attempts": 3,
+                "backoff_seconds": 2,
+                "backoff_multiplier": 2,
+                "retry_on": ["read_timeout", "connect_timeout", "connection_error"],
+                "retry_on_statuses": [502, 503, 504],
+            },
+        )
+
     def test_fenced_sql_block_inside_db_step_is_parsed(self) -> None:
         with TemporaryDirectory() as tmp:
             scenario_path = self._write_scenario(

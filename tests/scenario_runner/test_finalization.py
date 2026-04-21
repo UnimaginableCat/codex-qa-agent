@@ -179,6 +179,35 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
             summary.run_state_dir / "summary.json",
         )
 
+    def test_retry_metadata_is_persisted_in_summary_and_report(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            retry_outcome = self._step_outcome(
+                StepStatus.PASS,
+                message="Request executed successfully after 2 attempt(s)",
+                details={
+                    "api_retry": {
+                        "enabled": True,
+                        "attempt_count": 2,
+                        "attempts": [
+                            {"attempt": 1, "reason": "read_timeout", "will_retry": True},
+                            {"attempt": 2, "reason": "http_200", "will_retry": False},
+                        ],
+                    }
+                },
+            )
+            service = ScenarioRunnerService(
+                step_executor_factory=_FakeStepExecutorFactory([retry_outcome]),
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(self._scenario(root, with_step=True), workspace_root=root)
+            persisted_summary = json.loads((summary.run_state_dir / "summary.json").read_text(encoding="utf-8"))
+            report_content = summary.report_path.read_text(encoding="utf-8")
+
+        self.assertEqual(persisted_summary["steps"][0]["details"]["api_retry"]["attempt_count"], 2)
+        self.assertIn("Request executed successfully after 2 attempt(s)", report_content)
+
     def test_context_and_summary_omit_network_debug_details(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -247,14 +276,19 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _step_outcome(status: StepStatus) -> StepExecutionOutcome:
+    def _step_outcome(
+        status: StepStatus,
+        message: str | None = None,
+        details: dict | None = None,
+    ) -> StepExecutionOutcome:
         return StepExecutionOutcome(
             step_result=StepExecutionResult(
                 step_id="step-1",
                 step_number=1,
                 step_type=ScenarioStepType.API,
                 status=status,
-                message=f"Step ended with {status.value}",
+                message=message or f"Step ended with {status.value}",
+                details=details or {},
             ),
             tool_payload=None,
         )

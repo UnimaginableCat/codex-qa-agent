@@ -240,6 +240,7 @@ def _collect_step_placeholder_names(step) -> set[str]:
         names.update(_collect_placeholder_names(step.api.headers))
         names.update(_collect_placeholder_names(step.api.params))
         names.update(_collect_placeholder_names(step.api.body))
+        names.update(_collect_placeholder_names(step.api.retry))
     if step.db is not None:
         names.update(_collect_placeholder_names(step.db.sql))
         names.update(_collect_placeholder_names(step.db.params))

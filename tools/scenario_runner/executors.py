@@ -112,6 +112,7 @@ class _BaseStepExecutor:
                 "capture_keys": sorted(captures.keys()),
                 "tool_debug": tool_result.get("debug"),
                 "api_request_debug": payload.get("request_debug") if isinstance(payload, dict) else None,
+                "api_retry": payload.get("retry") if isinstance(payload, dict) else None,
             },
         )
 
@@ -126,6 +127,7 @@ class _BaseStepExecutor:
                 "tool_command": tool_result.get("command"),
                 "tool_debug": tool_result.get("debug"),
                 "api_request_debug": payload.get("request_debug") if isinstance(payload, dict) else None,
+                "api_retry": payload.get("retry") if isinstance(payload, dict) else None,
             },
         )
 
@@ -322,6 +324,7 @@ class ApiStepExecutor(_BaseStepExecutor):
             "headers": self._interpolator.interpolate(step.api.headers, run_context.variables),
             "query_params": self._interpolator.interpolate(step.api.params, run_context.variables),
             "body": self._interpolator.interpolate(step.api.body, run_context.variables),
+            "retry": self._interpolator.interpolate(step.api.retry, run_context.variables),
         }
 
     def _capture_rules(self, step: ScenarioStep) -> list[str]:

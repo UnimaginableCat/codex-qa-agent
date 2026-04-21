@@ -48,6 +48,7 @@ _KNOWN_STEP_FIELDS = {
     "path",
     "headers",
     "body",
+    "retry",
     "sql",
     "params",
     "capture",
@@ -430,6 +431,13 @@ class MarkdownScenarioParser:
                 fields[field_name] = self._parse_json_block(block_text, step_number, field_name)
                 continue
 
+            if field_name == "retry":
+                block_text, index = self._consume_block(lines, index + 1, step_number, field_name)
+                if inline_value and not block_text:
+                    block_text = inline_value
+                fields[field_name] = self._parse_retry_block(block_text, step_number)
+                continue
+
             if field_name == "sql":
                 block_text, index = self._consume_block(lines, index + 1, step_number, field_name)
                 sql_value = inline_value if inline_value else block_text
@@ -499,6 +507,11 @@ class MarkdownScenarioParser:
                     field_name="params",
                 ),
                 body=draft.fields.get("body"),
+                retry=self._normalize_optional_mapping(
+                    draft.fields.get("retry"),
+                    step_number=draft.step_number,
+                    field_name="retry",
+                ),
                 capture=capture,
                 expected=expected,
             )
@@ -607,6 +620,66 @@ class MarkdownScenarioParser:
                 f"Step {step_number} has invalid JSON in '{field_name}': {exc.msg}."
             ) from exc
 
+    def _parse_retry_block(self, block_text: str, step_number: int) -> dict[str, Any] | None:
+        normalized = block_text.strip()
+        if not normalized:
+            return None
+        if normalized.startswith("{"):
+            parsed = self._parse_json_block(normalized, step_number, "retry")
+            if not isinstance(parsed, dict):
+                raise ScenarioParseError(f"Step {step_number} is malformed: 'retry' must contain an object.")
+            return parsed
+
+        values: dict[str, Any] = {}
+        lines = normalized.splitlines()
+        index = 0
+        while index < len(lines):
+            stripped = lines[index].strip()
+            if not stripped:
+                index += 1
+                continue
+            if ":" not in stripped:
+                raise ScenarioParseError(
+                    f"Step {step_number} has invalid retry config at relative line {index + 1}: {stripped!r}."
+                )
+            key, raw_value = (part.strip() for part in stripped.split(":", 1))
+            if not key:
+                raise ScenarioParseError(f"Step {step_number} has invalid retry config with empty key.")
+            if raw_value:
+                values[key] = self._parse_scalar_retry_value(raw_value)
+                index += 1
+                continue
+
+            list_values: list[Any] = []
+            index += 1
+            while index < len(lines):
+                candidate = lines[index].strip()
+                if not candidate:
+                    index += 1
+                    continue
+                if not candidate.startswith("- "):
+                    break
+                list_values.append(self._parse_scalar_retry_value(candidate[2:].strip()))
+                index += 1
+            values[key] = list_values
+        return values
+
+    @staticmethod
+    def _parse_scalar_retry_value(value: str) -> Any:
+        normalized = value.strip()
+        lowered = normalized.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        if re.fullmatch(r"-?\d+", normalized):
+            return int(normalized)
+        if re.fullmatch(r"-?(?:\d+\.\d+|\d+\.|\.\d+)", normalized):
+            return float(normalized)
+        if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+            return normalized[1:-1]
+        return normalized
+
     @staticmethod
     def _parse_text(lines: list[str]) -> str:
         return "\n".join(line.strip() for line in MarkdownScenarioParser._trim_empty_lines(lines)).strip()
@@ -632,6 +705,16 @@ class MarkdownScenarioParser:
         if not isinstance(value, dict):
             raise ScenarioParseError(
                 f"Step {step_number} is malformed: '{field_name}' must contain a JSON object."
+            )
+        return value
+
+    @staticmethod
+    def _normalize_optional_mapping(value: Any, step_number: int, field_name: str) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ScenarioParseError(
+                f"Step {step_number} is malformed: '{field_name}' must contain an object."
             )
         return value
 

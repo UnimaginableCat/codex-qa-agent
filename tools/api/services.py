@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import platform
 from pathlib import Path
+import random
 import re
 import shutil
 import socket
 import subprocess
 import sys
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -20,7 +22,7 @@ from tools.common.errors import EnvFileLoadError
 
 from .auth import AuthConfigurationError, AuthStrategyFactory
 from .loaders import ApiEnvLoader, RequestStepLoader
-from .models import EnvConfig, PreparedRequest, RequestStep, ResponseData
+from .models import EnvConfig, PreparedRequest, RequestRetryPolicy, RequestStep, ResponseData
 
 
 class UrlBuilder:
@@ -69,10 +71,14 @@ class ApiRequestService:
         session: requests.Session | None = None,
         resolver=None,
         system_resolver_diagnostics: bool = True,
+        sleep_func=None,
+        jitter_func=None,
     ) -> None:
         self._session = session or requests.Session()
         self._resolver = resolver or socket.getaddrinfo
         self._system_resolver_diagnostics = system_resolver_diagnostics
+        self._sleep_func = sleep_func or time.sleep
+        self._jitter_func = jitter_func or (lambda upper_bound: random.uniform(0, upper_bound))
 
     def execute(self, step: RequestStep, prepared_request: PreparedRequest) -> ExecutionResult:
         request_debug = dict(prepared_request.request_debug or build_request_debug(prepared_request))
@@ -119,56 +125,189 @@ class ApiRequestService:
         if prepared_request.json_body is not None:
             request_kwargs["json"] = prepared_request.json_body
 
-        try:
-            response = self._session.request(step.method, prepared_request.url, **request_kwargs)
-        except requests.RequestException as exc:
-            return ExecutionResult(
-                status=StepStatus.BLOCKED,
-                message=f"Request failed: {exc}",
-                details={
-                    "method": step.method,
-                    "url": prepared_request.url,
-                    "error_type": type(exc).__name__,
-                    "classification": "connectivity",
-                    "request_debug": request_debug,
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            return ExecutionResult(
-                status=StepStatus.ERROR,
-                message=f"Runtime error: {exc}",
-                details={"method": step.method, "url": prepared_request.url, "request_debug": request_debug},
-            )
+        return self._execute_with_retry(step, prepared_request, request_kwargs, request_debug)
 
-        response_data = ResponseData(
-            http_status=response.status_code,
-            headers=dict(response.headers),
-            body=self._parse_response_body(response),
-        )
+    def _execute_with_retry(
+        self,
+        step: RequestStep,
+        prepared_request: PreparedRequest,
+        request_kwargs: dict[str, Any],
+        request_debug: dict[str, Any],
+    ) -> ExecutionResult:
+        retry_policy = step.retry_policy
+        retry_enabled = retry_policy.is_enabled_for_method(step.method)
+        max_attempts = retry_policy.max_attempts if retry_enabled else 1
+        retry_details: dict[str, Any] = {
+            "enabled": retry_enabled,
+            "policy_source": retry_policy.source_for_method(step.method),
+            "method": step.method,
+            "safe_method": step.method.upper() in {"GET", "HEAD", "OPTIONS"},
+            "max_attempts": max_attempts,
+            "retry_on": list(retry_policy.retry_on),
+            "retry_on_statuses": list(retry_policy.retry_on_statuses),
+            "attempts": [],
+        }
 
-        if response.status_code in {502, 503, 504}:
+        for attempt_number in range(1, max_attempts + 1):
+            try:
+                response = self._session.request(step.method, prepared_request.url, **request_kwargs)
+            except requests.RequestException as exc:
+                retry_reason = self._retry_reason_for_exception(exc)
+                can_retry = (
+                    retry_enabled
+                    and retry_reason in retry_policy.retry_on
+                    and attempt_number < max_attempts
+                )
+                delay = self._retry_delay_seconds(retry_policy, attempt_number) if can_retry else 0.0
+                retry_details["attempts"].append(
+                    {
+                        "attempt": attempt_number,
+                        "outcome": "exception",
+                        "reason": retry_reason or "non_retryable_request_exception",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                        "will_retry": can_retry,
+                        "next_delay_seconds": delay if can_retry else None,
+                    }
+                )
+                if can_retry:
+                    self._sleep_func(delay)
+                    continue
+                self._finalize_retry_details(retry_details, attempt_number, retry_reason or "request_exception")
+                return ExecutionResult(
+                    status=StepStatus.BLOCKED,
+                    message=(
+                        f"Request failed after {len(retry_details['attempts'])} attempt(s): "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                    details={
+                        "method": step.method,
+                        "url": prepared_request.url,
+                        "error_type": type(exc).__name__,
+                        "classification": "connectivity",
+                        "request_debug": request_debug,
+                        "retry": retry_details,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                retry_details["attempts"].append(
+                    {
+                        "attempt": attempt_number,
+                        "outcome": "runtime_error",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                        "will_retry": False,
+                        "next_delay_seconds": None,
+                    }
+                )
+                self._finalize_retry_details(retry_details, attempt_number, "runtime_error")
+                return ExecutionResult(
+                    status=StepStatus.ERROR,
+                    message=f"Runtime error after {len(retry_details['attempts'])} attempt(s): {exc}",
+                    details={
+                        "method": step.method,
+                        "url": prepared_request.url,
+                        "request_debug": request_debug,
+                        "retry": retry_details,
+                    },
+                )
+
+            response_data = ResponseData(
+                http_status=response.status_code,
+                headers=dict(response.headers),
+                body=self._parse_response_body(response),
+            )
+            retry_reason = f"http_{response.status_code}"
+            can_retry = (
+                retry_enabled
+                and response.status_code in retry_policy.retry_on_statuses
+                and attempt_number < max_attempts
+            )
+            delay = self._retry_delay_seconds(retry_policy, attempt_number) if can_retry else 0.0
+            retry_details["attempts"].append(
+                {
+                    "attempt": attempt_number,
+                    "outcome": "response",
+                    "http_status": response.status_code,
+                    "reason": retry_reason,
+                    "will_retry": can_retry,
+                    "next_delay_seconds": delay if can_retry else None,
+                }
+            )
+            if can_retry:
+                self._sleep_func(delay)
+                continue
+
+            self._finalize_retry_details(retry_details, attempt_number, retry_reason)
+            if response.status_code in {502, 503, 504}:
+                return ExecutionResult(
+                    status=StepStatus.BLOCKED,
+                    message=(
+                        f"Remote service unavailable after {len(retry_details['attempts'])} attempt(s): "
+                        f"HTTP {response.status_code}"
+                    ),
+                    details={
+                        "method": step.method,
+                        "url": prepared_request.url,
+                        "response": response_data,
+                        "classification": "service_unavailable",
+                        "request_debug": request_debug,
+                        "retry": retry_details,
+                    },
+                )
+
+            success_message = "Request executed successfully"
+            if len(retry_details["attempts"]) > 1:
+                success_message += f" after {len(retry_details['attempts'])} attempt(s)"
             return ExecutionResult(
-                status=StepStatus.BLOCKED,
-                message=f"Remote service unavailable: HTTP {response.status_code}",
+                status=StepStatus.PASS,
+                message=success_message,
                 details={
                     "method": step.method,
                     "url": prepared_request.url,
                     "response": response_data,
-                    "classification": "service_unavailable",
                     "request_debug": request_debug,
+                    "retry": retry_details,
                 },
             )
 
+        self._finalize_retry_details(retry_details, len(retry_details["attempts"]), "attempts_exhausted")
         return ExecutionResult(
-            status=StepStatus.PASS,
-            message="Request executed successfully",
+            status=StepStatus.BLOCKED,
+            message=f"Request failed after {len(retry_details['attempts'])} attempt(s): attempts exhausted",
             details={
                 "method": step.method,
                 "url": prepared_request.url,
-                "response": response_data,
+                "classification": "connectivity",
                 "request_debug": request_debug,
+                "retry": retry_details,
             },
         )
+
+    def _retry_delay_seconds(self, retry_policy: RequestRetryPolicy, attempt_number: int) -> float:
+        base_delay = retry_policy.backoff_seconds * (retry_policy.backoff_multiplier ** (attempt_number - 1))
+        if base_delay <= 0:
+            return 0.0
+        jitter_cap = min(base_delay * 0.1, 0.25)
+        return round(base_delay + self._jitter_func(jitter_cap), 3)
+
+    @staticmethod
+    def _finalize_retry_details(retry_details: dict[str, Any], attempt_number: int, final_reason: str) -> None:
+        retry_details["attempt_count"] = len(retry_details["attempts"])
+        retry_details["final_attempt"] = attempt_number
+        retry_details["final_reason"] = final_reason
+
+    @staticmethod
+    def _retry_reason_for_exception(exc: requests.RequestException) -> str | None:
+        read_timeout_type = getattr(requests, "ReadTimeout", None)
+        connect_timeout_type = getattr(requests, "ConnectTimeout", None)
+        if read_timeout_type is not None and isinstance(exc, read_timeout_type):
+            return "read_timeout"
+        if connect_timeout_type is not None and isinstance(exc, connect_timeout_type):
+            return "connect_timeout"
+        if isinstance(exc, requests.ConnectionError):
+            return "connection_error"
+        return None
 
     def _precheck_connectivity(self, request_debug: dict[str, Any]) -> dict[str, Any]:
         hostname = request_debug.get("parsed_hostname")
