@@ -171,6 +171,68 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         self.assertEqual(results[1].status, StepStatus.FAIL)
         self.assertEqual(results[2].status, StepStatus.PASS)
 
+    def test_api_equality_preserves_typed_rhs_placeholders(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {
+                    "id": 1929526,
+                    "cost_price": 5900.0,
+                    "is_hidden": False,
+                    "current_specification_import": None,
+                },
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    "response id = {{source_position_id}}",
+                    "response `id` = `{{source_position_id}}`",
+                    "response cost_price = {{expected_cost_price}}",
+                    "response is_hidden = {{expected_hidden}}",
+                    "response current_specification_import = {{expected_nullable}}",
+                ]
+            ),
+            payload,
+            variables={
+                "source_position_id": 1929526,
+                "expected_cost_price": 5900.0,
+                "expected_hidden": False,
+                "expected_nullable": None,
+            },
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
+    def test_api_quoted_placeholder_remains_explicit_string(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {
+                    "id": 1929526,
+                    "name": "Michelin",
+                },
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    'response id = "{{source_position_id}}"',
+                    'response name = "{{brand_name}}"',
+                ]
+            ),
+            payload,
+            variables={
+                "source_position_id": 1929526,
+                "brand_name": "Michelin",
+            },
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+        self.assertEqual(results[1].status, StepStatus.PASS)
+
     def test_api_supported_array_expectations(self) -> None:
         payload = {
             "response": {

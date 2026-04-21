@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from numbers import Number
 import re
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 from tools.common.errors import ValidationError
 from tools.common.statuses import StepStatus
 
-from .interpolator import InterpolationError, PlaceholderInterpolator
+from .interpolator import EXACT_PLACEHOLDER_PATTERN, InterpolationError, PlaceholderInterpolator
 from .models import ExpectationCheckResult, ScenarioStep, ScenarioStepType
 from .path_lookup import PathLookupResult as _PathLookupResult
 from .path_lookup import resolve_path
@@ -55,6 +56,7 @@ class ScenarioStepValidator:
         if not expectations:
             return []
 
+        raw_expectations = list(expectations)
         if variables is not None:
             interpolated_expectations: list[str] = []
             for expectation in expectations:
@@ -71,7 +73,15 @@ class ScenarioStepValidator:
             expectations = interpolated_expectations
 
         if step.step_type == ScenarioStepType.API:
-            return [self._validate_api_expectation(expectation, tool_payload) for expectation in expectations]
+            return [
+                self._validate_api_expectation(
+                    expectation,
+                    tool_payload,
+                    variables=variables,
+                    raw_expectation=raw_expectations[index],
+                )
+                for index, expectation in enumerate(expectations)
+            ]
         return [self._validate_db_expectation(expectation, tool_payload) for expectation in expectations]
 
     @staticmethod
@@ -84,6 +94,8 @@ class ScenarioStepValidator:
         self,
         expectation: str,
         tool_payload: dict[str, Any],
+        variables: dict[str, Any] | None = None,
+        raw_expectation: str | None = None,
     ) -> ExpectationCheckResult:
         response = tool_payload.get("response")
         response_body = response.get("body") if isinstance(response, dict) else None
@@ -144,7 +156,8 @@ class ScenarioStepValidator:
 
         if match := _RESPONSE_EQUALS_RE.fullmatch(expectation):
             field_path = self._parse_field_path(match.group(1))
-            expected_value = self._parse_literal(match.group(2))
+            raw_rhs = self._raw_api_equals_rhs(raw_expectation)
+            expected_value = self._parse_api_expected_value(match.group(2), raw_rhs, variables)
             lookup = self._try_get_path(response_body, field_path)
             return self._result(
                 expectation,
@@ -294,6 +307,34 @@ class ScenarioStepValidator:
         if re.fullmatch(r"-?(?:\d+\.\d+|\d+\.|\.\d+)(?:[eE][+-]?\d+)?|-?\d+[eE][+-]?\d+", normalized):
             return float(normalized)
         return normalized
+
+    @classmethod
+    def _parse_api_expected_value(
+        cls,
+        interpolated_raw_value: str,
+        raw_value: str | None,
+        variables: dict[str, Any] | None,
+    ) -> Any:
+        if raw_value is not None and variables is not None:
+            variable_name = cls._typed_placeholder_variable_name(raw_value)
+            if variable_name is not None and variable_name in variables:
+                return deepcopy(variables[variable_name])
+        return cls._parse_literal(interpolated_raw_value)
+
+    @staticmethod
+    def _typed_placeholder_variable_name(raw_value: str) -> str | None:
+        normalized = raw_value.strip()
+        if len(normalized) >= 2 and normalized[0] == normalized[-1] == "`":
+            normalized = normalized[1:-1].strip()
+        match = EXACT_PLACEHOLDER_PATTERN.fullmatch(normalized)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _raw_api_equals_rhs(raw_expectation: str | None) -> str | None:
+        if raw_expectation is None:
+            return None
+        match = _RESPONSE_EQUALS_RE.fullmatch(raw_expectation)
+        return match.group(2) if match else None
 
     @classmethod
     def _values_equal(cls, actual_value: Any, expected_value: Any) -> bool:
