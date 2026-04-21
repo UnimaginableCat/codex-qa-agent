@@ -108,6 +108,69 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
 
+    def test_api_scalar_equality_parses_unquoted_rhs_as_typed_literals(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {
+                    "id": 1929525,
+                    "cost_price": 4200.0,
+                    "is_hidden": False,
+                    "current_specification_import": None,
+                    "unit": {"id": 27},
+                    "attributes": [
+                        {"option": {"id": 1}},
+                        {"option": {"id": 2}},
+                        {"option": {"id": 3}},
+                        {"option": {"id": 16}},
+                    ],
+                },
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    "response id = 1929525",
+                    "response cost_price = 4200.0",
+                    "response is_hidden = false",
+                    "response current_specification_import = null",
+                    "response unit.id = 27",
+                    "response attributes[3].option.id = 16",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
+    def test_api_quoted_scalar_equality_remains_string_strict(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {
+                    "id": 1929525,
+                    "is_hidden": False,
+                    "name": "Michelin",
+                },
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    'response id = "1929525"',
+                    'response is_hidden = "false"',
+                    'response name = "Michelin"',
+                ]
+            ),
+            payload,
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+        self.assertEqual(results[1].status, StepStatus.FAIL)
+        self.assertEqual(results[2].status, StepStatus.PASS)
+
     def test_api_supported_array_expectations(self) -> None:
         payload = {
             "response": {

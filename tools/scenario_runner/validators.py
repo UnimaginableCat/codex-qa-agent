@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from numbers import Number
 import re
 from typing import Any
 
@@ -296,8 +297,11 @@ class ScenarioStepValidator:
 
     @classmethod
     def _values_equal(cls, actual_value: Any, expected_value: Any) -> bool:
-        normalized_actual = cls._parse_literal(actual_value) if isinstance(actual_value, str) else actual_value
-        return normalized_actual == expected_value
+        if isinstance(actual_value, bool) or isinstance(expected_value, bool):
+            return type(actual_value) is bool and type(expected_value) is bool and actual_value == expected_value
+        if isinstance(actual_value, Number) and isinstance(expected_value, Number):
+            return actual_value == expected_value
+        return actual_value == expected_value
 
     @classmethod
     def _parse_field_path(cls, raw_field_path: str) -> str:
