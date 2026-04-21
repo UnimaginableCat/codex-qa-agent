@@ -9,10 +9,11 @@ from typing import Any
 from tools.common.errors import ValidationError
 from tools.common.statuses import StepStatus
 
+from .interpolator import InterpolationError, PlaceholderInterpolator
 from .models import ExpectationCheckResult, ScenarioStep, ScenarioStepType
 
 _HTTP_EXPECTATION_RE = re.compile(r"^\s*HTTP\s+(\d{3})(?:\s+or\s+HTTP\s+(\d{3}))?\s*$", re.IGNORECASE)
-_RESPONSE_CONTAINS_FIELD_RE = re.compile(r"^\s*response\s+contains\s+field\s+(.+?)\s*$", re.IGNORECASE)
+_RESPONSE_CONTAINS_FIELD_RE = re.compile(r"^\s*response\s+contains(?:\s+field)?\s+(.+?)\s*$", re.IGNORECASE)
 _RESPONSE_EQUALS_RE = re.compile(r"^\s*response\s+(.+?)\s*=\s*(.+?)\s*$", re.IGNORECASE)
 _RESPONSE_NOT_NULL_RE = re.compile(r"^\s*response\s+(.+?)\s+is\s+not\s+null\s*$", re.IGNORECASE)
 _ARRAY_CONTAINS_RE = re.compile(
@@ -45,10 +46,33 @@ class _PathLookupResult:
 class ScenarioStepValidator:
     """Validates parsed expectation strings against structured tool payloads."""
 
-    def validate(self, step: ScenarioStep, tool_payload: dict[str, Any]) -> list[ExpectationCheckResult]:
+    def __init__(self, interpolator: PlaceholderInterpolator | None = None) -> None:
+        self._interpolator = interpolator or PlaceholderInterpolator()
+
+    def validate(
+        self,
+        step: ScenarioStep,
+        tool_payload: dict[str, Any],
+        variables: dict[str, Any] | None = None,
+    ) -> list[ExpectationCheckResult]:
         expectations = self._expectations(step)
         if not expectations:
             return []
+
+        if variables is not None:
+            interpolated_expectations: list[str] = []
+            for expectation in expectations:
+                try:
+                    interpolated_expectations.append(str(self._interpolator.interpolate(expectation, variables)))
+                except InterpolationError as exc:
+                    return [
+                        ExpectationCheckResult(
+                            rule=expectation,
+                            status=StepStatus.BLOCKED,
+                            detail=f"Expectation interpolation failed: {exc}",
+                        )
+                    ]
+            expectations = interpolated_expectations
 
         if step.step_type == ScenarioStepType.API:
             return [self._validate_api_expectation(expectation, tool_payload) for expectation in expectations]

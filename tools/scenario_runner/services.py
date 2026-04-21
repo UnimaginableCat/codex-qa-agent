@@ -203,9 +203,16 @@ class ScenarioRunnerService:
             except Exception as exc:  # noqa: BLE001
                 outcome = self._build_step_execution_error(step, exc)
 
+            if outcome.step_result.status == StepStatus.PASS and outcome.captured_values:
+                run_context.variables.update(outcome.captured_values)
+
             if outcome.step_result.status == StepStatus.PASS and outcome.tool_payload is not None:
                 try:
-                    expectation_results = self._step_validator.validate(step, outcome.tool_payload)
+                    expectation_results = self._step_validator.validate(
+                        step,
+                        outcome.tool_payload,
+                        variables=run_context.variables,
+                    )
                     outcome.step_result.expectation_results.extend(expectation_results)
                     validation_status = self._step_validator.final_status(expectation_results)
                     if validation_status != StepStatus.PASS:
@@ -226,7 +233,8 @@ class ScenarioRunnerService:
                     outcome.step_result.message = f"Expectation validation failed: {exc}"
 
             run_context.step_results.append(outcome.step_result)
-            run_context.variables.update(outcome.captured_values)
+            if outcome.captured_values:
+                run_context.variables.update(outcome.captured_values)
             if not self._try_write_context(run_context, tooling_issues, finalization_statuses):
                 break
 
@@ -267,6 +275,7 @@ class ScenarioRunnerService:
                 deferred_blocked_result = self._build_deferred_capture_blocked_result(
                     failed_step=step,
                     future_steps=scenario_definition.steps[step_index + 1 :],
+                    available_variables=run_context.variables,
                 )
                 if deferred_blocked_result is not None:
                     run_context.step_results.append(deferred_blocked_result)
@@ -478,8 +487,9 @@ class ScenarioRunnerService:
         cls,
         failed_step: ScenarioStep,
         future_steps: list[ScenarioStep],
+        available_variables: dict,
     ) -> StepExecutionResult | None:
-        failed_capture_names = cls._capture_variable_names(failed_step)
+        failed_capture_names = cls._capture_variable_names(failed_step) - set(available_variables)
         if not failed_capture_names:
             return None
 

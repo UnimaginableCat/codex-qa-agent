@@ -215,6 +215,7 @@ class ScenarioVariableTests(unittest.TestCase):
 
         self.assertEqual(summary.final_status, StepStatus.PASS)
         self.assertEqual(executor.execute_count, 2)
+        self.assertTrue(all(result.status == StepStatus.PASS for result in summary.steps[0].expectation_results))
         self.assertEqual(executor.step_payloads[0]["path"], "/companies/company-capture/price-lists")
         self.assertEqual(executor.step_payloads[1]["path"], "/price-lists/123")
         self.assertFalse(any(step.details.get("phase") == "initial_context" for step in summary.steps))
@@ -226,6 +227,7 @@ class ScenarioVariableTests(unittest.TestCase):
             executor = _CapturingExecutorFactory(tool_results=[self._api_result({"ok": True})])
             scenario = self._captured_variable_scenario(root)
             scenario.steps[0].api.capture = []
+            scenario.steps[0].api.expected = []
             service = ScenarioRunnerService(
                 step_executor_factory=executor,
                 preflight_checker=_PassingPreflightChecker(),
@@ -343,6 +345,10 @@ class ScenarioVariableTests(unittest.TestCase):
     def _captured_variable_scenario(cls, root: Path) -> ScenarioDefinition:
         scenario = cls._scenario(root)
         scenario.steps[0].api.capture = ["response.body.id -> price_list_id"]
+        scenario.steps[0].api.expected = [
+            "response contains id",
+            "response id = {{price_list_id}}",
+        ]
         scenario.steps.append(
             ScenarioStep(
                 step_id="step-2",

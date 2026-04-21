@@ -24,6 +24,7 @@ class ScenarioStepValidatorTests(unittest.TestCase):
                     "name": "abc",
                     "sort_order": 0,
                     "root_category_id": 10,
+                    "default_measurement_unit": "pcs",
                     "root": {"id": 123},
                     "items": [{"id": 123}],
                 },
@@ -35,6 +36,9 @@ class ScenarioStepValidatorTests(unittest.TestCase):
                 [
                     "HTTP 200",
                     "response JSON exists",
+                    "response contains id",
+                    "response contains root_category_id",
+                    "response contains default_measurement_unit",
                     "response contains field id",
                     "response contains field `id`",
                     'response name = "abc"',
@@ -45,6 +49,34 @@ class ScenarioStepValidatorTests(unittest.TestCase):
                 ]
             ),
             payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
+    def test_api_expectation_placeholders_are_interpolated_before_validation(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 201,
+                "body": {
+                    "id": 321,
+                    "name": "AUTOTEST Attributes Flow run-123",
+                },
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    "HTTP 201",
+                    "response id = {{price_list_id}}",
+                    "response name = {{generated_price_list_name}}",
+                ]
+            ),
+            payload,
+            variables={
+                "price_list_id": 321,
+                "generated_price_list_name": "AUTOTEST Attributes Flow run-123",
+            },
         )
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
