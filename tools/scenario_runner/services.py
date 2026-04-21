@@ -19,7 +19,7 @@ from .models import RunContext, ScenarioDefinition, ScenarioExecutionSummary, Sc
 from .preflight import PreflightCheckResult, ScenarioPreflightChecker
 from .summary import build_scenario_summary
 from .validators import ExpectationValidationError, ScenarioStepValidator
-from .variables import VariableResolutionError, build_initial_variables
+from .variables import VariableResolutionError, build_initial_variables, resolve_step_variables
 
 
 class ScenarioRunnerService:
@@ -187,10 +187,19 @@ class ScenarioRunnerService:
                 preflight_checks=preflight_checks,
             )
 
-        for step in scenario_definition.steps:
+        for step_index, step in enumerate(scenario_definition.steps):
             try:
+                step_variables = resolve_step_variables(run_context, scenario_definition, step)
+                run_context.variables = step_variables.variables
+                self._extend_unique(tooling_issues, step_variables.warnings)
                 step_executor = self._step_executor_factory.create(step, run_context.workspace_root)
                 outcome = step_executor.execute(run_context, scenario_definition, step)
+            except VariableResolutionError as exc:
+                self._extend_unique(tooling_issues, exc.warnings)
+                outcome = StepExecutionOutcome(
+                    step_result=self._build_step_variable_blocked_result(step, exc),
+                    journal_details={"phase": "step_variable_resolution"},
+                )
             except Exception as exc:  # noqa: BLE001
                 outcome = self._build_step_execution_error(step, exc)
 
@@ -255,6 +264,13 @@ class ScenarioRunnerService:
                 break
 
             if outcome.step_result.status != StepStatus.PASS:
+                deferred_blocked_result = self._build_deferred_capture_blocked_result(
+                    failed_step=step,
+                    future_steps=scenario_definition.steps[step_index + 1 :],
+                )
+                if deferred_blocked_result is not None:
+                    run_context.step_results.append(deferred_blocked_result)
+                    self._try_write_context(run_context, tooling_issues, finalization_statuses)
                 break
 
         return self._finalize_run(
@@ -441,6 +457,88 @@ class ScenarioRunnerService:
         )
 
     @staticmethod
+    def _build_step_variable_blocked_result(
+        step: ScenarioStep,
+        exc: VariableResolutionError,
+    ) -> StepExecutionResult:
+        return StepExecutionResult(
+            step_id=step.step_id,
+            step_number=step.step_number,
+            step_type=step.step_type,
+            status=StepStatus.BLOCKED,
+            message=f"Step variable resolution blocked: {exc}",
+            details={
+                "phase": "step_variable_resolution",
+                "unresolved_variables": list(exc.unresolved_variables),
+            },
+        )
+
+    @classmethod
+    def _build_deferred_capture_blocked_result(
+        cls,
+        failed_step: ScenarioStep,
+        future_steps: list[ScenarioStep],
+    ) -> StepExecutionResult | None:
+        failed_capture_names = cls._capture_variable_names(failed_step)
+        if not failed_capture_names:
+            return None
+
+        for future_step in future_steps:
+            future_placeholders = cls._step_placeholder_names(future_step)
+            missing_capture_names = sorted(failed_capture_names & future_placeholders)
+            if not missing_capture_names:
+                continue
+            return StepExecutionResult(
+                step_id=future_step.step_id,
+                step_number=future_step.step_number,
+                step_type=future_step.step_type,
+                status=StepStatus.BLOCKED,
+                message=(
+                    f"Step blocked because required captured variable(s) were not produced by "
+                    f"{failed_step.step_id}: {', '.join(missing_capture_names)}."
+                ),
+                details={
+                    "phase": "deferred_capture",
+                    "producer_step_id": failed_step.step_id,
+                    "unresolved_variables": missing_capture_names,
+                },
+            )
+        return None
+
+    @staticmethod
+    def _capture_variable_names(step: ScenarioStep) -> set[str]:
+        capture_rules = []
+        if step.api is not None:
+            capture_rules.extend(step.api.capture)
+        if step.db is not None:
+            capture_rules.extend(step.db.capture)
+
+        variable_names: set[str] = set()
+        for capture_rule in capture_rules:
+            if "->" not in capture_rule:
+                continue
+            variable_name = capture_rule.split("->", 1)[1].strip()
+            if variable_name:
+                variable_names.add(variable_name)
+        return variable_names
+
+    @staticmethod
+    def _step_placeholder_names(step: ScenarioStep) -> set[str]:
+        from .variables import _collect_placeholder_names
+
+        names: set[str] = set()
+        if step.api is not None:
+            names.update(_collect_placeholder_names(step.api.method))
+            names.update(_collect_placeholder_names(step.api.path))
+            names.update(_collect_placeholder_names(step.api.headers))
+            names.update(_collect_placeholder_names(step.api.params))
+            names.update(_collect_placeholder_names(step.api.body))
+        if step.db is not None:
+            names.update(_collect_placeholder_names(step.db.sql))
+            names.update(_collect_placeholder_names(step.db.params))
+        return names
+
+    @staticmethod
     def _record_finalization_error(
         tooling_issues: list[str],
         finalization_statuses: list[StepStatus],
@@ -468,6 +566,14 @@ class ScenarioRunnerService:
                 exc=exc,
             )
             return False
+
+    @staticmethod
+    def _extend_unique(target: list[str], values: list[str]) -> None:
+        existing = set(target)
+        for value in values:
+            if value not in existing:
+                target.append(value)
+                existing.add(value)
 
     def _try_write_context(
         self,

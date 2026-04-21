@@ -193,8 +193,78 @@ class ScenarioVariableTests(unittest.TestCase):
         self.assertEqual(executor.execute_count, 0)
         self.assertEqual(summary.steps[0].status, StepStatus.BLOCKED)
         self.assertIn("missing_variable", summary.steps[0].message)
-        self.assertEqual(summary.steps[0].details["phase"], "initial_context")
+        self.assertEqual(summary.steps[0].details["phase"], "step_variable_resolution")
         self.assertIn("missing_variable", summary.steps[0].details["unresolved_variables"])
+
+    def test_later_step_can_use_variable_captured_by_step_one_without_initial_block(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "COMPANY_GUID=company-capture\n")
+            executor = _CapturingExecutorFactory(
+                tool_results=[
+                    self._api_result({"id": 123}),
+                    self._api_result({"ok": True}),
+                ]
+            )
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(self._captured_variable_scenario(root), workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.execute_count, 2)
+        self.assertEqual(executor.step_payloads[0]["path"], "/companies/company-capture/price-lists")
+        self.assertEqual(executor.step_payloads[1]["path"], "/price-lists/123")
+        self.assertFalse(any(step.details.get("phase") == "initial_context" for step in summary.steps))
+
+    def test_later_step_placeholder_is_deferred_until_that_step_is_active(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "COMPANY_GUID=company-deferred\n")
+            executor = _CapturingExecutorFactory(tool_results=[self._api_result({"ok": True})])
+            scenario = self._captured_variable_scenario(root)
+            scenario.steps[0].api.capture = []
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.BLOCKED)
+        self.assertEqual(executor.execute_count, 1)
+        self.assertEqual(summary.steps[0].status, StepStatus.PASS)
+        self.assertEqual(summary.steps[1].status, StepStatus.BLOCKED)
+        self.assertEqual(summary.steps[1].details["phase"], "step_variable_resolution")
+        self.assertIn("price_list_id", summary.steps[1].details["unresolved_variables"])
+
+    def test_failed_producer_marks_dependent_future_step_blocked_not_initial_preflight(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "COMPANY_GUID=company-fail\n")
+            executor = _CapturingExecutorFactory(
+                tool_results=[
+                    {
+                        "status": StepStatus.FAIL.value,
+                        "message": "create failed",
+                        "response": {"http_status": 500, "body": {}},
+                    }
+                ]
+            )
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(self._captured_variable_scenario(root), workspace_root=root)
+
+        self.assertEqual(executor.execute_count, 1)
+        self.assertEqual(summary.steps[0].status, StepStatus.FAIL)
+        self.assertEqual(summary.steps[1].status, StepStatus.BLOCKED)
+        self.assertEqual(summary.steps[1].details["phase"], "deferred_capture")
+        self.assertIn("price_list_id", summary.steps[1].details["unresolved_variables"])
 
     @staticmethod
     def _scenario(
@@ -243,6 +313,32 @@ class ScenarioVariableTests(unittest.TestCase):
             ],
         )
 
+    @classmethod
+    def _captured_variable_scenario(cls, root: Path) -> ScenarioDefinition:
+        scenario = cls._scenario(root)
+        scenario.steps[0].api.capture = ["response.body.id -> price_list_id"]
+        scenario.steps.append(
+            ScenarioStep(
+                step_id="step-2",
+                step_number=2,
+                title="read price list",
+                step_type=ScenarioStepType.API,
+                api=ApiStepDefinition(
+                    method="GET",
+                    path="/price-lists/{{price_list_id}}",
+                ),
+            )
+        )
+        return scenario
+
+    @staticmethod
+    def _api_result(body: dict) -> dict:
+        return {
+            "status": StepStatus.PASS.value,
+            "message": "ok",
+            "response": {"http_status": 200, "body": body},
+        }
+
     @staticmethod
     def _prepare_env(root: Path, content: str) -> None:
         (root / "env").mkdir(parents=True, exist_ok=True)
@@ -257,13 +353,33 @@ class ScenarioVariableTests(unittest.TestCase):
 
 
 class _CapturingExecutorFactory:
-    def __init__(self) -> None:
+    def __init__(self, tool_results: list[dict] | None = None) -> None:
         self.execute_count = 0
         self.step_payload: dict | None = None
+        self.step_payloads: list[dict] = []
         self.run_variables: dict | None = None
+        self._tool_results = list(
+            tool_results
+            or [
+                {
+                    "status": StepStatus.PASS.value,
+                    "message": "ok",
+                    "response": {"http_status": 200, "body": {"ok": True}},
+                }
+            ]
+        )
 
     def create(self, step: ScenarioStep, workspace_root: Path) -> "_CapturingApiStepExecutor":
         return _CapturingApiStepExecutor(workspace_root, self)
+
+    def next_tool_result(self) -> dict:
+        if self._tool_results:
+            return self._tool_results.pop(0)
+        return {
+            "status": StepStatus.PASS.value,
+            "message": "ok",
+            "response": {"http_status": 200, "body": {"ok": True}},
+        }
 
 
 class _CapturingApiStepExecutor(ApiStepExecutor):
@@ -278,16 +394,13 @@ class _CapturingApiStepExecutor(ApiStepExecutor):
 
     def _invoke_cli(self, env_path: Path, step_file: Path) -> dict:
         self._owner.step_payload = json.loads(step_file.read_text(encoding="utf-8"))
+        self._owner.step_payloads.append(self._owner.step_payload)
         return {
             "command": ["test-api"],
             "returncode": 0,
             "stdout": "",
             "stderr": "",
-            "result": {
-                "status": StepStatus.PASS.value,
-                "message": "ok",
-                "response": {"http_status": 200, "body": {"ok": True}},
-            },
+            "result": self._owner.next_tool_result(),
         }
 
 

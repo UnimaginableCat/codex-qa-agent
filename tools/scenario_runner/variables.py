@@ -49,7 +49,48 @@ def build_initial_variables(
     dotenv_loader: EnvValueLoader | None = None,
     interpolator: PlaceholderInterpolator | None = None,
 ) -> InitialVariableResolution:
-    """Build initial execution context using best-effort variable fallbacks."""
+    """Build initial context using only variables needed before the first step."""
+
+    first_step = scenario_definition.steps[0] if scenario_definition.steps else None
+    required_placeholders = _collect_step_placeholder_names(first_step) if first_step is not None else set()
+    return _resolve_variables(
+        run_context=run_context,
+        scenario_definition=scenario_definition,
+        required_placeholders=required_placeholders,
+        enforce_required=False,
+        dotenv_loader=dotenv_loader,
+        interpolator=interpolator,
+    )
+
+
+def resolve_step_variables(
+    run_context: RunContext,
+    scenario_definition: ScenarioDefinition,
+    step,
+    dotenv_loader: EnvValueLoader | None = None,
+    interpolator: PlaceholderInterpolator | None = None,
+) -> InitialVariableResolution:
+    """Resolve placeholders required by the current step from current context."""
+
+    return _resolve_variables(
+        run_context=run_context,
+        scenario_definition=scenario_definition,
+        required_placeholders=_collect_step_placeholder_names(step),
+        enforce_required=True,
+        dotenv_loader=dotenv_loader,
+        interpolator=interpolator,
+    )
+
+
+def _resolve_variables(
+    run_context: RunContext,
+    scenario_definition: ScenarioDefinition,
+    required_placeholders: set[str],
+    enforce_required: bool,
+    dotenv_loader: EnvValueLoader | None,
+    interpolator: PlaceholderInterpolator | None,
+) -> InitialVariableResolution:
+    """Resolve required placeholders without sweeping the full scenario."""
 
     definitions = list(scenario_definition.variables)
     resolved: dict[str, Any] = dict(run_context.variables)
@@ -57,7 +98,6 @@ def build_initial_variables(
     env_values: dict[str, str | None] | None = None
     env_loaded = False
     placeholder_interpolator = interpolator or PlaceholderInterpolator()
-    required_placeholders = _collect_required_step_placeholders(scenario_definition)
     template_dependencies = _collect_template_dependency_placeholders(definitions)
     for fallback_name, template_value in _GENERATED_TEMPLATE_FALLBACKS.items():
         if fallback_name in required_placeholders:
@@ -130,6 +170,7 @@ def build_initial_variables(
             resolved,
             placeholder_interpolator,
             required_placeholders,
+            enforce_required,
             warnings,
         )
         if template_value is not None:
@@ -144,18 +185,24 @@ def build_initial_variables(
             resolved,
             placeholder_interpolator,
             required_placeholders,
+            enforce_required,
             warnings,
         )
         if fallback_value is not None:
             resolved[name] = fallback_value
 
     unresolved_required = sorted(name for name in required_placeholders if name not in resolved)
-    if unresolved_required:
+    if unresolved_required and enforce_required:
         raise VariableResolutionError(
             "Required placeholders could not be resolved after Variables, env, generated, and template "
             f"fallbacks: {', '.join(unresolved_required)}.",
             unresolved_variables=unresolved_required,
             warnings=warnings,
+        )
+    if unresolved_required:
+        warnings.append(
+            "Initial context deferred unresolved placeholder(s) until step execution: "
+            f"{', '.join(unresolved_required)}."
         )
 
     return InitialVariableResolution(variables=resolved, warnings=warnings)
@@ -167,6 +214,7 @@ def _resolve_template_variable(
     resolved: dict[str, Any],
     interpolator: PlaceholderInterpolator,
     required_placeholders: set[str],
+    enforce_required: bool,
     warnings: list[str],
 ) -> Any | None:
     try:
@@ -175,7 +223,7 @@ def _resolve_template_variable(
         missing_names = sorted(dict.fromkeys(exc.placeholder_names))
         message = f"Variable '{name}' could not be derived because {', '.join(missing_names)} is unresolved."
         warnings.append(message)
-        if name in required_placeholders:
+        if name in required_placeholders and enforce_required:
             raise VariableResolutionError(
                 message,
                 unresolved_variables=[name, *missing_names],
@@ -184,18 +232,17 @@ def _resolve_template_variable(
     return None
 
 
-def _collect_required_step_placeholders(scenario_definition: ScenarioDefinition) -> set[str]:
+def _collect_step_placeholder_names(step) -> set[str]:
     names: set[str] = set()
-    for step in scenario_definition.steps:
-        if step.api is not None:
-            names.update(_collect_placeholder_names(step.api.method))
-            names.update(_collect_placeholder_names(step.api.path))
-            names.update(_collect_placeholder_names(step.api.headers))
-            names.update(_collect_placeholder_names(step.api.params))
-            names.update(_collect_placeholder_names(step.api.body))
-        if step.db is not None:
-            names.update(_collect_placeholder_names(step.db.sql))
-            names.update(_collect_placeholder_names(step.db.params))
+    if step.api is not None:
+        names.update(_collect_placeholder_names(step.api.method))
+        names.update(_collect_placeholder_names(step.api.path))
+        names.update(_collect_placeholder_names(step.api.headers))
+        names.update(_collect_placeholder_names(step.api.params))
+        names.update(_collect_placeholder_names(step.api.body))
+    if step.db is not None:
+        names.update(_collect_placeholder_names(step.db.sql))
+        names.update(_collect_placeholder_names(step.db.params))
     return names
 
 
