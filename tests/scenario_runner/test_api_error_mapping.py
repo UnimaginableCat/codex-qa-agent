@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -43,6 +46,44 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
         self.assertEqual(summary.steps[0].status, StepStatus.ERROR)
         self.assertIn("executor wrapper broke", summary.steps[0].message)
 
+    def test_local_tool_subprocess_uses_parent_interpreter_env_and_workspace_cwd(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = _InspectableApiStepExecutor(root)
+            captured = {}
+
+            def fake_run(command, **kwargs):
+                captured["command"] = command
+                captured["kwargs"] = kwargs
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout='{"status": "PASS", "message": "ok"}\n',
+                    stderr="",
+                )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "VIRTUAL_ENV": str(root / ".venv"),
+                    "PATH": f"{root / '.venv' / 'bin'}{os.pathsep}existing-path",
+                    "HTTP_PROXY": "http://proxy.local:8080",
+                    "HTTPS_PROXY": "https://proxy.local:8443",
+                    "NO_PROXY": "localhost,127.0.0.1",
+                },
+            ):
+                with patch("tools.scenario_runner.executors.subprocess.run", side_effect=fake_run):
+                    result = executor.invoke_cli_for_test(root / "env" / "demo.env", root / "step.json")
+
+        self.assertEqual(captured["command"][0], sys.executable)
+        self.assertEqual(captured["kwargs"]["cwd"], root)
+        self.assertEqual(captured["kwargs"]["env"]["VIRTUAL_ENV"], str(root / ".venv"))
+        self.assertIn(str(root / ".venv" / "bin"), captured["kwargs"]["env"]["PATH"])
+        self.assertEqual(captured["kwargs"]["env"]["HTTP_PROXY"], "http://proxy.local:8080")
+        self.assertEqual(result["debug"]["interpreter_path"], sys.executable)
+        self.assertEqual(result["debug"]["cwd"], str(root))
+        self.assertEqual(result["debug"]["VIRTUAL_ENV"], str(root / ".venv"))
+        self.assertEqual(result["debug"]["NO_PROXY"], "localhost,127.0.0.1")
+
     @staticmethod
     def _scenario(root: Path) -> ScenarioDefinition:
         return ScenarioDefinition(
@@ -69,6 +110,9 @@ class _InspectableApiStepExecutor(ApiStepExecutor):
 
     def parse_tool_payload_for_test(self, stdout: str, stderr: str, returncode: int) -> dict:
         return self._parse_tool_payload(stdout, stderr, returncode)
+
+    def invoke_cli_for_test(self, env_path: Path, step_file: Path) -> dict:
+        return self._invoke_cli(env_path, step_file)
 
 
 class _ExplodingExecutorFactory:

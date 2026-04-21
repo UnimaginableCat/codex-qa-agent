@@ -108,6 +108,7 @@ class _BaseStepExecutor:
                 "result_artifact_path": str(result_artifact_path),
                 "tool_status": payload.get("status") if isinstance(payload, dict) else "ERROR",
                 "capture_keys": sorted(captures.keys()),
+                "tool_debug": tool_result.get("debug"),
             },
         )
 
@@ -120,6 +121,7 @@ class _BaseStepExecutor:
                 "result_artifact_path": str(result_artifact_path),
                 "captures": sorted(captures.keys()),
                 "tool_command": tool_result.get("command"),
+                "tool_debug": tool_result.get("debug"),
             },
         )
 
@@ -141,11 +143,14 @@ class _BaseStepExecutor:
             str(env_path),
             str(step_file),
         ]
+        child_env = os.environ.copy()
+        debug_metadata = self._subprocess_debug_metadata(child_env)
 
         try:
             completed = subprocess.run(
                 command,
                 cwd=self._workspace_root,
+                env=child_env,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -157,6 +162,7 @@ class _BaseStepExecutor:
                 "returncode": None,
                 "stdout": "",
                 "stderr": "",
+                "debug": debug_metadata,
                 "result": {
                     "status": StepStatus.ERROR.value,
                     "message": f"Failed to launch tool: {exc}",
@@ -168,7 +174,19 @@ class _BaseStepExecutor:
             "returncode": completed.returncode,
             "stdout": completed.stdout,
             "stderr": completed.stderr,
+            "debug": debug_metadata,
             "result": self._parse_tool_payload(completed.stdout, completed.stderr, completed.returncode),
+        }
+
+    def _subprocess_debug_metadata(self, child_env: dict[str, str]) -> dict[str, Any]:
+        return {
+            "interpreter_path": sys.executable,
+            "cwd": str(self._workspace_root),
+            "VIRTUAL_ENV": child_env.get("VIRTUAL_ENV"),
+            "PATH": child_env.get("PATH"),
+            "HTTP_PROXY": child_env.get("HTTP_PROXY"),
+            "HTTPS_PROXY": child_env.get("HTTPS_PROXY"),
+            "NO_PROXY": child_env.get("NO_PROXY"),
         }
 
     def _parse_tool_payload(self, stdout: str, stderr: str, returncode: int) -> dict[str, Any]:
