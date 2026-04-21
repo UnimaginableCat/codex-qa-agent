@@ -22,10 +22,12 @@ class EnvConfig:
     api_bearer_token: str | None = None
     api_username: str | None = None
     api_password: str | None = None
+    api_base_url_key: str = "API_BASE_URL"
 
     @classmethod
     def from_mapping(cls, values: dict[str, str | None]) -> "EnvConfig":
-        raw_auth_type = (values.get("API_AUTH_TYPE") or "none").strip().lower()
+        raw_auth_type = _normalize_env_value(values.get("API_AUTH_TYPE")) or "none"
+        raw_auth_type = raw_auth_type.lower()
 
         try:
             auth_type = AuthType(raw_auth_type)
@@ -35,11 +37,12 @@ class EnvConfig:
             ) from exc
 
         return cls(
-            api_base_url=(values.get("API_BASE_URL") or "").strip(),
+            api_base_url=_normalize_env_value(values.get("API_BASE_URL")) or "",
             auth_type=auth_type,
-            api_bearer_token=(values.get("API_BEARER_TOKEN") or "").strip() or None,
+            api_bearer_token=_normalize_env_value(values.get("API_BEARER_TOKEN")),
             api_username=_first_present(values, "API_USERNAME", "API_BASIC_USERNAME", "BASIC_AUTH_USERNAME"),
             api_password=_first_present(values, "API_PASSWORD", "API_BASIC_PASSWORD", "BASIC_AUTH_PASSWORD"),
+            api_base_url_key="API_BASE_URL",
         )
 
     def is_ready(self) -> bool:
@@ -48,10 +51,20 @@ class EnvConfig:
 
 def _first_present(values: dict[str, str | None], *keys: str) -> str | None:
     for key in keys:
-        value = (values.get(key) or "").strip()
+        value = _normalize_env_value(values.get(key))
         if value:
             return value
     return None
+
+
+def _normalize_env_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+        normalized = normalized[1:-1].strip()
+    return normalized or None
 
 
 @dataclass(slots=True)
@@ -111,7 +124,11 @@ class ResponseData:
 class PreparedRequest:
     url: str
     headers: dict[str, str]
+    base_url: str = ""
+    path: str = ""
+    base_url_key: str = "API_BASE_URL"
     auth: Any = None
     json_body: Any = None
     query_params: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: int = 30
+    request_debug: dict[str, Any] = field(default_factory=dict)

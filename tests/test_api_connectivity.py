@@ -82,13 +82,18 @@ from tools.common.statuses import StepStatus
 
 class ApiConnectivityClassificationTests(unittest.TestCase):
     def test_dns_failure_is_blocked(self) -> None:
-        result = self._run_with_exception(
-            requests.ConnectionError("NameResolutionError: failed to resolve host")
+        result = ApiRequestService(
+            session=_ResponseSession(200),
+            resolver=_failing_resolver,
+        ).execute(
+            self._step(),
+            self._prepared_request(),
         )
 
         self.assertEqual(result.status, StepStatus.BLOCKED)
         self.assertEqual(result.details["classification"], "connectivity")
-        self.assertEqual(result.details["error_type"], "ConnectionError")
+        self.assertEqual(result.details["request_debug"]["getaddrinfo"]["status"], StepStatus.BLOCKED.value)
+        self.assertEqual(result.details["request_debug"]["hostname_repr"], "'api.example.invalid'")
 
     def test_connection_timeout_is_blocked(self) -> None:
         result = self._run_with_exception(requests.Timeout("request timed out"))
@@ -111,7 +116,7 @@ class ApiConnectivityClassificationTests(unittest.TestCase):
         self.assertEqual(result.details["error_type"], "SSLError")
 
     def test_service_unavailable_response_is_blocked(self) -> None:
-        result = ApiRequestService(session=_ResponseSession(503)).execute(
+        result = ApiRequestService(session=_ResponseSession(503), resolver=_passing_resolver).execute(
             self._step(),
             self._prepared_request(),
         )
@@ -127,7 +132,7 @@ class ApiConnectivityClassificationTests(unittest.TestCase):
         self.assertNotEqual(result.details.get("classification"), "connectivity")
 
     def _run_with_exception(self, exc: Exception):
-        return ApiRequestService(session=_ExceptionSession(exc)).execute(
+        return ApiRequestService(session=_ExceptionSession(exc), resolver=_passing_resolver).execute(
             self._step(),
             self._prepared_request(),
         )
@@ -159,6 +164,14 @@ class _ResponseSession:
         response._content = b'{"error": "unavailable"}'
         response.headers["Content-Type"] = "application/json"
         return response
+
+
+def _passing_resolver(hostname, port):
+    return [(2, 1, 6, "", ("203.0.113.20", port or 443))]
+
+
+def _failing_resolver(hostname, port):
+    raise OSError("mock DNS failure")
 
 
 if __name__ == "__main__":

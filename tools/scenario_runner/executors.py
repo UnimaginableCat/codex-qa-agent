@@ -109,6 +109,7 @@ class _BaseStepExecutor:
                 "tool_status": payload.get("status") if isinstance(payload, dict) else "ERROR",
                 "capture_keys": sorted(captures.keys()),
                 "tool_debug": tool_result.get("debug"),
+                "api_request_debug": payload.get("request_debug") if isinstance(payload, dict) else None,
             },
         )
 
@@ -122,6 +123,7 @@ class _BaseStepExecutor:
                 "captures": sorted(captures.keys()),
                 "tool_command": tool_result.get("command"),
                 "tool_debug": tool_result.get("debug"),
+                "api_request_debug": payload.get("request_debug") if isinstance(payload, dict) else None,
             },
         )
 

@@ -94,7 +94,7 @@ class ApiAuthTests(unittest.TestCase):
 
         prepared = self._builder().build(env, step)
         session = _RecordingSession()
-        result = ApiRequestService(session=session).execute(step, prepared)
+        result = ApiRequestService(session=session, resolver=_passing_resolver).execute(step, prepared)
 
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertIsNotNone(prepared.auth)
@@ -127,7 +127,7 @@ class ApiAuthTests(unittest.TestCase):
 
         prepared = self._builder().build(env, step)
         session = _RecordingSession()
-        result = ApiRequestService(session=session).execute(step, prepared)
+        result = ApiRequestService(session=session, resolver=_passing_resolver).execute(step, prepared)
 
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertEqual(session.last_kwargs["headers"]["Authorization"], "Bearer token-value")
@@ -146,7 +146,7 @@ class ApiAuthTests(unittest.TestCase):
 
         prepared = self._builder().build(env, step)
         session = _RecordingSession()
-        result = ApiRequestService(session=session).execute(step, prepared)
+        result = ApiRequestService(session=session, resolver=_passing_resolver).execute(step, prepared)
 
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertIsNone(prepared.auth)
@@ -200,7 +200,7 @@ class ApiAuthTests(unittest.TestCase):
             ),
             step_loader=_StaticStepLoader(self._step()),
             request_builder=self._builder(),
-            request_service=ApiRequestService(session=_RecordingSession()),
+            request_service=ApiRequestService(session=_RecordingSession(), resolver=_passing_resolver),
         ).run(Path("env"), Path("step"))
 
         self.assertEqual(result.status, StepStatus.BLOCKED)
@@ -217,7 +217,7 @@ class ApiAuthTests(unittest.TestCase):
 
         prepared = self._builder().build(env, step)
         session = _RecordingSession()
-        result = ApiRequestService(session=session).execute(step, prepared)
+        result = ApiRequestService(session=session, resolver=_passing_resolver).execute(step, prepared)
 
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertNotIn("auth", session.last_kwargs)
@@ -228,7 +228,7 @@ class ApiAuthTests(unittest.TestCase):
             env_loader=_StaticEnvLoader(EnvConfig.from_mapping(env_values)),
             step_loader=_StaticStepLoader(self._step()),
             request_builder=self._builder(),
-            request_service=ApiRequestService(session=_RecordingSession()),
+            request_service=ApiRequestService(session=_RecordingSession(), resolver=_passing_resolver),
         ).run(Path("env"), Path("step"))
 
     @staticmethod
@@ -279,6 +279,10 @@ class _StaticStepLoader:
 
     def load(self, step_path: Path) -> RequestStep:
         return self._step
+
+
+def _passing_resolver(hostname, port):
+    return [(2, 1, 6, "", ("203.0.113.10", port or 443))]
 
 
 if __name__ == "__main__":
