@@ -32,6 +32,22 @@ Do not default to manual API and DB execution if the scenario can be run through
 3. runner entrypoint location
 4. optional existing run artifacts if this is a rerun or investigation
 
+# Python environment policy
+
+Always prefer the workspace or project virtual environment for runner execution.
+
+Required order:
+1. First look for a local virtual environment such as:
+   - `.venv/bin/python`
+   - `venv/bin/python`
+   - `.venv/Scripts/python.exe`
+   - `venv/Scripts/python.exe`
+2. If a local venv interpreter exists, use it for all runner invocations.
+3. Do not default to system `python` if a local venv is available.
+4. Use system `python` only as a fallback when no suitable local venv exists.
+5. If system `python` is used, clearly say so in the result because dependency mismatches are likely.
+6. If runner preflight fails due to missing dependencies under system `python`, retry with local venv before doing any deeper investigation.
+
 # Default execution policy
 
 The runner is the primary execution mechanism.
@@ -40,12 +56,13 @@ Default flow:
 1. Read the scenario.
 2. Confirm the scenario path.
 3. Identify the runner CLI command.
-4. Execute the scenario through the runner.
-5. Inspect produced artifacts:
+4. Resolve the Python interpreter, preferring local venv.
+5. Execute the scenario through the runner.
+6. Inspect produced artifacts:
    - `summary.json`
    - `report.md`
    - step artifacts if needed
-6. Return the final outcome to the user.
+7. Return the final outcome to the user.
 
 # Required behavior
 
@@ -53,6 +70,7 @@ Default flow:
 
 If a valid scenario file exists, do this first:
 - run the local scenario runner
+- use the local venv interpreter if available
 - wait for completion
 - inspect the generated artifacts
 - summarize the result
@@ -79,6 +97,16 @@ Use the scenario for:
 
 Do not invent alternative endpoints, SQL, or expectations unless clearly marked as a debugging assumption.
 
+## 4. Treat interpreter selection as part of execution correctness
+
+Interpreter selection is not a minor detail.
+
+If the workspace has a local venv, runner execution through system `python` is considered an incorrect first attempt unless the user explicitly asked for that interpreter.
+
+Before concluding that dependencies are missing or the runner is broken:
+- verify whether a local venv exists
+- retry with the local venv interpreter if available
+
 # Execution workflow
 
 1. Read the scenario file.
@@ -88,16 +116,20 @@ Do not invent alternative endpoints, SQL, or expectations unless clearly marked 
    - env path
    - report path if declared
 3. Locate the runner command.
-4. Execute the runner against the scenario.
-5. Read the final outputs:
+4. Resolve the Python interpreter with this priority:
+   - local venv python
+   - system python fallback
+5. Execute the runner against the scenario.
+6. Read the final outputs:
    - final status
    - summary
    - report
-6. Return:
+7. Return:
    - final status
    - short summary
    - key blockers/failures
    - exact artifact paths
+   - which Python interpreter was used
 
 # Expected artifacts to inspect
 
@@ -120,6 +152,7 @@ Provide a concise factual result with:
 - short explanation
 - key failed/blocked steps if any
 - exact paths to summary and report
+- interpreter used for execution
 
 # Status interpretation
 
@@ -140,11 +173,14 @@ If runner output and artifacts disagree, say so explicitly.
 - Do not manually execute destructive DB queries.
 - Do not claim a scenario passed without checking runner output artifacts.
 - Do not perform broad codebase scanning by default.
+- Do not report missing dependencies until you have checked whether a local venv exists.
+- Do not treat a failed system-python attempt as conclusive if a local venv is available.
 
 # Completion criteria
 
 This skill is complete when:
 - the runner was executed or a clear reason was given why it could not be executed
+- the interpreter choice was explicit
 - final artifacts were inspected
 - the user received the final status and artifact paths
 - any fallback investigation was clearly marked as fallback/debug behavior
