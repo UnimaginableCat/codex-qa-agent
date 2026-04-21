@@ -27,11 +27,23 @@ _FIELD_RE = re.compile(r"^(?P<name>[A-Za-z ]+):(?:\s*(?P<value>.*))?$")
 _VARIABLE_RE = re.compile(
     r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:(?:\s*=|\s*:)\s*(?P<value>.*))?$"
 )
-_ENV_VALUE_RE = re.compile(r"^env:(?P<name>[A-Za-z_][A-Za-z0-9_]*)$", re.IGNORECASE)
-_RUNTIME_VALUE_RE = re.compile(
-    r"^(?P<source>generated|runtime):(?P<name>[A-Za-z_][A-Za-z0-9_]*)$",
+_VARIABLE_BACKTICK_ASSIGNMENT_RE = re.compile(
+    r"^`(?P<name>[A-Za-z_][A-Za-z0-9_]*)`\s*(?:(?:=|:|--?|[–—])\s*(?P<value>.*))?$"
+)
+_VARIABLE_LOOSE_ASSIGNMENT_RE = re.compile(
+    r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+(?:=|:|--?|[–—])\s*(?P<value>.+)$"
+)
+_VARIABLE_GENERATED_AS_RE = re.compile(
+    r"^`?(?P<name>[A-Za-z_][A-Za-z0-9_]*)`?\s+should\s+be\s+generated"
+    r"(?:\s+dynamically)?(?:\s+as\s+(?P<value>.+))?$",
     re.IGNORECASE,
 )
+_ENV_VALUE_RE = re.compile(r"^env(?:\s*:\s*|\s+)(?P<name>[A-Za-z_][A-Za-z0-9_]*)$", re.IGNORECASE)
+_RUNTIME_VALUE_RE = re.compile(
+    r"^(?P<source>generated|runtime)(?:\s*:\s*|\s+)(?P<name>[A-Za-z_][A-Za-z0-9_]*)$",
+    re.IGNORECASE,
+)
+_VARIABLE_TABLE_SEPARATOR_RE = re.compile(r"^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$")
 _LOOSE_VARIABLE_NAME_RE = re.compile(r"^`?(?P<name>[A-Za-z_][A-Za-z0-9_]*)`?(?:\s+|$)")
 _BACKTICK_VARIABLE_NAME_RE = re.compile(r"`(?P<name>[A-Za-z_][A-Za-z0-9_]*)`")
 _KNOWN_BEST_EFFORT_VARIABLE_NAMES = {
@@ -257,6 +269,7 @@ class MarkdownScenarioParser:
         variables: list[ScenarioVariableDefinition] = []
         warnings: list[str] = []
         seen_names: set[str] = set()
+        table_headers: list[str] | None = None
 
         for line_number, line in enumerate(lines, start=1):
             stripped_line = line.strip()
@@ -265,7 +278,17 @@ class MarkdownScenarioParser:
             if stripped_line.startswith("- "):
                 stripped_line = stripped_line[2:].strip()
 
-            parsed_variable = self._parse_variable_line(stripped_line)
+            if self._is_variable_table_separator(stripped_line):
+                continue
+
+            if self._is_variable_table_line(stripped_line):
+                parsed_variable, parsed_headers = self._parse_variable_table_line(stripped_line, table_headers)
+                if parsed_headers is not None:
+                    table_headers = parsed_headers
+                    continue
+            else:
+                parsed_variable = self._parse_variable_line(stripped_line)
+
             if parsed_variable is None:
                 warnings.append(
                     f"Variables section contains unrecognized content at relative line {line_number}: "
@@ -291,15 +314,32 @@ class MarkdownScenarioParser:
         return variables, warnings
 
     def _parse_variable_line(self, stripped_line: str) -> tuple[str, str, bool] | None:
+        generated_as = _VARIABLE_GENERATED_AS_RE.match(stripped_line)
+        if generated_as:
+            variable_name = generated_as.group("name").strip()
+            raw_value = self._normalize_generated_variable_value(
+                variable_name,
+                generated_as.group("value") or "",
+            )
+            return variable_name, raw_value, False
+
+        backtick_assignment = _VARIABLE_BACKTICK_ASSIGNMENT_RE.match(stripped_line)
+        if backtick_assignment:
+            variable_name = backtick_assignment.group("name").strip()
+            raw_value = self._normalize_variable_raw_value(backtick_assignment.group("value") or "")
+            return variable_name, raw_value, False
+
         variable_match = _VARIABLE_RE.match(stripped_line)
         if variable_match:
             variable_name = variable_match.group("name").strip()
-            raw_value = (variable_match.group("value") or "").strip()
+            raw_value = self._normalize_variable_raw_value(variable_match.group("value") or "")
             return variable_name, raw_value, False
 
-        table_variable = self._parse_variable_table_line(stripped_line)
-        if table_variable is not None:
-            return table_variable
+        loose_assignment = _VARIABLE_LOOSE_ASSIGNMENT_RE.match(stripped_line)
+        if loose_assignment:
+            variable_name = loose_assignment.group("name").strip()
+            raw_value = self._normalize_variable_raw_value(loose_assignment.group("value"))
+            return variable_name, raw_value, False
 
         backtick_match = _BACKTICK_VARIABLE_NAME_RE.search(stripped_line)
         if backtick_match:
@@ -310,27 +350,46 @@ class MarkdownScenarioParser:
             return loose_match.group("name").strip(), "", True
         return None
 
-    @staticmethod
-    def _parse_variable_table_line(stripped_line: str) -> tuple[str, str, bool] | None:
+    @classmethod
+    def _parse_variable_table_line(
+        cls,
+        stripped_line: str,
+        table_headers: list[str] | None,
+    ) -> tuple[tuple[str, str, bool] | None, list[str] | None]:
         if not stripped_line.startswith("|") or not stripped_line.endswith("|"):
-            return None
+            return None, None
 
         cells = [cell.strip() for cell in stripped_line.strip("|").split("|")]
         if not cells or all(not cell for cell in cells):
-            return None
-        if all(set(cell) <= {"-", ":"} for cell in cells if cell):
-            return None
+            return None, None
+
+        normalized_cells = [_normalize_variable_table_header(cell) for cell in cells]
+        if table_headers is None and any(cell in {"name", "variable", "key"} for cell in normalized_cells):
+            return None, normalized_cells
+
+        if table_headers:
+            row = {
+                header: cells[index].strip()
+                for index, header in enumerate(table_headers)
+                if index < len(cells)
+            }
+            variable_name = _first_present_cell(row, "name", "variable", "key")
+            if variable_name is None:
+                return None, None
+            raw_value = cls._raw_value_from_variable_table_row(row)
+            return (variable_name.strip("` "), raw_value, True), None
 
         variable_name = cells[0].strip("` ")
         if variable_name.lower() in {"name", "variable", "key"}:
-            return None
+            return None, normalized_cells
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable_name):
-            return None
+            return None, None
 
-        raw_value = cells[1].strip() if len(cells) > 1 else ""
-        return variable_name, raw_value, True
+        raw_value = cls._normalize_variable_raw_value(cells[1].strip() if len(cells) > 1 else "")
+        return (variable_name, raw_value, True), None
 
     def _build_variable_definition(self, variable_name: str, raw_value: str) -> ScenarioVariableDefinition:
+        raw_value = self._normalize_variable_raw_value(raw_value)
         env_match = _ENV_VALUE_RE.fullmatch(raw_value)
         if env_match:
             return ScenarioVariableDefinition(
@@ -348,10 +407,10 @@ class MarkdownScenarioParser:
                 source=ScenarioVariableSource.RUNTIME,
             )
 
-        if variable_name == "run_suffix" and raw_value.lower() in {"", "generated", "runtime"}:
+        if self._is_generated_runtime_variable(variable_name, raw_value):
             return ScenarioVariableDefinition(
                 name=variable_name,
-                raw_value=raw_value or "generated:run_suffix",
+                raw_value=f"generated:{variable_name}",
                 source=ScenarioVariableSource.RUNTIME,
             )
 
@@ -381,6 +440,58 @@ class MarkdownScenarioParser:
             name=variable_name,
             raw_value=raw_value,
             source=ScenarioVariableSource.LITERAL,
+        )
+
+    @staticmethod
+    def _is_variable_table_line(stripped_line: str) -> bool:
+        return stripped_line.startswith("|") and stripped_line.endswith("|")
+
+    @staticmethod
+    def _is_variable_table_separator(stripped_line: str) -> bool:
+        return bool(_VARIABLE_TABLE_SEPARATOR_RE.fullmatch(stripped_line))
+
+    @classmethod
+    def _raw_value_from_variable_table_row(cls, row: dict[str, str]) -> str:
+        direct_value = _first_present_cell(row, "value", "raw_value", "default")
+        source = (_first_present_cell(row, "source", "type") or "").strip().lower()
+        env_name = _first_present_cell(row, "env", "env_name", "environment", "environment_variable")
+
+        if source in {"env", "environment"}:
+            return f"env:{env_name or direct_value}"
+        if source in {"generated", "runtime"}:
+            return f"{source}:{direct_value}" if direct_value else source
+        return cls._normalize_variable_raw_value(direct_value or "")
+
+    @staticmethod
+    def _normalize_variable_raw_value(raw_value: str) -> str:
+        value = str(raw_value).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'", "`"}:
+            return value[1:-1].strip()
+        return value
+
+    @classmethod
+    def _normalize_generated_variable_value(cls, variable_name: str, raw_value: str) -> str:
+        value = cls._normalize_variable_raw_value(raw_value)
+        lowered = value.lower()
+        if not value:
+            return f"generated:{variable_name}"
+        if "{{" in value and "}}" in value:
+            return value
+        if any(token in lowered for token in ("uuid", "timestamp", "unique", "dynamically")):
+            return f"generated:{variable_name}"
+        return value
+
+    @staticmethod
+    def _is_generated_runtime_variable(variable_name: str, raw_value: str) -> bool:
+        normalized_value = raw_value.strip().lower()
+        if normalized_value not in {"", "generated", "runtime"}:
+            return False
+        normalized_name = variable_name.lower()
+        return (
+            normalized_name == "run_suffix"
+            or normalized_name.endswith("_suffix")
+            or normalized_name.endswith("_run_id")
+            or normalized_name in {"run_id", "timestamp", "generated_timestamp"}
         )
 
     def _parse_step_block(
@@ -748,3 +859,26 @@ class MarkdownScenarioParser:
     @staticmethod
     def _is_fence_line(line: str) -> bool:
         return line.startswith("```")
+
+
+def _normalize_variable_table_header(value: str) -> str:
+    normalized = value.strip().strip("`").strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
+    aliases = {
+        "variable_name": "name",
+        "var": "name",
+        "key": "key",
+        "env_var": "env",
+        "env_variable": "env",
+        "environment_variable": "environment_variable",
+        "default_value": "default",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _first_present_cell(row: dict[str, str], *keys: str) -> str | None:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and value.strip():
+            return value.strip()
+    return None

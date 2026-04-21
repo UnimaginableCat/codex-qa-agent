@@ -154,6 +154,161 @@ class ScenarioVariableTests(unittest.TestCase):
         )
         self.assertEqual(executor.step_payload["path"], "/companies/company-partial/price-lists")
 
+    def test_variables_section_supports_tables_backticks_and_dash_assignments(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "COMPANY_GUID=company-table\n")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Variable Formats
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                | Variable | Source | Env | Value |
+                | --- | --- | --- | --- |
+                | company_guid | env | COMPANY_GUID | |
+                | unique_suffix | generated | | |
+                | scenario_run_id | generated | | |
+                | generated_name | template | | AUTOTEST {{unique_suffix}} |
+                - `literal_name`: "Fixed literal"
+                - dashed_template — Item {{unique_suffix}}
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: create
+                Method: POST
+                Path: /companies/{{company_guid}}/items/{{unique_suffix}}
+                Body:
+                ```json
+                {
+                  "name": "{{generated_name}}",
+                  "literal": "{{literal_name}}",
+                  "dash": "{{dashed_template}}",
+                  "run": "{{scenario_run_id}}"
+                }
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(
+            [variable.name for variable in scenario.variables],
+            [
+                "company_guid",
+                "unique_suffix",
+                "scenario_run_id",
+                "generated_name",
+                "literal_name",
+                "dashed_template",
+            ],
+        )
+        self.assertEqual(executor.run_variables["company_guid"], "company-table")
+        self.assertEqual(executor.run_variables["scenario_run_id"], summary.run_id)
+        self.assertEqual(executor.run_variables["unique_suffix"], summary.run_id.removeprefix("run-"))
+        self.assertEqual(
+            executor.run_variables["generated_name"],
+            f"AUTOTEST {executor.run_variables['unique_suffix']}",
+        )
+        self.assertEqual(executor.run_variables["literal_name"], "Fixed literal")
+        self.assertEqual(
+            executor.run_variables["dashed_template"],
+            f"Item {executor.run_variables['unique_suffix']}",
+        )
+        self.assertIn("/companies/company-table/items/", executor.step_payload["path"])
+
+    def test_variables_section_supports_generated_as_natural_language(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Generated As Variables
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - `run_suffix` should be generated dynamically as a unique timestamp or UUID suffix
+                - `primary_display_name` should be generated as `AUTOTEST User Primary {{run_suffix}}`
+                - `primary_email_mixed_case` should be generated as `AUTOTEST.Primary.{{run_suffix}}@Example.COM`
+                - `primary_email_normalized` should be generated as `autotest.primary.{{run_suffix}}@example.com`
+                - `missing_user_id` should be generated as a valid UUID that is not present in DB
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: create primary
+                Method: POST
+                Path: /users/{{missing_user_id}}
+                Body:
+                ```json
+                {
+                  "displayName": "{{primary_display_name}}",
+                  "email": "{{primary_email_mixed_case}}",
+                  "expectedEmail": "{{primary_email_normalized}}"
+                }
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(
+            [variable.name for variable in scenario.variables],
+            [
+                "run_suffix",
+                "primary_display_name",
+                "primary_email_mixed_case",
+                "primary_email_normalized",
+                "missing_user_id",
+            ],
+        )
+        self.assertEqual(
+            executor.run_variables["primary_display_name"],
+            f"AUTOTEST User Primary {executor.run_variables['run_suffix']}",
+        )
+        self.assertEqual(
+            executor.run_variables["primary_email_mixed_case"],
+            f"AUTOTEST.Primary.{executor.run_variables['run_suffix']}@Example.COM",
+        )
+        self.assertEqual(
+            executor.run_variables["primary_email_normalized"],
+            f"autotest.primary.{executor.run_variables['run_suffix']}@example.com",
+        )
+        self.assertRegex(
+            executor.run_variables["missing_user_id"],
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        )
+        self.assertEqual(executor.step_payload["body"]["displayName"], executor.run_variables["primary_display_name"])
+
     def test_step_one_payload_interpolates_path_headers_body_and_params_from_initial_variables(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

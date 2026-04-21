@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from typing import Any, Protocol
+from uuid import uuid4
 
 from tools.common.errors import EnvFileLoadError, ValidationError
 
@@ -292,8 +293,17 @@ def _resolve_runtime_variable(
 
 
 def _resolve_known_runtime_name(name: str, run_context: RunContext, resolved: dict[str, Any]) -> Any | None:
-    if name == "run_suffix":
+    normalized_name = name.strip().lower()
+    if normalized_name == "run_id" or normalized_name.endswith("_run_id"):
+        return run_context.run_id
+    if normalized_name == "run_suffix" or normalized_name.endswith("_suffix"):
         return run_context.run_id.removeprefix("run-")
+    if normalized_name in {"timestamp", "generated_timestamp", "current_timestamp"}:
+        return run_context.run_id.removeprefix("run-")
+    if normalized_name == "missing_user_id" or (
+        normalized_name.startswith("missing_") and normalized_name.endswith("_id")
+    ):
+        return str(uuid4())
     return resolved.get(name)
 
 
