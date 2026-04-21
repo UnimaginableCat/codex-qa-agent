@@ -38,12 +38,20 @@ class EnvConfig:
             api_base_url=(values.get("API_BASE_URL") or "").strip(),
             auth_type=auth_type,
             api_bearer_token=(values.get("API_BEARER_TOKEN") or "").strip() or None,
-            api_username=(values.get("API_USERNAME") or "").strip() or None,
-            api_password=(values.get("API_PASSWORD") or "").strip() or None,
+            api_username=_first_present(values, "API_USERNAME", "API_BASIC_USERNAME", "BASIC_AUTH_USERNAME"),
+            api_password=_first_present(values, "API_PASSWORD", "API_BASIC_PASSWORD", "BASIC_AUTH_PASSWORD"),
         )
 
     def is_ready(self) -> bool:
         return bool(self.api_base_url)
+
+
+def _first_present(values: dict[str, str | None], *keys: str) -> str | None:
+    for key in keys:
+        value = (values.get(key) or "").strip()
+        if value:
+            return value
+    return None
 
 
 @dataclass(slots=True)

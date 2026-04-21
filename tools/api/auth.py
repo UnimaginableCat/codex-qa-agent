@@ -27,7 +27,9 @@ class BearerTokenAuthStrategy:
         if not env.api_bearer_token:
             raise AuthConfigurationError("API_AUTH_TYPE=bearer but API_BEARER_TOKEN is missing")
 
-        prepared_request.headers.setdefault("Authorization", f"Bearer {env.api_bearer_token}")
+        if _has_authorization_header(prepared_request.headers):
+            return
+        prepared_request.headers["Authorization"] = f"Bearer {env.api_bearer_token}"
 
 
 class BasicAuthStrategy:
@@ -37,6 +39,9 @@ class BasicAuthStrategy:
         if env.api_password is None:
             raise AuthConfigurationError("API_AUTH_TYPE=basic but API_PASSWORD is missing")
 
+        # Scenario-provided Authorization is intentional input and wins over env-driven auth.
+        if _has_authorization_header(prepared_request.headers):
+            return
         prepared_request.auth = HTTPBasicAuth(env.api_username, env.api_password)
 
 
@@ -55,3 +60,7 @@ class AuthStrategyFactory:
             return self._strategies[env.auth_type]
         except KeyError as exc:
             raise AuthConfigurationError(f"Unsupported auth type: {env.auth_type}") from exc
+
+
+def _has_authorization_header(headers: dict[str, str]) -> bool:
+    return any(str(header_name).lower() == "authorization" for header_name in headers)
