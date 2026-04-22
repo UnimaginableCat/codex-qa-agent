@@ -35,6 +35,9 @@ Use this skill when:
    - prior captured outputs
    - environment values if appropriate
    - generated runtime values if explicitly required by the scenario
+   - machine-readable derived/template variables such as `derived:run_suffix|lower` and `template:...`
+
+Do not treat prose variable descriptions as values. A variable definition such as `email_suffix = the lowercase form of run_suffix` is invalid and should block before any HTTP request is sent. Use `email_suffix = derived:run_suffix|lower` instead.
 4. Before execution, use `env-resolution` if the environment path, auth configuration, credentials, or base URL are unclear.
 5. Load the correct env file.
 6. Determine auth strategy from env/config first.

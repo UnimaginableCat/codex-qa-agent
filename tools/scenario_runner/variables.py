@@ -131,13 +131,16 @@ def _resolve_variables(
             continue
         resolved[definition.name] = value
 
-    for definition in _definitions_by_source(definitions, ScenarioVariableSource.RUNTIME):
+    for definition in (
+        _definitions_by_source(definitions, ScenarioVariableSource.RUNTIME)
+        + _definitions_by_source(definitions, ScenarioVariableSource.GENERATED)
+    ):
         if definition.name in resolved:
             continue
         runtime_value = _resolve_runtime_variable(definition, run_context, resolved)
         if runtime_value is None:
             warnings.append(
-                f"Variable '{definition.name}' declared unsupported runtime value "
+                f"Variable '{definition.name}' declared unsupported generated/runtime value "
                 f"'{_runtime_name(definition)}'."
             )
             continue
@@ -154,28 +157,36 @@ def _resolve_variables(
         required_placeholders
         | template_dependencies
         | {definition.name for definition in _definitions_by_source(definitions, ScenarioVariableSource.RUNTIME)}
+        | {definition.name for definition in _definitions_by_source(definitions, ScenarioVariableSource.GENERATED)}
     )
+    generated_definition_names = {
+        definition.name
+        for definition in (
+            _definitions_by_source(definitions, ScenarioVariableSource.RUNTIME)
+            + _definitions_by_source(definitions, ScenarioVariableSource.GENERATED)
+        )
+    }
+    declared_variable_names = {definition.name for definition in definitions}
     for name in sorted(runtime_names):
         if name in resolved:
+            continue
+        if name in declared_variable_names and name not in generated_definition_names:
             continue
         runtime_value = _resolve_known_runtime_name(name, run_context, resolved)
         if runtime_value is not None:
             resolved[name] = runtime_value
 
-    for definition in _definitions_by_source(definitions, ScenarioVariableSource.TEMPLATE):
-        if definition.name in resolved:
-            continue
-        template_value = _resolve_template_variable(
-            definition.name,
-            definition.raw_value,
-            resolved,
-            placeholder_interpolator,
-            required_placeholders,
-            enforce_required,
-            warnings,
-        )
-        if template_value is not None:
-            resolved[definition.name] = template_value
+    _resolve_dependent_variables(
+        definitions=(
+            _definitions_by_source(definitions, ScenarioVariableSource.TEMPLATE)
+            + _definitions_by_source(definitions, ScenarioVariableSource.DERIVED)
+        ),
+        resolved=resolved,
+        interpolator=placeholder_interpolator,
+        required_placeholders=required_placeholders,
+        enforce_required=enforce_required,
+        warnings=warnings,
+    )
 
     for name, template_value in _GENERATED_TEMPLATE_FALLBACKS.items():
         if name in resolved or name not in required_placeholders:
@@ -233,6 +244,82 @@ def _resolve_template_variable(
     return None
 
 
+def _resolve_dependent_variables(
+    definitions: list[ScenarioVariableDefinition],
+    resolved: dict[str, Any],
+    interpolator: PlaceholderInterpolator,
+    required_placeholders: set[str],
+    enforce_required: bool,
+    warnings: list[str],
+) -> None:
+    pending = [definition for definition in definitions if definition.name not in resolved]
+    emitted_warnings: set[str] = set()
+
+    while pending:
+        progressed = False
+        next_pending: list[ScenarioVariableDefinition] = []
+        for definition in pending:
+            try:
+                value = _resolve_dependent_variable(definition, resolved, interpolator)
+            except UnresolvedPlaceholderError as exc:
+                missing_names = sorted(dict.fromkeys(exc.placeholder_names))
+                message = (
+                    f"Variable '{definition.name}' could not be derived because "
+                    f"{', '.join(missing_names)} is unresolved."
+                )
+                if message not in emitted_warnings:
+                    warnings.append(message)
+                    emitted_warnings.add(message)
+                if definition.name in required_placeholders and enforce_required:
+                    raise VariableResolutionError(
+                        message,
+                        unresolved_variables=[definition.name, *missing_names],
+                        warnings=warnings,
+                    ) from exc
+                next_pending.append(definition)
+                continue
+
+            resolved[definition.name] = value
+            progressed = True
+
+        if not next_pending or not progressed:
+            break
+        pending = next_pending
+
+
+def _resolve_dependent_variable(
+    definition: ScenarioVariableDefinition,
+    resolved: dict[str, Any],
+    interpolator: PlaceholderInterpolator,
+) -> Any:
+    if definition.source == ScenarioVariableSource.TEMPLATE:
+        return interpolator.interpolate(definition.raw_value, resolved)
+    if definition.source == ScenarioVariableSource.DERIVED:
+        if not definition.source_name:
+            raise VariableResolutionError(f"Variable '{definition.name}' is missing derived source.")
+        if definition.source_name not in resolved:
+            raise UnresolvedPlaceholderError([definition.source_name])
+        value = resolved[definition.source_name]
+        for transform in definition.transforms:
+            value = _apply_transform(definition.name, value, transform)
+        return value
+    raise VariableResolutionError(
+        f"Variable '{definition.name}' has unsupported dependent source '{definition.source}'."
+    )
+
+
+def _apply_transform(variable_name: str, value: Any, transform: str) -> Any:
+    if transform == "trim":
+        return "" if value is None else str(value).strip()
+    if transform == "lower":
+        return "" if value is None else str(value).lower()
+    if transform == "upper":
+        return "" if value is None else str(value).upper()
+    raise VariableResolutionError(
+        f"Variable '{variable_name}' uses unsupported transform '{transform}'."
+    )
+
+
 def _collect_step_placeholder_names(step) -> set[str]:
     names: set[str] = set()
     if step.api is not None:
@@ -252,6 +339,9 @@ def _collect_template_dependency_placeholders(definitions: list[ScenarioVariable
     names: set[str] = set()
     for definition in _definitions_by_source(definitions, ScenarioVariableSource.TEMPLATE):
         names.update(_collect_placeholder_names(definition.raw_value))
+    for definition in _definitions_by_source(definitions, ScenarioVariableSource.DERIVED):
+        if definition.source_name:
+            names.add(definition.source_name)
     return names
 
 
@@ -298,8 +388,10 @@ def _resolve_known_runtime_name(name: str, run_context: RunContext, resolved: di
         return run_context.run_id
     if normalized_name == "run_suffix" or normalized_name.endswith("_suffix"):
         return run_context.run_id.removeprefix("run-")
-    if normalized_name in {"timestamp", "generated_timestamp", "current_timestamp"}:
+    if normalized_name in {"timestamp", "generated_timestamp", "current_timestamp", "timestamp_suffix"}:
         return run_context.run_id.removeprefix("run-")
+    if normalized_name == "uuid":
+        return str(uuid4())
     if normalized_name == "missing_user_id" or (
         normalized_name.startswith("missing_") and normalized_name.endswith("_id")
     ):

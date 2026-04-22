@@ -87,6 +87,35 @@ A failed venv lookup is not valid unless explicit path checks were performed.
 
 Some scenario variables may come from the environment file rather than being written as literal values in the scenario.
 
+Variables must be machine-readable. Do not put prose instructions in a variable value. The runner does not infer human intent from text such as "the lowercase form of `run_suffix`"; that is an invalid scenario definition and must block before API/DB execution.
+
+Supported explicit formats:
+- `name = env:ENV_NAME`
+- `name = generated:run_suffix`
+- `name = generated:run_id`
+- `name = generated:timestamp_suffix`
+- `name = generated:uuid`
+- `name = template:AUTOTEST {{run_suffix}}`
+- `name = derived:run_suffix|lower`
+- `name = derived:raw_name|trim|upper`
+- `name = literal:Fixed literal`
+
+Supported transforms for `derived` variables:
+- `lower`
+- `upper`
+- `trim`
+
+Good definitions:
+- `email_suffix = derived:run_suffix|lower`
+- `primary_email = template:autotest.primary.{{email_suffix}}@example.com`
+- `missing_user_id = generated:uuid`
+
+Bad definitions:
+- `email_suffix = the lowercase form of `run_suffix``
+- `run_suffix generated dynamically`
+- `generated_name derived from run suffix`
+- `static_label = Fixed literal without literal prefix`
+
 When the scenario references variables, resolve them using this priority:
 
 1. captured values from previous executed steps

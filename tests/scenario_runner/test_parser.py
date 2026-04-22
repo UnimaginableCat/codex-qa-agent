@@ -339,6 +339,69 @@ class MarkdownScenarioParserTests(unittest.TestCase):
         self.assertEqual(scenario.steps[0].api.path, "/first")
         self.assertEqual(scenario.steps[1].db.sql, "SELECT 1")
 
+    def test_variables_section_records_unsupported_transform_for_preflight(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = self._write_scenario(
+                Path(tmp),
+                """
+                # Scenario: Bad Variable Transform
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - run_suffix = generated:run_suffix
+                - email_suffix = derived:run_suffix|slugify
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: first
+                Method: GET
+                Path: /users/{{email_suffix}}
+                """,
+            )
+
+            scenario = self.parser.parse(scenario_path)
+
+        self.assertTrue(scenario.metadata["variables_validation_errors"])
+        self.assertIn("unsupported transform", scenario.metadata["variables_validation_errors"][0])
+
+    def test_variables_section_records_ambiguous_prose_for_preflight(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = self._write_scenario(
+                Path(tmp),
+                """
+                # Scenario: Prose Variable
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - email_suffix = the lowercase form of `run_suffix`
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: first
+                Method: GET
+                Path: /users/{{email_suffix}}
+                """,
+            )
+
+            scenario = self.parser.parse(scenario_path)
+
+        self.assertTrue(scenario.metadata["variables_validation_errors"])
+        self.assertIn("ambiguous untyped value", scenario.metadata["variables_validation_errors"][0])
+
     def test_comments_blank_lines_and_trailing_notes_do_not_corrupt_steps(self) -> None:
         with TemporaryDirectory() as tmp:
             scenario_path = self._write_scenario(

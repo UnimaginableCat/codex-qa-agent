@@ -43,6 +43,19 @@ _RUNTIME_VALUE_RE = re.compile(
     r"^(?P<source>generated|runtime)(?:\s*:\s*|\s+)(?P<name>[A-Za-z_][A-Za-z0-9_]*)$",
     re.IGNORECASE,
 )
+_VARIABLE_SOURCE_PREFIX_RE = re.compile(
+    r"^(?P<source>env|environment|generated|runtime|template|literal|derived|transform)"
+    r"(?:\s*:\s*(?P<value>.*)|\s*)$",
+    re.IGNORECASE,
+)
+_DERIVED_EXPRESSION_RE = re.compile(
+    r"^(?P<source>\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}|[A-Za-z_][A-Za-z0-9_]*)"
+    r"\s*\|\s*(?P<transforms>[A-Za-z_][A-Za-z0-9_]*(?:\s*\|\s*[A-Za-z_][A-Za-z0-9_]*)*)$"
+)
+_TRANSFORM_EXPRESSION_RE = re.compile(
+    r"^(?P<transform>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*"
+    r"(?P<source>\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}|[A-Za-z_][A-Za-z0-9_]*)$"
+)
 _VARIABLE_TABLE_SEPARATOR_RE = re.compile(r"^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$")
 _LOOSE_VARIABLE_NAME_RE = re.compile(r"^`?(?P<name>[A-Za-z_][A-Za-z0-9_]*)`?(?:\s+|$)")
 _BACKTICK_VARIABLE_NAME_RE = re.compile(r"`(?P<name>[A-Za-z_][A-Za-z0-9_]*)`")
@@ -50,6 +63,16 @@ _KNOWN_BEST_EFFORT_VARIABLE_NAMES = {
     "company_guid",
     "generated_price_list_name",
     "run_suffix",
+}
+_SUPPORTED_TRANSFORMS = {"lower", "upper", "trim"}
+_SUPPORTED_GENERATED_VALUES = {
+    "run_id",
+    "run_suffix",
+    "timestamp",
+    "timestamp_suffix",
+    "generated_timestamp",
+    "current_timestamp",
+    "uuid",
 }
 _SCENARIO_TITLE_RE = re.compile(r"^#\s+Scenario:\s*(?P<name>.+?)\s*$")
 _SLUG_INVALID_CHARS_RE = re.compile(r"[^a-z0-9]+")
@@ -106,6 +129,7 @@ class MarkdownScenarioParser:
 
         warnings: list[str] = []
         variable_warnings: list[str] = []
+        variable_errors: list[str] = []
         scenario_definition = ScenarioDefinition(
             scenario_path=resolved_scenario_path,
             scenario_slug=self._build_scenario_slug(title, resolved_scenario_path),
@@ -122,9 +146,12 @@ class MarkdownScenarioParser:
                 continue
 
             if normalized_name == "variables":
-                variable_definitions, section_variable_warnings = self._parse_variables(section_lines)
+                variable_definitions, section_variable_warnings, section_variable_errors = self._parse_variables(
+                    section_lines
+                )
                 scenario_definition.variables = variable_definitions
                 variable_warnings.extend(section_variable_warnings)
+                variable_errors.extend(section_variable_errors)
                 warnings.extend(section_variable_warnings)
                 continue
 
@@ -156,6 +183,7 @@ class MarkdownScenarioParser:
         scenario_definition.metadata = {
             "parse_warnings": warnings,
             "variables_parse_warnings": variable_warnings,
+            "variables_validation_errors": variable_errors,
             "source_format": "markdown",
         }
         return scenario_definition
@@ -265,9 +293,10 @@ class MarkdownScenarioParser:
         ]
         return steps, warnings
 
-    def _parse_variables(self, lines: list[str]) -> tuple[list[ScenarioVariableDefinition], list[str]]:
+    def _parse_variables(self, lines: list[str]) -> tuple[list[ScenarioVariableDefinition], list[str], list[str]]:
         variables: list[ScenarioVariableDefinition] = []
         warnings: list[str] = []
+        errors: list[str] = []
         seen_names: set[str] = set()
         table_headers: list[str] | None = None
 
@@ -290,15 +319,17 @@ class MarkdownScenarioParser:
                 parsed_variable = self._parse_variable_line(stripped_line)
 
             if parsed_variable is None:
-                warnings.append(
-                    f"Variables section contains unrecognized content at relative line {line_number}: "
-                    f"{line.strip()!r}"
+                errors.append(
+                    "Variables section contains unsupported or ambiguous content at relative line "
+                    f"{line_number}: {line.strip()!r}. Use an explicit machine-readable definition such as "
+                    "'name = env:ENV_NAME', 'name = generated:run_suffix', 'name = template:... ', "
+                    "'name = derived:source|lower', or 'name = literal:...'."
                 )
                 continue
 
             variable_name, raw_value, used_best_effort = parsed_variable
             if variable_name in seen_names:
-                warnings.append(
+                errors.append(
                     f"Variables section contains duplicate variable '{variable_name}' at relative line "
                     f"{line_number}; first definition was kept."
                 )
@@ -309,45 +340,34 @@ class MarkdownScenarioParser:
                     f"Variables section used best-effort parsing for '{variable_name}' at relative line "
                     f"{line_number}."
                 )
-            variables.append(self._build_variable_definition(variable_name, raw_value))
+            try:
+                variables.append(self._build_variable_definition(variable_name, raw_value))
+            except ScenarioParseError as exc:
+                errors.append(
+                    f"Variables section has invalid definition for '{variable_name}' at relative line "
+                    f"{line_number}: {exc}"
+                )
 
-        return variables, warnings
+        return variables, warnings, errors
 
     def _parse_variable_line(self, stripped_line: str) -> tuple[str, str, bool] | None:
-        generated_as = _VARIABLE_GENERATED_AS_RE.match(stripped_line)
-        if generated_as:
-            variable_name = generated_as.group("name").strip()
-            raw_value = self._normalize_generated_variable_value(
-                variable_name,
-                generated_as.group("value") or "",
-            )
-            return variable_name, raw_value, False
-
         backtick_assignment = _VARIABLE_BACKTICK_ASSIGNMENT_RE.match(stripped_line)
         if backtick_assignment:
             variable_name = backtick_assignment.group("name").strip()
-            raw_value = self._normalize_variable_raw_value(backtick_assignment.group("value") or "")
+            raw_value = (backtick_assignment.group("value") or "").strip()
             return variable_name, raw_value, False
 
         variable_match = _VARIABLE_RE.match(stripped_line)
         if variable_match:
             variable_name = variable_match.group("name").strip()
-            raw_value = self._normalize_variable_raw_value(variable_match.group("value") or "")
+            raw_value = (variable_match.group("value") or "").strip()
             return variable_name, raw_value, False
 
         loose_assignment = _VARIABLE_LOOSE_ASSIGNMENT_RE.match(stripped_line)
         if loose_assignment:
             variable_name = loose_assignment.group("name").strip()
-            raw_value = self._normalize_variable_raw_value(loose_assignment.group("value"))
+            raw_value = loose_assignment.group("value").strip()
             return variable_name, raw_value, False
-
-        backtick_match = _BACKTICK_VARIABLE_NAME_RE.search(stripped_line)
-        if backtick_match:
-            return backtick_match.group("name").strip(), "", True
-
-        loose_match = _LOOSE_VARIABLE_NAME_RE.match(stripped_line)
-        if loose_match and loose_match.group("name").strip() in _KNOWN_BEST_EFFORT_VARIABLE_NAMES:
-            return loose_match.group("name").strip(), "", True
         return None
 
     @classmethod
@@ -389,57 +409,91 @@ class MarkdownScenarioParser:
         return (variable_name, raw_value, True), None
 
     def _build_variable_definition(self, variable_name: str, raw_value: str) -> ScenarioVariableDefinition:
-        raw_value = self._normalize_variable_raw_value(raw_value)
+        raw_value = str(raw_value).strip()
+        quoted_literal = self._is_wrapped_literal(raw_value)
+        normalized_raw_value = self._normalize_variable_raw_value(raw_value)
+        source_match = _VARIABLE_SOURCE_PREFIX_RE.fullmatch(raw_value)
+        source = source_match.group("source").lower() if source_match else ""
+        source_value = (source_match.group("value") or "").strip() if source_match else ""
+
         env_match = _ENV_VALUE_RE.fullmatch(raw_value)
-        if env_match:
+        if source in {"env", "environment"} or env_match:
+            env_name = source_value or (env_match.group("name") if env_match else "")
             return ScenarioVariableDefinition(
                 name=variable_name,
                 raw_value=raw_value,
                 source=ScenarioVariableSource.ENV,
-                env_name=env_match.group("name"),
+                env_name=env_name or variable_name.upper(),
             )
 
         runtime_match = _RUNTIME_VALUE_RE.fullmatch(raw_value)
-        if runtime_match:
+        if source in {"generated", "runtime"} or runtime_match:
+            generated_value = source_value or (
+                runtime_match.group("name") if runtime_match else variable_name
+            )
+            generated_value = generated_value or variable_name
+            self._validate_generated_variable(variable_name, generated_value)
             return ScenarioVariableDefinition(
                 name=variable_name,
-                raw_value=raw_value,
-                source=ScenarioVariableSource.RUNTIME,
+                raw_value=f"generated:{generated_value}",
+                source=ScenarioVariableSource.GENERATED,
             )
 
         if self._is_generated_runtime_variable(variable_name, raw_value):
+            self._validate_generated_variable(variable_name, variable_name)
             return ScenarioVariableDefinition(
                 name=variable_name,
                 raw_value=f"generated:{variable_name}",
-                source=ScenarioVariableSource.RUNTIME,
+                source=ScenarioVariableSource.GENERATED,
             )
 
-        if variable_name == "generated_price_list_name" and not raw_value:
+        if source == "template":
             return ScenarioVariableDefinition(
                 name=variable_name,
-                raw_value="AUTOTEST Attributes Flow {{run_suffix}}",
+                raw_value=self._normalize_variable_raw_value(source_value),
                 source=ScenarioVariableSource.TEMPLATE,
             )
 
-        if not raw_value:
+        if source == "literal":
+            return ScenarioVariableDefinition(
+                name=variable_name,
+                raw_value=self._normalize_variable_raw_value(source_value),
+                source=ScenarioVariableSource.LITERAL,
+            )
+
+        if source in {"derived", "transform"}:
+            source_name, transforms = self._parse_derived_variable(source, source_value)
             return ScenarioVariableDefinition(
                 name=variable_name,
                 raw_value=raw_value,
-                source=ScenarioVariableSource.ENV,
-                env_name=variable_name.upper(),
+                source=ScenarioVariableSource.DERIVED,
+                source_name=source_name,
+                transforms=transforms,
             )
 
         if "{{" in raw_value and "}}" in raw_value:
             return ScenarioVariableDefinition(
                 name=variable_name,
-                raw_value=raw_value,
+                raw_value=normalized_raw_value,
                 source=ScenarioVariableSource.TEMPLATE,
             )
 
-        return ScenarioVariableDefinition(
-            name=variable_name,
-            raw_value=raw_value,
-            source=ScenarioVariableSource.LITERAL,
+        if quoted_literal:
+            return ScenarioVariableDefinition(
+                name=variable_name,
+                raw_value=normalized_raw_value,
+                source=ScenarioVariableSource.LITERAL,
+            )
+
+        if not raw_value:
+            raise ScenarioParseError(
+                "empty variable definitions are not supported; use env:NAME, generated:kind, "
+                "template:..., derived:source|transform, or literal:..."
+            )
+
+        raise ScenarioParseError(
+            f"ambiguous untyped value {raw_value!r}; prose or bare literals are not allowed in "
+            "Variables. Use an explicit type prefix."
         )
 
     @staticmethod
@@ -459,7 +513,19 @@ class MarkdownScenarioParser:
         if source in {"env", "environment"}:
             return f"env:{env_name or direct_value}"
         if source in {"generated", "runtime"}:
-            return f"{source}:{direct_value}" if direct_value else source
+            return f"generated:{direct_value}" if direct_value else "generated"
+        if source == "template":
+            return f"template:{direct_value}"
+        if source == "literal":
+            return f"literal:{direct_value}"
+        if source in {"derived", "transform"}:
+            transform_value = _first_present_cell(row, "transform", "transforms")
+            source_value = _first_present_cell(row, "from", "input", "source_variable", "source_name")
+            if source == "transform" and transform_value and (source_value or direct_value):
+                return f"transform:{transform_value}:{source_value or direct_value}"
+            if transform_value and (source_value or direct_value):
+                return f"derived:{source_value or direct_value}|{transform_value}"
+            return f"{source}:{direct_value}"
         return cls._normalize_variable_raw_value(direct_value or "")
 
     @staticmethod
@@ -468,6 +534,70 @@ class MarkdownScenarioParser:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'", "`"}:
             return value[1:-1].strip()
         return value
+
+    @staticmethod
+    def _is_wrapped_literal(raw_value: str) -> bool:
+        value = str(raw_value).strip()
+        return len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}
+
+    @classmethod
+    def _parse_derived_variable(cls, source: str, raw_expression: str) -> tuple[str, list[str]]:
+        expression = raw_expression.strip()
+        if not expression:
+            raise ScenarioParseError(
+                "derived variables require an expression such as derived:run_suffix|lower"
+            )
+
+        if source == "transform":
+            match = _TRANSFORM_EXPRESSION_RE.fullmatch(expression)
+            if match is None:
+                raise ScenarioParseError(
+                    "transform variables require transform:<transform>:<source>, for example "
+                    "transform:lower:run_suffix"
+                )
+            source_name = cls._normalize_derived_source_name(match.group("source"))
+            transforms = [match.group("transform").strip().lower()]
+        else:
+            match = _DERIVED_EXPRESSION_RE.fullmatch(expression)
+            if match is None:
+                raise ScenarioParseError(
+                    "derived variables require derived:<source>|<transform>, for example "
+                    "derived:run_suffix|lower"
+                )
+            source_name = cls._normalize_derived_source_name(match.group("source"))
+            transforms = [item.strip().lower() for item in match.group("transforms").split("|")]
+
+        unsupported = [transform for transform in transforms if transform not in _SUPPORTED_TRANSFORMS]
+        if unsupported:
+            raise ScenarioParseError(
+                "unsupported transform(s): "
+                f"{', '.join(unsupported)}. Supported transforms: {', '.join(sorted(_SUPPORTED_TRANSFORMS))}."
+            )
+        return source_name, transforms
+
+    @staticmethod
+    def _normalize_derived_source_name(raw_source: str) -> str:
+        source = raw_source.strip()
+        placeholder_match = re.fullmatch(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}", source)
+        return placeholder_match.group(1) if placeholder_match else source
+
+    @staticmethod
+    def _validate_generated_variable(variable_name: str, generated_value: str) -> None:
+        normalized_value = generated_value.strip().lower()
+        normalized_name = variable_name.strip().lower()
+        if normalized_value in _SUPPORTED_GENERATED_VALUES:
+            return
+        if normalized_value == normalized_name and (
+            normalized_name.endswith("_suffix")
+            or normalized_name.endswith("_run_id")
+            or normalized_name in {"run_id", "timestamp", "generated_timestamp"}
+            or (normalized_name.startswith("missing_") and normalized_name.endswith("_id"))
+        ):
+            return
+        raise ScenarioParseError(
+            f"unsupported generated value '{generated_value}'. Supported generated values: "
+            f"{', '.join(sorted(_SUPPORTED_GENERATED_VALUES))}."
+        )
 
     @classmethod
     def _normalize_generated_variable_value(cls, variable_name: str, raw_value: str) -> str:
@@ -872,6 +1002,12 @@ def _normalize_variable_table_header(value: str) -> str:
         "env_variable": "env",
         "environment_variable": "environment_variable",
         "default_value": "default",
+        "derived_from": "from",
+        "source_name": "source_name",
+        "source_variable": "source_variable",
+        "transform": "transform",
+        "transformation": "transform",
+        "transformations": "transforms",
     }
     return aliases.get(normalized, normalized)
 

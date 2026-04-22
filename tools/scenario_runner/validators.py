@@ -478,8 +478,9 @@ class ScenarioStepValidator:
     def _normalize_db_expectation_rule(cls, expectation: str) -> str:
         normalized = expectation.strip()
         if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'", "`"}:
-            if normalized.count(normalized[0]) == 2:
-                return normalized[1:-1].strip()
+            if cls._split_comparison_rule(normalized) is not None:
+                return normalized
+            return normalized[1:-1].strip()
         return normalized
 
     @staticmethod

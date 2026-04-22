@@ -31,6 +31,9 @@ Use this skill when:
    - explicit scenario values
    - prior captured outputs
    - environment values if appropriate
+   - machine-readable derived/template variables such as `derived:run_suffix|lower` and `template:...`
+
+Do not treat prose variable descriptions as values. Invalid variable definitions must block before DB verification so malformed placeholders do not turn into unsupported expectation rules or misleading DB checks.
 4. Ensure the query is read-only.
 5. Before execution, use `env-resolution` if the environment path or database connection settings are unclear.
 6. Load the correct env file.

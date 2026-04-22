@@ -123,6 +123,25 @@ class ScenarioRunnerPreflightTests(unittest.TestCase):
         self.assertEqual(summary.steps, [])
         self.assertEqual(summary.message, "Scenario preflight failed with status BLOCKED.")
 
+    def test_invalid_variables_section_blocks_before_step_execution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_workspace(root, create_env=True, create_project=True, create_api_tool=True)
+            scenario = self._scenario(root, ScenarioStepType.API)
+            scenario.metadata["variables_validation_errors"] = [
+                "Variables section has invalid definition for 'email_suffix': ambiguous untyped value"
+            ]
+            executor = _CountingStepExecutorFactory()
+            service = ScenarioRunnerService(step_executor_factory=executor)
+
+            with self._dependencies_available():
+                summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.BLOCKED)
+        self.assertEqual(executor.execute_count, 0)
+        self.assertTrue(any("variables_section_valid" in issue for issue in summary.tooling_issues))
+        self.assertTrue(any("email_suffix" in issue for issue in summary.tooling_issues))
+
     @staticmethod
     def _scenario(root: Path, step_type: ScenarioStepType) -> ScenarioDefinition:
         scenario_path = root / "scenario.md"

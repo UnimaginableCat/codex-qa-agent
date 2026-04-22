@@ -19,8 +19,10 @@ class ScenarioStepType(StrEnum):
 class ScenarioVariableSource(StrEnum):
     RUNTIME = "runtime"
     ENV = "env"
+    GENERATED = "generated"
     LITERAL = "literal"
     TEMPLATE = "template"
+    DERIVED = "derived"
 
 
 @dataclass(slots=True)
@@ -29,6 +31,8 @@ class ScenarioVariableDefinition:
     raw_value: str = ""
     source: ScenarioVariableSource = ScenarioVariableSource.LITERAL
     env_name: str | None = None
+    source_name: str | None = None
+    transforms: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

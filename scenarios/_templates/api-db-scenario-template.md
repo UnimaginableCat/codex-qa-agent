@@ -19,6 +19,13 @@ Describe what business functionality should be verified.
 Optional free-form notes for the agent.
 Use this section for assumptions, special setup details, or known limitations.
 
+## Variables
+- company_guid = env:COMPANY_GUID
+- run_suffix = generated:run_suffix
+- email_suffix = derived:run_suffix|lower
+- generated_name = template:AUTOTEST {{run_suffix}}
+- static_label = literal:Fixed literal
+
 ## Steps
 
 ### Step 1

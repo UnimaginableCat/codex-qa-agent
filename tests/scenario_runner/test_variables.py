@@ -41,8 +41,8 @@ class ScenarioVariableTests(unittest.TestCase):
                 ## Variables
                 - company_guid = env:COMPANY_GUID
                 - run_suffix = generated
-                - literal_name = fixed value
-                - generated_price_list_name = AUTOTEST Attributes Flow {{run_suffix}}
+                - literal_name = literal:fixed value
+                - generated_price_list_name = template:AUTOTEST Attributes Flow {{run_suffix}}
 
                 ## Steps
 
@@ -61,7 +61,7 @@ class ScenarioVariableTests(unittest.TestCase):
             ["company_guid", "run_suffix", "literal_name", "generated_price_list_name"],
         )
         self.assertEqual(scenario.variables[0].source, ScenarioVariableSource.ENV)
-        self.assertEqual(scenario.variables[1].source, ScenarioVariableSource.RUNTIME)
+        self.assertEqual(scenario.variables[1].source, ScenarioVariableSource.GENERATED)
         self.assertEqual(scenario.variables[2].source, ScenarioVariableSource.LITERAL)
         self.assertEqual(scenario.variables[3].source, ScenarioVariableSource.TEMPLATE)
         self.assertFalse(
@@ -91,7 +91,7 @@ class ScenarioVariableTests(unittest.TestCase):
             f"AUTOTEST Attributes Flow {executor.run_variables['run_suffix']}",
         )
 
-    def test_partially_parsed_variables_warn_but_do_not_block_fallback_resolution(self) -> None:
+    def test_prose_like_variables_block_before_runtime(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._prepare_env(root, "COMPANY_GUID=company-partial\n")
@@ -137,22 +137,17 @@ class ScenarioVariableTests(unittest.TestCase):
             executor = _CapturingExecutorFactory()
             service = ScenarioRunnerService(
                 step_executor_factory=executor,
-                preflight_checker=_PassingPreflightChecker(),
+                preflight_checker=_VariableAwarePreflightChecker(),
             )
 
             summary = service.run(scenario, workspace_root=root)
 
-        self.assertEqual(summary.final_status, StepStatus.PASS)
-        self.assertTrue(scenario.metadata["variables_parse_warnings"])
-        self.assertTrue(any("Variables section" in issue for issue in summary.tooling_issues))
-        self.assertTrue(any("Variables section" in warning for warning in summary.details["warnings"]))
-        self.assertEqual(executor.run_variables["company_guid"], "company-partial")
-        self.assertIn("run_suffix", executor.run_variables)
-        self.assertEqual(
-            executor.run_variables["generated_price_list_name"],
-            f"AUTOTEST Attributes Flow {executor.run_variables['run_suffix']}",
-        )
-        self.assertEqual(executor.step_payload["path"], "/companies/company-partial/price-lists")
+        self.assertEqual(summary.final_status, StepStatus.BLOCKED)
+        self.assertEqual(executor.execute_count, 0)
+        self.assertTrue(scenario.metadata["variables_validation_errors"])
+        self.assertTrue(any("variables_section_valid" in issue for issue in summary.tooling_issues))
+        self.assertTrue(any("company_guid comes from environment" in warning for warning in summary.details["warnings"]))
+        self.assertEqual(summary.details["executed_step_count"], 0)
 
     def test_variables_section_supports_tables_backticks_and_dash_assignments(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -173,8 +168,8 @@ class ScenarioVariableTests(unittest.TestCase):
                 | Variable | Source | Env | Value |
                 | --- | --- | --- | --- |
                 | company_guid | env | COMPANY_GUID | |
-                | unique_suffix | generated | | |
-                | scenario_run_id | generated | | |
+                | unique_suffix | generated | | run_suffix |
+                | scenario_run_id | generated | | run_id |
                 | generated_name | template | | AUTOTEST {{unique_suffix}} |
                 - `literal_name`: "Fixed literal"
                 - dashed_template — Item {{unique_suffix}}
@@ -232,7 +227,7 @@ class ScenarioVariableTests(unittest.TestCase):
         )
         self.assertIn("/companies/company-table/items/", executor.step_payload["path"])
 
-    def test_variables_section_supports_generated_as_natural_language(self) -> None:
+    def test_variables_section_supports_generated_template_and_derived_transforms(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._prepare_env(root, "")
@@ -248,11 +243,12 @@ class ScenarioVariableTests(unittest.TestCase):
                 env/demo.env
 
                 ## Variables
-                - `run_suffix` should be generated dynamically as a unique timestamp or UUID suffix
-                - `primary_display_name` should be generated as `AUTOTEST User Primary {{run_suffix}}`
-                - `primary_email_mixed_case` should be generated as `AUTOTEST.Primary.{{run_suffix}}@Example.COM`
-                - `primary_email_normalized` should be generated as `autotest.primary.{{run_suffix}}@example.com`
-                - `missing_user_id` should be generated as a valid UUID that is not present in DB
+                - run_suffix = generated:run_suffix
+                - email_suffix = derived:run_suffix|lower
+                - primary_display_name = template:AUTOTEST User Primary {{run_suffix}}
+                - primary_email_mixed_case = template:AUTOTEST.Primary.{{email_suffix}}@Example.COM
+                - primary_email_normalized = derived:primary_email_mixed_case|trim|lower
+                - missing_user_id = generated:uuid
 
                 ## Steps
 
@@ -285,6 +281,7 @@ class ScenarioVariableTests(unittest.TestCase):
             [variable.name for variable in scenario.variables],
             [
                 "run_suffix",
+                "email_suffix",
                 "primary_display_name",
                 "primary_email_mixed_case",
                 "primary_email_normalized",
@@ -297,17 +294,117 @@ class ScenarioVariableTests(unittest.TestCase):
         )
         self.assertEqual(
             executor.run_variables["primary_email_mixed_case"],
-            f"AUTOTEST.Primary.{executor.run_variables['run_suffix']}@Example.COM",
+            f"AUTOTEST.Primary.{executor.run_variables['run_suffix'].lower()}@Example.COM",
         )
         self.assertEqual(
             executor.run_variables["primary_email_normalized"],
-            f"autotest.primary.{executor.run_variables['run_suffix']}@example.com",
+            f"autotest.primary.{executor.run_variables['run_suffix'].lower()}@example.com",
         )
+        self.assertEqual(executor.run_variables["email_suffix"], executor.run_variables["run_suffix"].lower())
         self.assertRegex(
             executor.run_variables["missing_user_id"],
             r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
         )
         self.assertEqual(executor.step_payload["body"]["displayName"], executor.run_variables["primary_display_name"])
+
+    def test_email_suffix_regression_requires_machine_readable_derived_variable(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Email Suffix Regression
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - run_suffix = generated:run_suffix
+                - email_suffix = derived:run_suffix|lower
+                - primary_email = template:autotest.primary.{{email_suffix}}@example.com
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: create user
+                Method: POST
+                Path: /users
+                Body:
+                ```json
+                {"email": "{{primary_email}}"}
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertNotIn("lowercase form", executor.step_payload["body"]["email"])
+        self.assertEqual(
+            executor.step_payload["body"]["email"],
+            f"autotest.primary.{executor.run_variables['run_suffix'].lower()}@example.com",
+        )
+
+    def test_prose_email_suffix_blocks_with_summary_message_before_runtime(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Bad Email Suffix
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - run_suffix = generated:run_suffix
+                - email_suffix = the lowercase form of `run_suffix` and must be used for emails
+                - primary_email = template:autotest.primary.{{email_suffix}}@example.com
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: create user
+                Method: POST
+                Path: /users
+                Body:
+                ```json
+                {"email": "{{primary_email}}"}
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_VariableAwarePreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+            summary_json = (summary.run_state_dir / "summary.json").read_text(encoding="utf-8")
+
+        self.assertEqual(summary.final_status, StepStatus.BLOCKED)
+        self.assertEqual(executor.execute_count, 0)
+        self.assertIn("Variables section contains invalid definition", summary.tooling_issues[0])
+        self.assertIn("lowercase form", summary.tooling_issues[0])
+        self.assertTrue(summary.report_path is not None)
+        self.assertIn("lowercase form", summary_json)
 
     def test_step_one_payload_interpolates_path_headers_body_and_params_from_initial_variables(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -504,7 +601,7 @@ class ScenarioVariableTests(unittest.TestCase):
                 ScenarioVariableDefinition(
                     name="run_suffix",
                     raw_value="generated:run_suffix",
-                    source=ScenarioVariableSource.RUNTIME,
+                    source=ScenarioVariableSource.GENERATED,
                 ),
                 ScenarioVariableDefinition(
                     name="generated_price_list_name",
@@ -636,6 +733,24 @@ class _PassingPreflightChecker:
                 )
             ]
         )
+
+
+class _VariableAwarePreflightChecker:
+    @staticmethod
+    def run(scenario_definition, workspace_root):
+        errors = scenario_definition.metadata.get("variables_validation_errors", [])
+        if errors:
+            return PreflightResult(
+                checks=[
+                    PreflightCheckResult(
+                        name="variables_section_valid",
+                        status=StepStatus.BLOCKED,
+                        message="Variables section contains invalid definition(s); scenario execution was blocked before API/DB runtime.",
+                        details={"errors": list(errors)},
+                    )
+                ]
+            )
+        return _PassingPreflightChecker.run(scenario_definition, workspace_root)
 
 
 def _dedent(value: str) -> str:

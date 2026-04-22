@@ -43,7 +43,14 @@ class PreflightResult:
         return [check for check in self.checks if check.status != StepStatus.PASS]
 
     def issue_messages(self) -> list[str]:
-        return [f"Preflight {check.status.value}: {check.name}: {check.message}" for check in self.failed_checks()]
+        messages: list[str] = []
+        for check in self.failed_checks():
+            message = f"Preflight {check.status.value}: {check.name}: {check.message}"
+            errors = check.details.get("errors")
+            if isinstance(errors, list) and errors:
+                message = f"{message} {'; '.join(str(error) for error in errors)}"
+            messages.append(message)
+        return messages
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -92,6 +99,7 @@ class ScenarioPreflightChecker:
                 message="Environment path is missing.",
             ),
         ]
+        checks.extend(self._check_variable_definitions(scenario_definition))
 
         if scenario_definition.steps:
             checks.append(self._pass("steps_present", f"Scenario contains {len(scenario_definition.steps)} step(s)."))
@@ -117,6 +125,31 @@ class ScenarioPreflightChecker:
             checks.append(self._pass("step_numbers_unique", "Step numbers are unique."))
 
         return checks
+
+    def _check_variable_definitions(self, scenario_definition: ScenarioDefinition) -> list[PreflightCheckResult]:
+        errors = [
+            str(item)
+            for item in scenario_definition.metadata.get("variables_validation_errors", [])
+            if str(item).strip()
+        ]
+        if not errors:
+            return [
+                self._pass(
+                    "variables_section_valid",
+                    "Scenario variable definitions are machine-readable.",
+                )
+            ]
+        return [
+            PreflightCheckResult(
+                name="variables_section_valid",
+                status=StepStatus.BLOCKED,
+                message=(
+                    "Variables section contains invalid definition(s); scenario execution was blocked "
+                    "before API/DB runtime."
+                ),
+                details={"errors": errors},
+            )
+        ]
 
     def _check_environment_and_project(
         self,

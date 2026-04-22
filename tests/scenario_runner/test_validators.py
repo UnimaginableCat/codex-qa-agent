@@ -387,6 +387,31 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
 
+    def test_db_expectation_with_inner_backticks_is_parsed_as_comparison_not_unsupported(self) -> None:
+        payload = {
+            "query": {
+                "row_count": 1,
+                "rows": [
+                    {
+                        "email": "autotest.primary.20260422080300@example.com",
+                    }
+                ],
+            }
+        }
+
+        results = self.validator.validate(
+            self._db_step(
+                [
+                    "`email = the lowercase form of `run_suffix` and must be used for emails`",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+        self.assertNotIn("Unsupported expectation rule", results[0].detail)
+        self.assertIn("Expected value", results[0].detail)
+
     def test_unsupported_expectation_returns_structured_blocked_result(self) -> None:
         results = self.validator.validate(self._api_step(["response magically works"]), {"response": {"body": {}}})
 

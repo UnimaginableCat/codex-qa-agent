@@ -36,6 +36,32 @@ The goal is not only to execute steps, but to verify the intended functionality 
 6. Execute DB verification if needed.
 7. Produce a final report under `artifacts/agent/`.
 
+## Scenario Variables DSL
+
+`## Variables` entries must be machine-readable. The runner must fail fast during validation if a variable value is ambiguous prose or uses an unsupported transform.
+
+Supported formats:
+- `name = env:ENV_NAME`
+- `name = generated:run_suffix`
+- `name = generated:run_id`
+- `name = generated:timestamp_suffix`
+- `name = generated:uuid`
+- `name = template:prefix-{{run_suffix}}`
+- `name = derived:source_variable|lower`
+- `name = derived:source_variable|trim|upper`
+- `name = literal:Fixed literal`
+
+Supported derived transforms are `lower`, `upper`, and `trim`.
+
+Good:
+- `email_suffix = derived:run_suffix|lower`
+- `primary_email = template:autotest.primary.{{email_suffix}}@example.com`
+
+Bad:
+- `email_suffix = the lowercase form of run_suffix`
+- `run_suffix generated dynamically`
+- `display_name = Fixed literal without literal prefix`
+
 ## Project awareness rules
 
 - Always explicitly mention which project under `code/` is being analyzed.
