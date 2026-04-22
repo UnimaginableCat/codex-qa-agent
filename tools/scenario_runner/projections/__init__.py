@@ -1,8 +1,5 @@
-"""Scenario runner summary and reporting projections."""
+"""Scenario runner read-side projections."""
 
-from .summary import build_scenario_summary, resolve_final_status
+from .summary import build_scenario_summary, build_summary_projection, resolve_final_status
 
-__all__ = [
-    "build_scenario_summary",
-    "resolve_final_status",
-]
+__all__ = ["build_scenario_summary", "build_summary_projection", "resolve_final_status"]

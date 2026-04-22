@@ -157,16 +157,14 @@ class ScenarioExecutionSummary:
         payload["code_analysis_summary"] = (
             None if not self.code_analysis_used else "Code analysis was used during this run."
         )
-        payload["notes"] = self._build_notes()
-        payload["checks"] = self._build_report_checks()
-        payload["blockers"] = [
-            step.message for step in self.steps if step.status in {StepStatus.BLOCKED, StepStatus.ERROR}
-        ]
+        payload["notes"] = self.build_notes()
+        payload["checks"] = self.build_report_checks()
+        payload["blockers"] = self.build_blockers()
         payload["assumptions"] = list(self.assumptions)
-        payload["artifacts"] = self._build_artifact_list()
+        payload["artifacts"] = self.build_artifact_list()
         return payload
 
-    def _build_notes(self) -> list[str]:
+    def build_notes(self) -> list[str]:
         notes = [
             f"Environment: {self.environment}",
             f"Run ID: {self.run_id}",
@@ -175,7 +173,7 @@ class ScenarioExecutionSummary:
         notes.extend(self.tooling_issues)
         return notes
 
-    def _build_report_checks(self) -> list[dict[str, str | None]]:
+    def build_report_checks(self) -> list[dict[str, str | None]]:
         checks: list[dict[str, str | None]] = []
         for step in self.steps:
             checks.append(
@@ -195,7 +193,10 @@ class ScenarioExecutionSummary:
                 )
         return checks
 
-    def _build_artifact_list(self) -> list[str]:
+    def build_blockers(self) -> list[str]:
+        return [step.message for step in self.steps if step.status in {StepStatus.BLOCKED, StepStatus.ERROR}]
+
+    def build_artifact_list(self) -> list[str]:
         artifacts = [str(self.artifact_dir), str(self.run_state_dir)]
         if self.report_path is not None:
             artifacts.append(str(self.report_path))

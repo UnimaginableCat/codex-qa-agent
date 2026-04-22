@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from tools.common.errors import ToolingError
 from tools.common.io import write_text_file
@@ -91,6 +91,39 @@ class WorkspaceDirectories:
     parsed_plans_dir: Path
     runs_root_dir: Path
     artifacts_root_dir: Path
+
+
+class ScenarioRunArtifactStore:
+    """Persists raw execution artifacts and projection outputs to disk."""
+
+    def write_initial_state(self, session, scenario_definition: ScenarioDefinition) -> None:
+        write_compiled_plan_json(session.run_context.compiled_plan_path, scenario_definition)
+        write_bundle_compiled_plan_json(session.run_context, scenario_definition)
+        write_context_json(session.run_context)
+        if session.execution_events:
+            self.write_journal(session.run_context, [session.execution_events[0]])
+
+    @staticmethod
+    def create_report_path(run_context: RunContext) -> Path:
+        return create_report_path(run_context)
+
+    @staticmethod
+    def write_context(run_context: RunContext) -> Path:
+        return write_context_json(run_context)
+
+    @staticmethod
+    def write_summary(run_context: RunContext, summary: ScenarioExecutionSummary) -> Path:
+        return write_summary_json(run_context, summary)
+
+    @staticmethod
+    def write_journal(
+        run_context: RunContext,
+        entries: Iterable[dict[str, Any] | ExecutionEvent],
+    ) -> Path | None:
+        last_path: Path | None = None
+        for entry in entries:
+            last_path = write_journal_entry(run_context, entry)
+        return last_path
 
 
 def ensure_workspace_directories(workspace_root: Path) -> WorkspaceDirectories:

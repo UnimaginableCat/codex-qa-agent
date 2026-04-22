@@ -34,10 +34,11 @@ class ReportBuildService:
     def build(self, project: str, scenario: str, summary_path: Path, output_path: Path) -> Path:
         summary = self._summary_loader.load(summary_path)
         context = ReportContext(project=project, scenario=scenario, summary=summary)
+        return self.build_from_context(context=context, output_path=output_path)
 
+    def build_from_context(self, context: ReportContext, output_path: Path) -> Path:
         content = self._renderer.render(context)
         self._writer.write(output_path, content)
-
         return output_path
 
 
