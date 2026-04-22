@@ -20,6 +20,7 @@ from .execution import (
     StepExecutionLifecycleState,
     StepExecutionState,
 )
+from .engine import ScenarioExecutionEngine, ScenarioExecutionSession
 from .executors import StepExecutorFactory
 from .interpolator import PlaceholderInterpolator
 from .parser import MarkdownScenarioParser
@@ -45,6 +46,8 @@ __all__ = [
     "SensitiveDataRedactor",
     "ScenarioDefinition",
     "ScenarioExecutionSummary",
+    "ScenarioExecutionEngine",
+    "ScenarioExecutionSession",
     "ScenarioRunLifecycleState",
     "ScenarioRunState",
     "ScenarioPreflightChecker",
