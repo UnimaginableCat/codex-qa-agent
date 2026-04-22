@@ -19,6 +19,15 @@ import requests
 
 from tools.common import ExecutionResult, JsonFileLoadError, StepStatus, ValidationError
 from tools.common.errors import EnvFileLoadError
+from tools.common.runtime_signals import (
+    ContinuationHint,
+    NormalizedRuntimeSignal,
+    RetryHint,
+    RuntimeFailureCategory,
+    RuntimeSignalSource,
+    RuntimeSignalTag,
+    ToolFailureCode,
+)
 
 from .auth import AuthConfigurationError, AuthStrategyFactory
 from .loaders import ApiEnvLoader, RequestStepLoader
@@ -110,6 +119,7 @@ class ApiRequestService:
                     "url": prepared_request.url,
                     "classification": "connectivity",
                     "request_debug": request_debug,
+                    "runtime_signal": _api_connectivity_signal().to_dict(),
                 },
             )
 
@@ -187,6 +197,7 @@ class ApiRequestService:
                         "classification": "connectivity",
                         "request_debug": request_debug,
                         "retry": retry_details,
+                        "runtime_signal": _api_connectivity_signal().to_dict(),
                     },
                 )
             except Exception as exc:  # noqa: BLE001
@@ -209,6 +220,7 @@ class ApiRequestService:
                         "url": prepared_request.url,
                         "request_debug": request_debug,
                         "retry": retry_details,
+                        "runtime_signal": _runtime_tool_failure_signal().to_dict(),
                     },
                 )
 
@@ -253,6 +265,7 @@ class ApiRequestService:
                         "classification": "service_unavailable",
                         "request_debug": request_debug,
                         "retry": retry_details,
+                        "runtime_signal": _api_service_unavailable_signal().to_dict(),
                     },
                 )
 
@@ -281,6 +294,7 @@ class ApiRequestService:
                 "classification": "connectivity",
                 "request_debug": request_debug,
                 "retry": retry_details,
+                "runtime_signal": _api_connectivity_signal().to_dict(),
             },
         )
 
@@ -692,19 +706,28 @@ class ApiRequestRunner:
             return ExecutionResult(
                 status=StepStatus.BLOCKED,
                 message=str(exc),
-                details={"method": step.method},
+                details={
+                    "method": step.method,
+                    "runtime_signal": _api_auth_configuration_signal().to_dict(),
+                },
             )
         except ValidationError as exc:
             return ExecutionResult(
                 status=StepStatus.BLOCKED,
                 message=str(exc),
-                details={"method": step.method},
+                details={
+                    "method": step.method,
+                    "runtime_signal": _api_auth_configuration_signal().to_dict(),
+                },
             )
         except Exception as exc:  # noqa: BLE001
             return ExecutionResult(
                 status=StepStatus.ERROR,
                 message=f"Failed to prepare request: {exc}",
-                details={"method": step.method},
+                details={
+                    "method": step.method,
+                    "runtime_signal": _runtime_tool_failure_signal().to_dict(),
+                },
             )
 
         return self._request_service.execute(step, prepared_request)
@@ -716,4 +739,58 @@ def build_runner() -> ApiRequestRunner:
         step_loader=RequestStepLoader(),
         request_builder=ApiRequestBuilder(auth_strategy_factory=AuthStrategyFactory()),
         request_service=ApiRequestService(),
+    )
+
+
+def _api_auth_configuration_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.API_AUTH_CONFIGURATION_BLOCKED,
+        category=RuntimeFailureCategory.CONFIGURATION,
+        retry_hint=RetryHint.AFTER_OPERATOR_FIX,
+        continuation_hint=ContinuationHint.STOP_AND_FIX,
+        tags=(RuntimeSignalTag.ENVIRONMENT_BLOCKED, RuntimeSignalTag.USER_FIXABLE),
+        operator_fixable=True,
+    )
+
+
+def _api_connectivity_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.API_CONNECTIVITY_BLOCKED,
+        category=RuntimeFailureCategory.CONNECTIVITY,
+        retry_hint=RetryHint.MANUAL_RETRY,
+        continuation_hint=ContinuationHint.RETRY_MANUALLY,
+        tags=(
+            RuntimeSignalTag.RETRYABLE,
+            RuntimeSignalTag.ENVIRONMENT_BLOCKED,
+            RuntimeSignalTag.USER_FIXABLE,
+        ),
+        resumable=True,
+        operator_fixable=True,
+    )
+
+
+def _api_service_unavailable_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.API_SERVICE_UNAVAILABLE,
+        category=RuntimeFailureCategory.SERVICE_AVAILABILITY,
+        retry_hint=RetryHint.AFTER_SERVICE_RECOVERY,
+        continuation_hint=ContinuationHint.WAIT_FOR_DECISION,
+        tags=(RuntimeSignalTag.RETRYABLE, RuntimeSignalTag.REQUIRES_DECISION),
+        resumable=True,
+        requires_decision=True,
+    )
+
+
+def _runtime_tool_failure_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.RUNTIME_TOOL_FAILURE,
+        category=RuntimeFailureCategory.TOOL_RUNTIME,
+        retry_hint=RetryHint.MANUAL_RETRY,
+        continuation_hint=ContinuationHint.RETRY_MANUALLY,
+        tags=(RuntimeSignalTag.RETRYABLE,),
+        resumable=True,
     )

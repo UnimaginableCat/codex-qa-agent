@@ -3,6 +3,15 @@
 from .errors import EnvFileLoadError, JsonFileLoadError, ToolingError, ValidationError
 from .json_safe import to_json_safe
 from .result import ExecutionResult
+from .runtime_signals import (
+    ContinuationHint,
+    NormalizedRuntimeSignal,
+    RetryHint,
+    RuntimeFailureCategory,
+    RuntimeSignalSource,
+    RuntimeSignalTag,
+    ToolFailureCode,
+)
 from .statuses import StepStatus
 
 __all__ = [
@@ -10,7 +19,14 @@ __all__ = [
     "EnvFileLoadError",
     "ExecutionResult",
     "JsonFileLoadError",
+    "ContinuationHint",
+    "NormalizedRuntimeSignal",
+    "RetryHint",
+    "RuntimeFailureCategory",
+    "RuntimeSignalSource",
+    "RuntimeSignalTag",
     "StepStatus",
+    "ToolFailureCode",
     "ToolingError",
     "ValidationError",
     "read_json_file",

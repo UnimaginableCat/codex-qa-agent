@@ -33,6 +33,7 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], StepStatus.ERROR.value)
         self.assertIn("invalid JSON", payload["message"])
+        self.assertEqual(payload["runtime_signal"]["code"], "runtime_tool_failure")
 
     def test_internal_executor_exception_is_error(self) -> None:
         with TemporaryDirectory() as tmp:

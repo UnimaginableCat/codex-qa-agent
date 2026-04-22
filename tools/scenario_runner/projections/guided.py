@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from tools.common.runtime_signals import ContinuationHint, RuntimeSignalTag, ToolFailureCode
 from tools.common.statuses import StepStatus
 
 from ..domain.execution import ExecutionIssue, ExecutionPhase
@@ -17,6 +18,7 @@ from ..domain.guided import (
     GuidedDiagnosticTag,
 )
 from ..domain.models import ScenarioStepType, StepExecutionResult
+from ..runtime.normalization import normalize_step_runtime_signal
 from .models import ExecutionProjectionState, GuidedRunProjection
 
 
@@ -462,16 +464,47 @@ def _guided_template_for_issue(issue: ExecutionIssue) -> _GuidedTemplate | None:
 
 def _guided_template_for_step_result(step_result: StepExecutionResult) -> _GuidedTemplate | None:
     message = step_result.message
-    details = step_result.details
-    tool_classification = str(details.get("tool_classification", "")).strip().lower()
-    phase = _step_result_phase(step_result)
+    signal = normalize_step_runtime_signal(step_result)
+    if signal is None:
+        if step_result.status == StepStatus.FAIL:
+            return _template(
+                title="Scenario expectation failed at runtime",
+                summary=message,
+                tags=(GuidedDiagnosticTag.INFORMATIVE,),
+                continuation_policy=ContinuationPolicy.STOP_AND_FIX,
+                actions=(
+                    _action(
+                        "inspect_runtime_mismatch",
+                        GuidedActionType.INSPECT_ARTIFACTS,
+                        "Inspect runtime mismatch",
+                        "Compare the expected and actual runtime data recorded for this step.",
+                        recommended=True,
+                    ),
+                ),
+            )
+        if step_result.status == StepStatus.ERROR:
+            return _template(
+                title="Runner integration failed during step execution",
+                summary=message,
+                tags=(GuidedDiagnosticTag.RETRYABLE,),
+                continuation_policy=ContinuationPolicy.RETRY_MANUALLY,
+                actions=(
+                    _action(
+                        "retry_after_runner_failure",
+                        GuidedActionType.RETRY_RUN,
+                        "Retry run",
+                        "Retry after checking the local runner tool output and step artifacts.",
+                        recommended=True,
+                    ),
+                ),
+            )
+        return None
 
-    if phase == ExecutionPhase.INTERPOLATION:
-        return _template(
+    if signal.code == ToolFailureCode.STEP_INTERPOLATION_BLOCKED:
+        return _template_from_signal(
+            signal,
             title="Step payload could not be interpolated",
             summary=message,
-            tags=(GuidedDiagnosticTag.USER_FIXABLE,),
-            continuation_policy=ContinuationPolicy.STOP_AND_FIX,
             actions=(
                 _action(
                     "fix_interpolation",
@@ -482,7 +515,7 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
                 ),
             ),
         )
-    if tool_classification == "connectivity":
+    if signal.code == ToolFailureCode.API_CONNECTIVITY_BLOCKED:
         retry_action = _action(
             "retry_after_connectivity_fix",
             GuidedActionType.RETRY_RUN,
@@ -496,15 +529,10 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
             "Inspect request debug",
             "Review request_debug in the step artifacts to see DNS and resolver diagnostics.",
         )
-        return _template(
+        return _template_from_signal(
+            signal,
             title="External service connectivity blocked the step",
             summary=message,
-            tags=(
-                GuidedDiagnosticTag.RETRYABLE,
-                GuidedDiagnosticTag.ENVIRONMENT_BLOCKED,
-                GuidedDiagnosticTag.USER_FIXABLE,
-            ),
-            continuation_policy=ContinuationPolicy.RETRY_MANUALLY,
             actions=(retry_action, inspect_action),
             decision_point=DecisionPoint(
                 decision_id=f"decision:connectivity:{step_result.step_id}",
@@ -513,12 +541,12 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
                     "The step did not reach the external service. "
                     "Decide whether to inspect diagnostics first or retry after fixing connectivity."
                 ),
-                continuation_policy=ContinuationPolicy.RETRY_MANUALLY,
+                continuation_policy=_continuation_policy_from_signal(signal),
                 recommended_action_id=retry_action.action_id,
                 actions=(retry_action, inspect_action),
             ),
         )
-    if tool_classification == "service_unavailable":
+    if signal.code == ToolFailureCode.API_SERVICE_UNAVAILABLE:
         retry_action = _action(
             "retry_after_service_recovery",
             GuidedActionType.RETRY_RUN,
@@ -526,11 +554,10 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
             "Retry the scenario when the upstream service becomes available.",
             recommended=True,
         )
-        return _template(
+        return _template_from_signal(
+            signal,
             title="Upstream service is unavailable",
             summary=message,
-            tags=(GuidedDiagnosticTag.RETRYABLE, GuidedDiagnosticTag.REQUIRES_DECISION),
-            continuation_policy=ContinuationPolicy.WAIT_FOR_DECISION,
             actions=(
                 retry_action,
                 _action(
@@ -544,7 +571,7 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
                 decision_id=f"decision:service_unavailable:{step_result.step_id}",
                 title="Wait or retry unavailable service",
                 prompt="The upstream service returned a temporary availability error. Decide when to retry.",
-                continuation_policy=ContinuationPolicy.WAIT_FOR_DECISION,
+                continuation_policy=_continuation_policy_from_signal(signal),
                 recommended_action_id=retry_action.action_id,
                 actions=(
                     retry_action,
@@ -557,12 +584,11 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
                 ),
             ),
         )
-    if _is_api_auth_or_config_message(message):
-        return _template(
+    if signal.code == ToolFailureCode.API_AUTH_CONFIGURATION_BLOCKED:
+        return _template_from_signal(
+            signal,
             title="API auth or base URL configuration blocked the step",
             summary=message,
-            tags=(GuidedDiagnosticTag.ENVIRONMENT_BLOCKED, GuidedDiagnosticTag.USER_FIXABLE),
-            continuation_policy=ContinuationPolicy.STOP_AND_FIX,
             actions=(
                 _action(
                     "fix_api_auth",
@@ -573,12 +599,11 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
                 ),
             ),
         )
-    if _is_db_connection_message(message):
-        return _template(
+    if signal.code == ToolFailureCode.DB_CONNECTION_CONFIGURATION_MISSING:
+        return _template_from_signal(
+            signal,
             title="DB connection settings are missing",
             summary=message,
-            tags=(GuidedDiagnosticTag.ENVIRONMENT_BLOCKED, GuidedDiagnosticTag.USER_FIXABLE),
-            continuation_policy=ContinuationPolicy.STOP_AND_FIX,
             actions=(
                 _action(
                     "fix_db_connection",
@@ -589,18 +614,70 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
                 ),
             ),
         )
-    if _is_db_read_only_violation(message):
-        return _template(
+    if signal.code == ToolFailureCode.DB_READ_ONLY_GUARD_VIOLATION:
+        return _template_from_signal(
+            signal,
             title="DB step violates the read-only safety contract",
             summary=message,
-            tags=(GuidedDiagnosticTag.USER_FIXABLE,),
-            continuation_policy=ContinuationPolicy.STOP_AND_FIX,
             actions=(
                 _action(
                     "rewrite_sql_as_read_only",
                     GuidedActionType.UPDATE_SCENARIO,
                     "Rewrite SQL as read-only",
                     "Replace the SQL with a single read-only SELECT query that only verifies persisted state.",
+                    recommended=True,
+                ),
+            ),
+        )
+    if signal.code == ToolFailureCode.DB_CONNECTION_FAILED:
+        retry_action = _action(
+            "retry_db_connection",
+            GuidedActionType.RETRY_RUN,
+            "Retry after DB fix",
+            "Retry the scenario after fixing DB availability or access configuration.",
+            recommended=True,
+        )
+        return _template_from_signal(
+            signal,
+            title="Database connection failed during verification",
+            summary=message,
+            actions=(
+                retry_action,
+                _action(
+                    "inspect_db_artifacts",
+                    GuidedActionType.INSPECT_ARTIFACTS,
+                    "Inspect DB artifacts",
+                    "Review the recorded SQL and connection failure details before retrying.",
+                ),
+            ),
+            decision_point=DecisionPoint(
+                decision_id=f"decision:db_connection:{step_result.step_id}",
+                title="Resolve DB connection failure",
+                prompt="Decide whether to inspect the DB failure details first or retry after fixing access.",
+                continuation_policy=_continuation_policy_from_signal(signal),
+                recommended_action_id=retry_action.action_id,
+                actions=(
+                    retry_action,
+                    _action(
+                        "inspect_db_artifacts",
+                        GuidedActionType.INSPECT_ARTIFACTS,
+                        "Inspect DB artifacts",
+                        "Review the recorded SQL and failure details before retrying.",
+                    ),
+                ),
+            ),
+        )
+    if signal.code == ToolFailureCode.RUNTIME_TOOL_FAILURE:
+        return _template_from_signal(
+            signal,
+            title="Runner integration failed during step execution",
+            summary=message,
+            actions=(
+                _action(
+                    "retry_after_runner_failure",
+                    GuidedActionType.RETRY_RUN,
+                    "Retry run",
+                    "Retry after checking the local runner tool output and step artifacts.",
                     recommended=True,
                 ),
             ),
@@ -617,22 +694,6 @@ def _guided_template_for_step_result(step_result: StepExecutionResult) -> _Guide
                     GuidedActionType.INSPECT_ARTIFACTS,
                     "Inspect runtime mismatch",
                     "Compare the expected and actual runtime data recorded for this step.",
-                    recommended=True,
-                ),
-            ),
-        )
-    if step_result.status == StepStatus.ERROR:
-        return _template(
-            title="Runner integration failed during step execution",
-            summary=message,
-            tags=(GuidedDiagnosticTag.RETRYABLE,),
-            continuation_policy=ContinuationPolicy.RETRY_MANUALLY,
-            actions=(
-                _action(
-                    "retry_after_runner_failure",
-                    GuidedActionType.RETRY_RUN,
-                    "Retry run",
-                    "Retry after checking the local runner tool output and step artifacts.",
                     recommended=True,
                 ),
             ),
@@ -658,36 +719,6 @@ def _step_reference(step_result: StepExecutionResult):
         step_id=step_result.step_id,
         step_number=step_result.step_number,
         step_type=step_result.step_type,
-    )
-
-
-def _is_api_auth_or_config_message(message: str) -> bool:
-    lowered = message.lower()
-    return any(
-        token in lowered
-        for token in (
-            "missing api_base_url",
-            "api_auth_type=",
-            "unsupported api_auth_type",
-            "unsupported auth type",
-        )
-    )
-
-
-def _is_db_connection_message(message: str) -> bool:
-    lowered = message.lower()
-    return "missing db connection settings" in lowered or "database_url" in lowered
-
-
-def _is_db_read_only_violation(message: str) -> bool:
-    lowered = message.lower()
-    return any(
-        token in lowered
-        for token in (
-            "only select queries are allowed",
-            "read-only policy violation",
-            "multiple sql statements are not allowed",
-        )
     )
 
 
@@ -725,3 +756,44 @@ def _action(
         description=description,
         recommended=recommended,
     )
+
+
+def _template_from_signal(
+    signal,
+    *,
+    title: str,
+    summary: str,
+    actions: tuple[GuidedAction, ...],
+    decision_point: DecisionPoint | None = None,
+) -> _GuidedTemplate:
+    return _template(
+        title=title,
+        summary=summary,
+        tags=_guided_tags_from_signal(signal),
+        continuation_policy=_continuation_policy_from_signal(signal),
+        actions=actions,
+        decision_point=decision_point,
+    )
+
+
+def _guided_tags_from_signal(signal) -> tuple[GuidedDiagnosticTag, ...]:
+    mapping = {
+        RuntimeSignalTag.INFORMATIVE: GuidedDiagnosticTag.INFORMATIVE,
+        RuntimeSignalTag.RETRYABLE: GuidedDiagnosticTag.RETRYABLE,
+        RuntimeSignalTag.USER_FIXABLE: GuidedDiagnosticTag.USER_FIXABLE,
+        RuntimeSignalTag.ENVIRONMENT_BLOCKED: GuidedDiagnosticTag.ENVIRONMENT_BLOCKED,
+        RuntimeSignalTag.UNSUPPORTED_BY_RUNNER: GuidedDiagnosticTag.UNSUPPORTED_BY_RUNNER,
+        RuntimeSignalTag.REQUIRES_DECISION: GuidedDiagnosticTag.REQUIRES_DECISION,
+    }
+    return tuple(mapping[tag] for tag in signal.tags if tag in mapping)
+
+
+def _continuation_policy_from_signal(signal) -> ContinuationPolicy:
+    mapping = {
+        ContinuationHint.CONTINUE: ContinuationPolicy.CONTINUE,
+        ContinuationHint.STOP_AND_FIX: ContinuationPolicy.STOP_AND_FIX,
+        ContinuationHint.RETRY_MANUALLY: ContinuationPolicy.RETRY_MANUALLY,
+        ContinuationHint.WAIT_FOR_DECISION: ContinuationPolicy.WAIT_FOR_DECISION,
+        ContinuationHint.STOP_UNSUPPORTED: ContinuationPolicy.STOP_UNSUPPORTED,
+    }
+    return mapping[signal.continuation_hint]

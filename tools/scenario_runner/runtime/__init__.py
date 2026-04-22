@@ -14,6 +14,7 @@ from .interpolator import (
     PlaceholderInterpolator,
     UnresolvedPlaceholderError,
 )
+from .normalization import normalize_issue_runtime_signal, normalize_step_runtime_signal, normalize_tool_runtime_signal
 from .path_lookup import PathLookupResult, PathSegment, resolve_path, tokenize_path
 from .redaction import REDACTED, SensitiveDataRedactor, redact_sensitive_data
 from .validators import ExpectationContractDiagnostic, ExpectationValidationError, ScenarioStepValidator
@@ -47,6 +48,9 @@ __all__ = [
     "VariableResolutionError",
     "build_initial_variables",
     "is_known_runtime_variable_name",
+    "normalize_issue_runtime_signal",
+    "normalize_step_runtime_signal",
+    "normalize_tool_runtime_signal",
     "redact_sensitive_data",
     "resolve_path",
     "resolve_step_variables",
