@@ -16,6 +16,7 @@ from .markdown_document import (
     MarkdownScenarioDocument,
     MarkdownSection,
     MarkdownStepBlock,
+    parse_markdown_document_from_backend,
     parse_markdown_document,
     split_step_blocks,
 )
@@ -60,5 +61,6 @@ __all__ = [
     "empty_parse_diagnostics",
     "load_scenario_source",
     "parse_markdown_document",
+    "parse_markdown_document_from_backend",
     "split_step_blocks",
 ]
