@@ -15,6 +15,14 @@ from typing import Any
 from tools.common.statuses import StepStatus
 
 from .artifacts import write_step_artifact_json
+from .execution import (
+    ExecutionIssue,
+    ExecutionIssueKind,
+    ExecutionOutcome,
+    ExecutionPhase,
+    StepExecutionLifecycleState,
+    StepExecutionState,
+)
 from .interpolator import InterpolationError, PlaceholderInterpolator
 from .models import RunContext, ScenarioDefinition, ScenarioStep, ScenarioStepType, StepExecutionResult
 from .path_lookup import resolve_path
@@ -30,6 +38,8 @@ class StepExecutionOutcome:
     captured_values: dict[str, Any] = field(default_factory=dict)
     tool_payload: dict[str, Any] | None = None
     journal_details: dict[str, Any] = field(default_factory=dict)
+    execution_state: StepExecutionState | None = None
+    issues: list[ExecutionIssue] = field(default_factory=list)
 
 
 class StepExecutorFactory:
@@ -57,16 +67,35 @@ class _BaseStepExecutor:
         scenario_definition: ScenarioDefinition,
         step: ScenarioStep,
     ) -> StepExecutionOutcome:
+        step_state = StepExecutionState.from_step(
+            step,
+            lifecycle_state=StepExecutionLifecycleState.PREPARING,
+        )
         try:
             step_payload = self._build_step_payload(run_context, step)
         except InterpolationError as exc:
+            step_result = self._build_step_result(
+                step=step,
+                status=StepStatus.BLOCKED,
+                message=str(exc),
+                details={"phase": ExecutionPhase.INTERPOLATION.value},
+            )
+            issue = ExecutionIssue(
+                code="step_interpolation_failed",
+                message=str(exc),
+                phase=ExecutionPhase.INTERPOLATION,
+                issue_type=ExecutionIssueKind.VALIDATION,
+                outcome=StepStatus.BLOCKED,
+                step=step_state.step,
+            )
             return StepExecutionOutcome(
-                step_result=self._build_step_result(
-                    step=step,
-                    status=StepStatus.BLOCKED,
-                    message=str(exc),
-                ),
+                step_result=step_result,
                 journal_details={"phase": "interpolation"},
+                execution_state=step_state.finish(
+                    ExecutionOutcome.from_step_result(step_result, phase=ExecutionPhase.INTERPOLATION),
+                    issues=[issue],
+                ),
+                issues=[issue],
             )
 
         input_artifact_path = write_step_artifact_json(
@@ -94,12 +123,23 @@ class _BaseStepExecutor:
         )
 
         captures: dict[str, Any] = {}
+        issues: list[ExecutionIssue] = []
         if status == StepStatus.PASS:
             try:
                 captures = self._apply_captures(step=step, payload=payload)
             except CaptureResolutionError as exc:
                 status = StepStatus.FAIL
                 message = str(exc)
+                issues.append(
+                    ExecutionIssue(
+                        code="step_capture_failed",
+                        message=str(exc),
+                        phase=ExecutionPhase.CAPTURE,
+                        issue_type=ExecutionIssueKind.VALIDATION,
+                        outcome=StepStatus.FAIL,
+                        step=step_state.step,
+                    )
+                )
 
         step_result = self._build_step_result(
             step=step,
@@ -115,6 +155,11 @@ class _BaseStepExecutor:
                 "api_retry": payload.get("retry") if isinstance(payload, dict) else None,
             },
         )
+        outcome_phase = ExecutionPhase.STEP_EXECUTION if not issues else ExecutionPhase.CAPTURE
+        execution_state = step_state.finish(
+            ExecutionOutcome.from_step_result(step_result, phase=outcome_phase),
+            issues=issues,
+        )
 
         return StepExecutionOutcome(
             step_result=step_result,
@@ -129,6 +174,8 @@ class _BaseStepExecutor:
                 "api_request_debug": payload.get("request_debug") if isinstance(payload, dict) else None,
                 "api_retry": payload.get("retry") if isinstance(payload, dict) else None,
             },
+            execution_state=execution_state,
+            issues=issues,
         )
 
     def _run_cli(self, env_path: Path, step_payload: dict[str, Any]) -> dict[str, Any]:

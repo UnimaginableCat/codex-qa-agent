@@ -10,6 +10,16 @@ from .models import (
     ScenarioStep,
     StepExecutionResult,
 )
+from .execution import (
+    ExecutionEvent,
+    ExecutionIssue,
+    ExecutionOutcome,
+    ExecutionPhase,
+    ScenarioRunLifecycleState,
+    ScenarioRunState,
+    StepExecutionLifecycleState,
+    StepExecutionState,
+)
 from .executors import StepExecutorFactory
 from .interpolator import PlaceholderInterpolator
 from .parser import MarkdownScenarioParser
@@ -22,6 +32,10 @@ __all__ = [
     "ApiStepDefinition",
     "DbStepDefinition",
     "ExpectationCheckResult",
+    "ExecutionEvent",
+    "ExecutionIssue",
+    "ExecutionOutcome",
+    "ExecutionPhase",
     "MarkdownScenarioParser",
     "PlaceholderInterpolator",
     "PreflightCheckResult",
@@ -31,11 +45,15 @@ __all__ = [
     "SensitiveDataRedactor",
     "ScenarioDefinition",
     "ScenarioExecutionSummary",
+    "ScenarioRunLifecycleState",
+    "ScenarioRunState",
     "ScenarioPreflightChecker",
     "ScenarioRunnerService",
     "ScenarioStepValidator",
     "ScenarioStep",
     "StepExecutorFactory",
     "StepExecutionResult",
+    "StepExecutionLifecycleState",
+    "StepExecutionState",
     "redact_sensitive_data",
 ]

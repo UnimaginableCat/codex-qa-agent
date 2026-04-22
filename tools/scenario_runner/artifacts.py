@@ -10,6 +10,7 @@ from typing import Any
 from tools.common.errors import ToolingError
 from tools.common.io import write_text_file
 
+from .execution import ExecutionEvent
 from .models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
 from .redaction import redact_sensitive_data
 
@@ -182,9 +183,10 @@ def write_summary_json(run_context: RunContext, summary: ScenarioExecutionSummar
     return target_path
 
 
-def write_journal_entry(run_context: RunContext, entry: dict[str, Any]) -> Path:
+def write_journal_entry(run_context: RunContext, entry: dict[str, Any] | ExecutionEvent) -> Path:
     target_path = run_context.run_state_dir / JOURNAL_FILENAME
-    serialized_entry = json.dumps(redact_sensitive_data(entry), ensure_ascii=False)
+    payload = entry.to_dict() if isinstance(entry, ExecutionEvent) else entry
+    serialized_entry = json.dumps(redact_sensitive_data(payload), ensure_ascii=False)
     _append_jsonl(target_path, serialized_entry)
     _append_jsonl(_bundle_file_path(run_context, JOURNAL_FILENAME), serialized_entry)
     _write_manifest_json(run_context)
