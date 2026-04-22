@@ -10,7 +10,6 @@ from .errors import ScenarioParseError
 from .loader import ScenarioSource
 from .markdown_backend import MarkdownBackend, MarkdownBlock, MarkdownItBackend
 
-MARKDOWN_SECTION_RE = re.compile(r"^##\s+(?P<name>.+?)\s*$")
 MARKDOWN_STEP_RE = re.compile(r"^###\s+Step\s+(?P<number>\d+)\s*$", re.IGNORECASE)
 MARKDOWN_SCENARIO_TITLE_RE = re.compile(r"^#\s+Scenario:\s*(?P<name>.+?)\s*$")
 
@@ -40,19 +39,6 @@ class MarkdownScenarioDocument:
     source: ScenarioSource
     title: str
     sections: list[MarkdownSection]
-
-
-def parse_markdown_document(
-    source: ScenarioSource,
-    error_type: type[ScenarioParseError] = ScenarioParseError,
-) -> MarkdownScenarioDocument:
-    """Split raw scenario markdown into title and top-level sections."""
-
-    return MarkdownScenarioDocument(
-        source=source,
-        title=parse_markdown_title(source.lines, source.path, error_type=error_type),
-        sections=split_top_level_sections(source.lines, error_type=error_type),
-    )
 
 
 def parse_markdown_document_from_backend(
@@ -134,88 +120,6 @@ def _sections_from_backend_headings(
                 name=section_name,
                 line_number=line_number,
                 lines=source.lines[line_number:section_end_line],
-            )
-        )
-
-    return sections
-
-
-def parse_markdown_title(
-    lines: list[str],
-    scenario_path: Path,
-    error_type: type[ScenarioParseError] = ScenarioParseError,
-) -> str:
-    title: str | None = None
-    title_line_number = 0
-    inside_fence = False
-    for line_number, line in enumerate(lines, start=1):
-        stripped_line = line.strip()
-        if is_fence_line(stripped_line):
-            inside_fence = not inside_fence
-
-        match = MARKDOWN_SCENARIO_TITLE_RE.match(stripped_line) if not inside_fence else None
-        if match:
-            if title is not None:
-                raise error_type(
-                    f"Scenario '{scenario_path}' is malformed: duplicate '# Scenario:' title "
-                    f"at line {line_number}; first declared at line {title_line_number}."
-                )
-            title = match.group("name").strip()
-            title_line_number = line_number
-
-    if title is not None:
-        return title
-
-    raise error_type(f"Scenario '{scenario_path}' is malformed: missing '# Scenario: ...' title.")
-
-
-def split_top_level_sections(
-    lines: list[str],
-    error_type: type[ScenarioParseError] = ScenarioParseError,
-) -> list[MarkdownSection]:
-    sections: list[MarkdownSection] = []
-    seen_sections: dict[str, int] = {}
-    current_name: str | None = None
-    current_line_number = 0
-    current_lines: list[str] = []
-    inside_fence = False
-
-    for line_number, line in enumerate(lines, start=1):
-        stripped_line = line.strip()
-        if is_fence_line(stripped_line):
-            inside_fence = not inside_fence
-
-        match = MARKDOWN_SECTION_RE.match(stripped_line) if not inside_fence else None
-        if match:
-            if current_name is not None:
-                sections.append(
-                    MarkdownSection(
-                        name=current_name,
-                        line_number=current_line_number,
-                        lines=current_lines,
-                    )
-                )
-            current_name = match.group("name").strip()
-            current_line_number = line_number
-            normalized_name = current_name.lower()
-            if normalized_name in seen_sections:
-                raise error_type(
-                    f"Duplicate top-level section '## {current_name}' at line {line_number}; "
-                    f"first declared at line {seen_sections[normalized_name]}."
-                )
-            seen_sections[normalized_name] = line_number
-            current_lines = []
-            continue
-
-        if current_name is not None:
-            current_lines.append(line)
-
-    if current_name is not None:
-        sections.append(
-            MarkdownSection(
-                name=current_name,
-                line_number=current_line_number,
-                lines=current_lines,
             )
         )
 

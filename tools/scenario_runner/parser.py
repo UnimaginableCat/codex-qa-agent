@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .models import (
     ApiStepDefinition,
@@ -20,12 +20,10 @@ from .models import (
 )
 from .parsing.errors import ScenarioParseError as _ScenarioParseError
 from .parsing.interfaces import ScenarioParseOptions
-from .parsing.loader import ScenarioSource, load_scenario_source
+from .parsing.loader import load_scenario_source
 from .parsing.markdown_document import (
     MARKDOWN_STEP_RE as _STEP_RE,
-    MarkdownScenarioDocument,
     MarkdownSection,
-    parse_markdown_document,
     parse_markdown_document_from_backend,
     split_step_blocks,
 )
@@ -133,21 +131,9 @@ class MarkdownScenarioParser:
         "final expectations": "final_expectations",
     }
 
-    def __init__(
-        self,
-        use_backend_document_parser: bool = True,
-        document_parser: Callable[[ScenarioSource], MarkdownScenarioDocument] | None = None,
-    ) -> None:
-        if document_parser is not None:
-            self._document_parser = document_parser
-        elif use_backend_document_parser:
-            self._document_parser = self._parse_markdown_document_with_backend
-        else:
-            self._document_parser = self._parse_markdown_document_with_legacy_splitter
-
     def parse(self, scenario_path: Path) -> ScenarioDefinition:
         source = load_scenario_source(scenario_path, error_type=ScenarioParseError)
-        document = self._document_parser(source)
+        document = parse_markdown_document_from_backend(source, error_type=ScenarioParseError)
         resolved_scenario_path = document.source.path
 
         warnings: list[str] = []
@@ -210,14 +196,6 @@ class MarkdownScenarioParser:
             "source_format": "markdown",
         }
         return scenario_definition
-
-    @staticmethod
-    def _parse_markdown_document_with_backend(source: ScenarioSource) -> MarkdownScenarioDocument:
-        return parse_markdown_document_from_backend(source, error_type=ScenarioParseError)
-
-    @staticmethod
-    def _parse_markdown_document_with_legacy_splitter(source: ScenarioSource) -> MarkdownScenarioDocument:
-        return parse_markdown_document(source, error_type=ScenarioParseError)
 
     def parse_result(
         self,

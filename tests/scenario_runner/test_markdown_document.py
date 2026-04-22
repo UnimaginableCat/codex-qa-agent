@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.scenario_runner.parser import MarkdownScenarioParser, ScenarioParseError
 from tools.scenario_runner.parsing.loader import load_scenario_source
 from tools.scenario_runner.parsing.markdown_document import (
-    parse_markdown_document,
+    parse_markdown_document_from_backend,
     split_step_blocks,
 )
 
@@ -58,7 +58,7 @@ class MarkdownDocumentParsingTests(unittest.TestCase):
                 """,
             )
 
-            document = parse_markdown_document(
+            document = parse_markdown_document_from_backend(
                 load_scenario_source(scenario_path, error_type=ScenarioParseError),
                 error_type=ScenarioParseError,
             )

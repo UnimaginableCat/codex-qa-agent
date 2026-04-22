@@ -17,7 +17,6 @@ from .markdown_document import (
     MarkdownSection,
     MarkdownStepBlock,
     parse_markdown_document_from_backend,
-    parse_markdown_document,
     split_step_blocks,
 )
 from .result import (
@@ -60,7 +59,6 @@ __all__ = [
     "empty_json_object",
     "empty_parse_diagnostics",
     "load_scenario_source",
-    "parse_markdown_document",
     "parse_markdown_document_from_backend",
     "split_step_blocks",
 ]

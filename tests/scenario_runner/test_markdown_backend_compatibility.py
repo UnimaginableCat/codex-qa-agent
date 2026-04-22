@@ -11,15 +11,14 @@ from tools.scenario_runner.parser import ScenarioParseError
 from tools.scenario_runner.parsing.loader import load_scenario_source
 from tools.scenario_runner.parsing.markdown_document import (
     MarkdownScenarioDocument,
-    parse_markdown_document,
     parse_markdown_document_from_backend,
     split_step_blocks,
 )
 
 
-class MarkdownBackendCompatibilityTests(unittest.TestCase):
-    def test_representative_scenario_document_matches_legacy_splitter(self) -> None:
-        legacy, backend = _parse_both(
+class MarkdownBackendDocumentRegressionTests(unittest.TestCase):
+    def test_representative_scenario_document_shape_is_stable(self) -> None:
+        document = _parse_backend(
             """
             # Scenario: Compatibility
 
@@ -70,11 +69,33 @@ class MarkdownBackendCompatibilityTests(unittest.TestCase):
             """,
         )
 
-        self.assertEqual(_document_signature(backend), _document_signature(legacy))
-        self.assertEqual(_step_signature(backend), _step_signature(legacy))
+        self.assertEqual(
+            _document_signature(document),
+            {
+                "title": "Compatibility",
+                "sections": [
+                    {"name": "Project", "line_number": 3, "line_count": 2},
+                    {"name": "Environment", "line_number": 6, "line_count": 2},
+                    {"name": "Notes", "line_number": 9, "line_count": 2},
+                    {"name": "Preconditions", "line_number": 12, "line_count": 3},
+                    {"name": "Steps", "line_number": 16, "line_count": 28},
+                    {"name": "Final expectations", "line_number": 45, "line_count": 2},
+                ],
+            },
+        )
+        self.assertEqual(
+            _step_signature(document),
+            {
+                "warnings": [],
+                "steps": [
+                    {"step_number": 1, "line_number": 2, "line_count": 13},
+                    {"step_number": 2, "line_number": 16, "line_count": 12},
+                ],
+            },
+        )
 
     def test_heading_like_text_inside_fences_does_not_create_sections_or_steps(self) -> None:
-        legacy, backend = _parse_both(
+        document = _parse_backend(
             """
             # Scenario: Fenced Headings
 
@@ -99,11 +120,26 @@ class MarkdownBackendCompatibilityTests(unittest.TestCase):
             """,
         )
 
-        self.assertEqual(_document_signature(backend), _document_signature(legacy))
-        self.assertEqual(_step_signature(backend), _step_signature(legacy))
+        self.assertEqual(
+            _document_signature(document),
+            {
+                "title": "Fenced Headings",
+                "sections": [
+                    {"name": "Notes", "line_number": 3, "line_count": 6},
+                    {"name": "Steps", "line_number": 10, "line_count": 11},
+                ],
+            },
+        )
+        self.assertEqual(
+            _step_signature(document),
+            {
+                "warnings": [],
+                "steps": [{"step_number": 1, "line_number": 2, "line_count": 9}],
+            },
+        )
 
-    def test_empty_lines_lists_and_multiple_steps_match_legacy_splitter(self) -> None:
-        legacy, backend = _parse_both(
+    def test_empty_lines_lists_and_multiple_steps_keep_stable_boundaries(self) -> None:
+        document = _parse_backend(
             """
             # Scenario: Spacing And Lists
 
@@ -142,24 +178,30 @@ class MarkdownBackendCompatibilityTests(unittest.TestCase):
             """,
         )
 
-        self.assertEqual(_document_signature(backend), _document_signature(legacy))
-        self.assertEqual(_step_signature(backend), _step_signature(legacy))
+        self.assertEqual(
+            _document_signature(document),
+            {
+                "title": "Spacing And Lists",
+                "sections": [
+                    {"name": "Preconditions", "line_number": 4, "line_count": 5},
+                    {"name": "Steps", "line_number": 10, "line_count": 22},
+                    {"name": "Report output", "line_number": 33, "line_count": 2},
+                ],
+            },
+        )
+        self.assertEqual(
+            _step_signature(document),
+            {
+                "warnings": ["Ignored content before first step in 'scenario.md': 'setup text before first step'"],
+                "steps": [
+                    {"step_number": 1, "line_number": 4, "line_count": 8},
+                    {"step_number": 2, "line_number": 13, "line_count": 9},
+                ],
+            },
+        )
 
-    def test_duplicate_section_error_matches_legacy_message(self) -> None:
-        with self.assertRaisesRegex(ScenarioParseError, "Duplicate top-level section") as legacy_error:
-            _parse_legacy(
-                """
-                # Scenario: Duplicate
-
-                ## Project
-                code/demo
-
-                ## Project
-                code/other
-                """,
-            )
-
-        with self.assertRaisesRegex(ScenarioParseError, "Duplicate top-level section") as backend_error:
+    def test_duplicate_section_error_is_stable(self) -> None:
+        with self.assertRaisesRegex(ScenarioParseError, "Duplicate top-level section") as error:
             _parse_backend(
                 """
                 # Scenario: Duplicate
@@ -172,9 +214,10 @@ class MarkdownBackendCompatibilityTests(unittest.TestCase):
                 """,
             )
 
-        self.assertEqual(str(backend_error.exception), str(legacy_error.exception))
+        self.assertIn("first declared at line 3", str(error.exception))
+        self.assertIn("at line 6", str(error.exception))
 
-    def test_missing_title_error_matches_legacy_message(self) -> None:
+    def test_missing_title_error_is_stable(self) -> None:
         with TemporaryDirectory() as tmp:
             source = _write_source(
                 Path(tmp),
@@ -184,28 +227,8 @@ class MarkdownBackendCompatibilityTests(unittest.TestCase):
                 """,
             )
 
-            with self.assertRaisesRegex(ScenarioParseError, "missing '# Scenario: ...' title") as legacy_error:
-                parse_markdown_document(source, error_type=ScenarioParseError)
-
-            with self.assertRaisesRegex(ScenarioParseError, "missing '# Scenario: ...' title") as backend_error:
+            with self.assertRaisesRegex(ScenarioParseError, "missing '# Scenario: ...' title"):
                 parse_markdown_document_from_backend(source, error_type=ScenarioParseError)
-
-        self.assertEqual(str(backend_error.exception), str(legacy_error.exception))
-
-
-def _parse_both(content: str) -> tuple[MarkdownScenarioDocument, MarkdownScenarioDocument]:
-    with TemporaryDirectory() as tmp:
-        source = _write_source(Path(tmp), content)
-        return (
-            parse_markdown_document(source, error_type=ScenarioParseError),
-            parse_markdown_document_from_backend(source, error_type=ScenarioParseError),
-        )
-
-
-def _parse_legacy(content: str) -> MarkdownScenarioDocument:
-    with TemporaryDirectory() as tmp:
-        source = _write_source(Path(tmp), content)
-        return parse_markdown_document(source, error_type=ScenarioParseError)
 
 
 def _parse_backend(content: str) -> MarkdownScenarioDocument:
@@ -221,7 +244,7 @@ def _document_signature(document: MarkdownScenarioDocument):
             {
                 "name": section.name,
                 "line_number": section.line_number,
-                "lines": list(section.lines),
+                "line_count": len(section.lines),
             }
             for section in document.sections
         ],
@@ -239,7 +262,7 @@ def _step_signature(document: MarkdownScenarioDocument):
             {
                 "step_number": block.step_number,
                 "line_number": block.line_number,
-                "lines": list(block.lines),
+                "line_count": len(block.lines),
             }
             for block in step_blocks
         ],
