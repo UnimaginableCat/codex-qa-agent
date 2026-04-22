@@ -143,6 +143,21 @@ class ParsingContractTests(unittest.TestCase):
             any(diagnostic.code == "scenario.variables_validation_error" for diagnostic in result.diagnostics)
         )
 
+    def test_legacy_markdown_parser_parse_result_invalid_path_is_fatal_and_keeps_source_metadata(self) -> None:
+        scenario_path = Path("scenarios") / "missing-scenario.md"
+
+        result = MarkdownScenarioParser().parse_result(scenario_path)
+
+        self.assertIsNone(result.scenario)
+        self.assertTrue(result.has_errors)
+        self.assertTrue(result.has_fatal_errors)
+        self.assertEqual(result.source_path, scenario_path)
+        self.assertEqual(result.source_format, "markdown")
+        self.assertEqual(len(result.diagnostics), 1)
+        self.assertEqual(result.diagnostics[0].code, "scenario.parse_failed")
+        self.assertEqual(result.diagnostics[0].severity, ParseDiagnosticSeverity.FATAL)
+        self.assertEqual(result.diagnostics[0].location.path, scenario_path)
+
     def test_markdown_parser_uses_backend_document_parser_by_default(self) -> None:
         with TemporaryDirectory() as tmp:
             scenario_path = _write_scenario(Path(tmp), _representative_scenario_text())

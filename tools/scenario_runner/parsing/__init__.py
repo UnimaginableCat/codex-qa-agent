@@ -27,6 +27,8 @@ from .markdown import (
     MarkdownTokenDocument,
     parse_markdown_document_from_backend,
 )
+from .diagnostics_bridge import build_legacy_parse_diagnostics, build_parse_failure_diagnostic
+from .parse_result_adapter import adapt_legacy_parse_result
 from .scenario_assembly import ScenarioAssemblyInput, assemble_scenario_definition, parse_section_bullets, parse_section_text
 from .scenario_converter import convert_step_draft, convert_step_drafts
 from .source import ScenarioSource, load_scenario_source
@@ -46,6 +48,9 @@ __all__ = [
     "ParseDiagnosticKind",
     "ParseDiagnosticSeverity",
     "ParsedVariable",
+    "adapt_legacy_parse_result",
+    "build_legacy_parse_diagnostics",
+    "build_parse_failure_diagnostic",
     "ScenarioAssemblyInput",
     "ScenarioParseError",
     "ScenarioParseOptions",
