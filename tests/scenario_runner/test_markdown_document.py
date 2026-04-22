@@ -11,8 +11,8 @@ from tools.scenario_runner.parser import MarkdownScenarioParser, ScenarioParseEr
 from tools.scenario_runner.parsing.loader import load_scenario_source
 from tools.scenario_runner.parsing.markdown_document import (
     parse_markdown_document_from_backend,
-    split_step_blocks,
 )
+from tools.scenario_runner.parsing.step_blocks import split_step_blocks
 
 
 class MarkdownDocumentParsingTests(unittest.TestCase):

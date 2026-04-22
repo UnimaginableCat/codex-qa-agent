@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha1
-import json
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +20,8 @@ from .parsing.errors import ScenarioParseError as _ScenarioParseError
 from .parsing.interfaces import ScenarioParseOptions
 from .parsing.loader import load_scenario_source
 from .parsing.markdown_document import (
-    MARKDOWN_STEP_RE as _STEP_RE,
     MarkdownSection,
     parse_markdown_document_from_backend,
-    split_step_blocks,
 )
 from .parsing.result import (
     ParseDiagnostic,
@@ -34,8 +30,10 @@ from .parsing.result import (
     ScenarioParseResult,
     SourceLocation,
 )
+from .parsing.step_blocks import split_step_blocks
+from .parsing.step_fields import parse_step_block
+from .parsing.step_ir import ParsedStepDraft
 
-_FIELD_RE = re.compile(r"^(?P<name>[A-Za-z ]+):(?:\s*(?P<value>.*))?$")
 _VARIABLE_RE = re.compile(
     r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:(?:\s*=|\s*:)\s*(?P<value>.*))?$"
 )
@@ -87,31 +85,10 @@ _SUPPORTED_GENERATED_VALUES = {
     "uuid",
 }
 _SLUG_INVALID_CHARS_RE = re.compile(r"[^a-z0-9]+")
-_KNOWN_STEP_FIELDS = {
-    "type",
-    "name",
-    "method",
-    "path",
-    "headers",
-    "body",
-    "retry",
-    "sql",
-    "params",
-    "capture",
-    "expected",
-}
 
 
 class ScenarioParseError(_ScenarioParseError):
     """Raised when a markdown scenario cannot be normalized safely."""
-
-
-@dataclass(slots=True)
-class _ScenarioStepDraft:
-    step_number: int
-    line_number: int
-    fields: dict[str, Any]
-    warnings: list[str]
 
 
 class MarkdownScenarioParser:
@@ -264,7 +241,7 @@ class MarkdownScenarioParser:
     ) -> tuple[list[ScenarioStep], list[str]]:
         step_blocks, warnings = split_step_blocks(section, scenario_path)
         steps = [
-            self._build_step(self._parse_step_block(block.step_number, block.line_number, block.lines))
+            self._build_step(parse_step_block(block, error_type=ScenarioParseError))
             for block in step_blocks
         ]
         return steps, warnings
@@ -600,86 +577,7 @@ class MarkdownScenarioParser:
             or normalized_name in {"run_id", "timestamp", "generated_timestamp"}
         )
 
-    def _parse_step_block(
-        self,
-        step_number: int,
-        line_number: int,
-        lines: list[str],
-    ) -> _ScenarioStepDraft:
-        fields: dict[str, Any] = {}
-        warnings: list[str] = []
-        index = 0
-
-        while index < len(lines):
-            stripped_line = lines[index].strip()
-            if not stripped_line:
-                index += 1
-                continue
-
-            field_match = _FIELD_RE.match(stripped_line)
-            if not field_match:
-                warnings.append(
-                    f"Step {step_number} contains unrecognized content at relative line {index + 1}: "
-                    f"{stripped_line!r}"
-                )
-                index += 1
-                continue
-
-            field_name = field_match.group("name").strip().lower()
-            inline_value = (field_match.group("value") or "").strip()
-            if field_name in fields:
-                raise ScenarioParseError(
-                    f"Step {step_number} is malformed: duplicate field '{field_name}' "
-                    f"at relative line {index + 1}."
-                )
-
-            if field_name in {"type", "name", "method", "path"}:
-                fields[field_name] = inline_value
-                index += 1
-                continue
-
-            if field_name in {"headers", "body", "params"}:
-                block_text, index = self._consume_block(lines, index + 1, step_number, field_name)
-                if inline_value and not block_text:
-                    block_text = inline_value
-                if not block_text:
-                    fields[field_name] = {} if field_name != "body" else None
-                    continue
-                fields[field_name] = self._parse_json_block(block_text, step_number, field_name)
-                continue
-
-            if field_name == "retry":
-                block_text, index = self._consume_block(lines, index + 1, step_number, field_name)
-                if inline_value and not block_text:
-                    block_text = inline_value
-                fields[field_name] = self._parse_retry_block(block_text, step_number)
-                continue
-
-            if field_name == "sql":
-                block_text, index = self._consume_block(lines, index + 1, step_number, field_name)
-                sql_value = inline_value if inline_value else block_text
-                fields[field_name] = sql_value.strip()
-                continue
-
-            if field_name in {"capture", "expected"}:
-                bullet_values, next_index = self._consume_bullets(lines, index + 1)
-                if inline_value:
-                    bullet_values.insert(0, inline_value)
-                fields[field_name] = bullet_values
-                index = next_index
-                continue
-
-            warnings.append(f"Step {step_number} field '{field_name}' is unknown and was ignored.")
-            index += 1
-
-        return _ScenarioStepDraft(
-            step_number=step_number,
-            line_number=line_number,
-            fields=fields,
-            warnings=warnings,
-        )
-
-    def _build_step(self, draft: _ScenarioStepDraft) -> ScenarioStep:
+    def _build_step(self, draft: ParsedStepDraft) -> ScenarioStep:
         raw_type = str(draft.fields.get("type", "")).strip().lower()
         if not raw_type:
             raise ScenarioParseError(f"Step {draft.step_number} is malformed: missing 'Type:'.")
@@ -764,139 +662,6 @@ class MarkdownScenarioParser:
             metadata={"parse_warnings": draft.warnings, "source_line": draft.line_number},
         )
 
-    def _consume_block(
-        self,
-        lines: list[str],
-        start_index: int,
-        step_number: int,
-        field_name: str,
-    ) -> tuple[str, int]:
-        index = start_index
-        while index < len(lines) and not lines[index].strip():
-            index += 1
-
-        if index >= len(lines):
-            return "", index
-
-        stripped_line = lines[index].strip()
-        if stripped_line.startswith("```"):
-            return self._consume_fenced_block(lines, index, step_number, field_name)
-
-        collected: list[str] = []
-        while index < len(lines):
-            candidate = lines[index]
-            stripped_candidate = candidate.strip()
-            if self._is_step_field(stripped_candidate) or _STEP_RE.match(stripped_candidate):
-                break
-            collected.append(candidate)
-            index += 1
-
-        return "\n".join(self._trim_empty_lines(collected)).strip(), index
-
-    def _consume_fenced_block(
-        self,
-        lines: list[str],
-        start_index: int,
-        step_number: int,
-        field_name: str,
-    ) -> tuple[str, int]:
-        index = start_index + 1
-        collected: list[str] = []
-
-        while index < len(lines):
-            if lines[index].strip().startswith("```"):
-                return "\n".join(collected).strip(), index + 1
-            collected.append(lines[index])
-            index += 1
-
-        raise ScenarioParseError(
-            f"Step {step_number} has malformed fenced block for '{field_name}': missing closing ```."
-        )
-
-    def _consume_bullets(self, lines: list[str], start_index: int) -> tuple[list[str], int]:
-        index = start_index
-        values: list[str] = []
-
-        while index < len(lines):
-            stripped_line = lines[index].strip()
-            if not stripped_line:
-                index += 1
-                continue
-            if not stripped_line.startswith("- "):
-                break
-            values.append(stripped_line[2:].strip())
-            index += 1
-
-        return values, index
-
-    def _parse_json_block(self, block_text: str, step_number: int, field_name: str) -> Any:
-        try:
-            return json.loads(block_text)
-        except json.JSONDecodeError as exc:
-            raise ScenarioParseError(
-                f"Step {step_number} has invalid JSON in '{field_name}': {exc.msg}."
-            ) from exc
-
-    def _parse_retry_block(self, block_text: str, step_number: int) -> dict[str, Any] | None:
-        normalized = block_text.strip()
-        if not normalized:
-            return None
-        if normalized.startswith("{"):
-            parsed = self._parse_json_block(normalized, step_number, "retry")
-            if not isinstance(parsed, dict):
-                raise ScenarioParseError(f"Step {step_number} is malformed: 'retry' must contain an object.")
-            return parsed
-
-        values: dict[str, Any] = {}
-        lines = normalized.splitlines()
-        index = 0
-        while index < len(lines):
-            stripped = lines[index].strip()
-            if not stripped:
-                index += 1
-                continue
-            if ":" not in stripped:
-                raise ScenarioParseError(
-                    f"Step {step_number} has invalid retry config at relative line {index + 1}: {stripped!r}."
-                )
-            key, raw_value = (part.strip() for part in stripped.split(":", 1))
-            if not key:
-                raise ScenarioParseError(f"Step {step_number} has invalid retry config with empty key.")
-            if raw_value:
-                values[key] = self._parse_scalar_retry_value(raw_value)
-                index += 1
-                continue
-
-            list_values: list[Any] = []
-            index += 1
-            while index < len(lines):
-                candidate = lines[index].strip()
-                if not candidate:
-                    index += 1
-                    continue
-                if not candidate.startswith("- "):
-                    break
-                list_values.append(self._parse_scalar_retry_value(candidate[2:].strip()))
-                index += 1
-            values[key] = list_values
-        return values
-
-    @staticmethod
-    def _parse_scalar_retry_value(value: str) -> Any:
-        normalized = value.strip()
-        lowered = normalized.lower()
-        if lowered == "true":
-            return True
-        if lowered == "false":
-            return False
-        if re.fullmatch(r"-?\d+", normalized):
-            return int(normalized)
-        if re.fullmatch(r"-?(?:\d+\.\d+|\d+\.|\.\d+)", normalized):
-            return float(normalized)
-        if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
-            return normalized[1:-1]
-        return normalized
-
     @staticmethod
     def _parse_text(lines: list[str]) -> str:
         return "\n".join(line.strip() for line in MarkdownScenarioParser._trim_empty_lines(lines)).strip()
@@ -942,11 +707,6 @@ class MarkdownScenarioParser:
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         return [str(value).strip()] if str(value).strip() else []
-
-    @staticmethod
-    def _is_step_field(line: str) -> bool:
-        field_match = _FIELD_RE.match(line)
-        return bool(field_match and field_match.group("name").strip().lower() in _KNOWN_STEP_FIELDS)
 
     @classmethod
     def _build_scenario_slug(cls, title: str, scenario_path: Path) -> str:

@@ -12,12 +12,9 @@ from .markdown_backend import (
     MarkdownTokenDocument,
 )
 from .markdown_document import (
-    MARKDOWN_STEP_RE,
     MarkdownScenarioDocument,
     MarkdownSection,
-    MarkdownStepBlock,
     parse_markdown_document_from_backend,
-    split_step_blocks,
 )
 from .result import (
     JsonObject,
@@ -31,6 +28,9 @@ from .result import (
     empty_json_object,
     empty_parse_diagnostics,
 )
+from .step_blocks import MARKDOWN_STEP_RE, split_step_blocks
+from .step_fields import parse_step_block
+from .step_ir import ParsedStepDraft, StepBlock, StepFieldKind, StepFields, StepFieldValue
 
 __all__ = [
     "JsonObject",
@@ -54,11 +54,16 @@ __all__ = [
     "MARKDOWN_STEP_RE",
     "MarkdownScenarioDocument",
     "MarkdownSection",
-    "MarkdownStepBlock",
     "MarkdownTokenDocument",
+    "ParsedStepDraft",
+    "StepBlock",
+    "StepFieldKind",
+    "StepFieldValue",
+    "StepFields",
     "empty_json_object",
     "empty_parse_diagnostics",
     "load_scenario_source",
     "parse_markdown_document_from_backend",
+    "parse_step_block",
     "split_step_blocks",
 ]
