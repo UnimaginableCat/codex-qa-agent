@@ -101,6 +101,7 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
             "scenario_name": state.scenario_definition.scenario_name,
             "project": state.scenario_definition.project,
             "environment": state.scenario_definition.environment,
+            "run_mode": state.run_mode.value,
             "parsed_plan_dir": state.run_context.parsed_plans_dir,
             "compiled_plan_path": state.run_context.compiled_plan_path,
             "run_bundle_dir": state.run_context.artifact_dir,

@@ -7,11 +7,12 @@ from pathlib import Path
 from tools.common.errors import ValidationError
 
 from ..domain.execution import ExecutionOutcome, ExecutionPhase, utc_now_iso
-from ..domain.manual import OperatorActionSelection
+from ..domain.manual import OperatorActionSelection, RunMode
 from ..domain.pause import ResumeRequest, RunContinuationState
 from ..domain.models import ScenarioDefinition, ScenarioExecutionSummary
 from ..persistence import load_pause_state, restore_session_from_pause_state
 from ..projections.finalization import ScenarioRunFinalizer
+from ..projections.operator import OperatorGuidanceProjection, build_operator_guidance_from_pause_state
 from .context import initialize_run_context
 from .engine import ScenarioExecutionEngine
 from .manual import resolve_operator_action_selection
@@ -39,12 +40,14 @@ class ScenarioRunnerService:
         self,
         scenario_definition: ScenarioDefinition,
         workspace_root: Path | None = None,
+        *,
+        run_mode: RunMode = RunMode.AUTO,
     ) -> ScenarioExecutionSummary:
         run_context = initialize_run_context(
             scenario_definition=scenario_definition,
             workspace_root=workspace_root,
         )
-        session = self._engine.create_session(run_context, scenario_definition)
+        session = self._engine.create_session(run_context, scenario_definition, run_mode=run_mode)
         finalization_outcomes: list[ExecutionOutcome] = []
 
         try:
@@ -80,6 +83,7 @@ class ScenarioRunnerService:
         scenario_definition: ScenarioDefinition | None = None,
         operator_action_selection: OperatorActionSelection | None = None,
         selected_action_id: str | None = None,
+        run_mode: RunMode = RunMode.GUIDED,
     ) -> ScenarioExecutionSummary:
         pause_state = load_pause_state(pause_state_path)
         if not pause_state.resumable:
@@ -104,6 +108,7 @@ class ScenarioRunnerService:
         )
         scenario = scenario_definition or restored_scenario_definition
         session.pause_state = pause_state
+        session.run_mode = run_mode
 
         finalization_outcomes: list[ExecutionOutcome] = []
         session = self._engine.resume(
@@ -125,3 +130,12 @@ class ScenarioRunnerService:
         if summary.continuation_state != RunContinuationState.PAUSED:
             self._finalizer.persist_pause_state(session.run_context, pause_state)
         return summary
+
+    def inspect_pause_state(
+        self,
+        pause_state_path: Path,
+        *,
+        run_mode: RunMode = RunMode.GUIDED,
+    ) -> OperatorGuidanceProjection:
+        pause_state = load_pause_state(pause_state_path)
+        return build_operator_guidance_from_pause_state(pause_state, run_mode=run_mode)

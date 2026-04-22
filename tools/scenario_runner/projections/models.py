@@ -8,7 +8,7 @@ from typing import Any
 
 from ..domain.execution import ExecutionEvent, ExecutionIssue, ExecutionOutcome, RunTermination, ScenarioRunState
 from ..domain.guided import DecisionPoint, GuidedDiagnostic
-from ..domain.manual import DecisionResolution
+from ..domain.manual import DecisionResolution, RunMode
 from ..domain.models import RunContext, ScenarioDefinition
 from ..domain.pause import PauseState, RunContinuationState
 
@@ -28,6 +28,7 @@ class ExecutionProjectionState:
     finalization_outcomes: tuple[ExecutionOutcome, ...] = ()
     execution_events: tuple[ExecutionEvent, ...] = ()
     report_path: Path | None = None
+    run_mode: RunMode = RunMode.AUTO
     continuation_state: RunContinuationState = RunContinuationState.ACTIVE
     pause_state: PauseState | None = None
     decision_resolution: DecisionResolution | None = None
@@ -54,6 +55,7 @@ class ExecutionProjectionState:
             finalization_outcomes=tuple(finalization_outcomes or []),
             execution_events=tuple(session.execution_events),
             report_path=report_path,
+            run_mode=session.run_mode,
             continuation_state=session.continuation_state,
             pause_state=session.pause_state,
             decision_resolution=session.decision_resolution,

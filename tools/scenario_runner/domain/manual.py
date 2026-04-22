@@ -9,6 +9,12 @@ from typing import Any
 from tools.common.json_safe import to_json_safe
 
 
+class RunMode(StrEnum):
+    AUTO = "auto"
+    GUIDED = "guided"
+    MANUAL = "manual"
+
+
 class OperatorActionType(StrEnum):
     RETRY_FROM_ANCHOR = "retry_from_anchor"
     SKIP_STEP = "skip_step"

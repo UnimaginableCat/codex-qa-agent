@@ -209,6 +209,7 @@ def _decision_already_resolved(
 def _build_session_snapshot(state: ExecutionProjectionState) -> dict:
     return {
         "scenario_definition": state.scenario_definition.to_dict(),
+        "run_mode": state.run_mode.value,
         "run_context": state.run_context.to_dict(),
         "run_state": None if state.run_state is None else state.run_state.to_dict(),
         "tooling_issues": [issue.to_dict() for issue in state.tooling_issues],

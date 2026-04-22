@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from tools.common.statuses import StepStatus
 
 from .compiler import CompileCheckResult, CompiledScenario, ScenarioCompiler
+from ..domain.manual import RunMode
 from ..domain.pause import ResumeRequest, RunContinuationState
 from ..domain.execution import (
     AbortDisposition,
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 class ScenarioExecutionSession:
     run_context: RunContext
     run_state: ScenarioRunState
+    run_mode: RunMode = RunMode.AUTO
     tooling_issues: list[ExecutionIssue] = field(default_factory=list)
     compile_outcomes: list[ExecutionOutcome] = field(default_factory=list)
     compile_checks: list[CompileCheckResult] = field(default_factory=list)
@@ -88,6 +90,8 @@ class ScenarioExecutionEngine:
         self,
         run_context: RunContext,
         scenario_definition: ScenarioDefinition,
+        *,
+        run_mode: RunMode = RunMode.AUTO,
     ) -> ScenarioExecutionSession:
         run_state = ScenarioRunState(
             run_id=run_context.run_id,
@@ -95,7 +99,7 @@ class ScenarioExecutionEngine:
             scenario_path=run_context.scenario_path,
         )
         run_state.transition_to(ScenarioRunLifecycleState.INITIALIZING)
-        session = ScenarioExecutionSession(run_context=run_context, run_state=run_state)
+        session = ScenarioExecutionSession(run_context=run_context, run_state=run_state, run_mode=run_mode)
         session.append_event(
             ExecutionEvent.create(
                 event_type="run_initialized",
@@ -105,6 +109,7 @@ class ScenarioExecutionEngine:
                     "scenario_path": str(run_context.scenario_path),
                     "compiled_plan_path": str(run_context.compiled_plan_path),
                     "started_at": run_context.started_at,
+                    "run_mode": run_mode.value,
                 },
             )
         )

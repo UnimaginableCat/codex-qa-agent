@@ -13,6 +13,7 @@ from .manual import (
     DecisionResolution,
     OperatorActionSelection,
     OperatorActionType,
+    RunMode,
     ResumeStrategy,
 )
 from .pause import PauseState, ResumeRequest, ResumeToken, RunContinuationState
@@ -79,6 +80,7 @@ __all__ = [
     "OperatorActionSelection",
     "OperatorActionType",
     "PauseState",
+    "RunMode",
     "ResumeStrategy",
     "ResumeRequest",
     "ResumeToken",

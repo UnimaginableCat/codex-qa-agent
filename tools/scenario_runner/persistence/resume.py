@@ -29,6 +29,7 @@ from ..domain.execution import (
     TerminationReason,
     TerminationReasonSource,
 )
+from ..domain.manual import RunMode
 from ..domain.models import (
     ApiStepDefinition,
     DbStepDefinition,
@@ -68,6 +69,7 @@ def restore_session_from_pause_state(
     session = ScenarioExecutionSession(
         run_context=run_context,
         run_state=run_state,
+        run_mode=RunMode(str(snapshot.get("run_mode", RunMode.AUTO.value))),
         tooling_issues=[
             _execution_issue_from_mapping(item)
             for item in snapshot.get("tooling_issues") or []

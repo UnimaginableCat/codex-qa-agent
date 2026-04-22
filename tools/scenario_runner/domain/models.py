@@ -206,6 +206,9 @@ class ScenarioExecutionSummary:
             f"Run ID: {self.run_id}",
             f"Code analysis used: {self.code_analysis_used}",
         ]
+        run_mode = self.details.get("run_mode")
+        if isinstance(run_mode, str) and run_mode:
+            notes.append(f"Run mode: {run_mode}")
         run_termination = self.details.get("run_termination")
         if isinstance(run_termination, dict):
             reason = run_termination.get("reason") or {}
