@@ -9,6 +9,7 @@ from .compiler import (
 )
 from .context import create_run_id, initialize_run_context
 from .engine import ScenarioExecutionEngine, ScenarioExecutionSession
+from .manual import resolve_operator_action_selection
 from .preflight import PreflightCheckResult, PreflightResult, ScenarioPreflightChecker
 from .services import ScenarioRunnerService
 
@@ -26,4 +27,5 @@ __all__ = [
     "ScenarioRunnerService",
     "create_run_id",
     "initialize_run_context",
+    "resolve_operator_action_selection",
 ]

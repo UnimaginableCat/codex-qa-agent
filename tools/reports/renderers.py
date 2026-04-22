@@ -51,6 +51,27 @@ class MarkdownReportRenderer:
             lines.extend(["", "## Guided stop reason"])
             lines.extend(self._render_guided_diagnostics([context.summary.guided_stop_reason]))
 
+        if context.summary.available_operator_actions:
+            lines.extend(["", "## Operator actions"])
+            for action in context.summary.available_operator_actions:
+                marker = "Recommended" if action.recommended else "Available"
+                lines.append(
+                    f"- {marker}: `{action.action_type}` {action.action_id} - {action.title}: {action.description}"
+                )
+
+        if context.summary.decision_resolution is not None:
+            selected_action = context.summary.decision_resolution.get("selected_action") or {}
+            lines.extend(["", "## Decision resolution"])
+            lines.append(
+                f"- Decision point: `{context.summary.decision_resolution.get('decision_point_id', '')}`"
+            )
+            lines.append(
+                f"- Selected action: `{selected_action.get('action_type', '')}` {selected_action.get('action_id', '')}"
+            )
+            lines.append(
+                f"- Resume strategy: `{context.summary.decision_resolution.get('resume_strategy', '')}`"
+            )
+
         if context.summary.resume_token is not None:
             lines.extend(["", "## Resume"])
             lines.append(f"- Run ID: `{context.summary.resume_token.get('run_id', '')}`")
@@ -92,10 +113,15 @@ class MarkdownReportRenderer:
             for action in diagnostic.actions:
                 marker = "Recommended" if action.recommended else "Action"
                 lines.append(
-                    f"  - {marker}: `{action.action_type}` {action.title} - {action.description}"
+                    f"  - {marker}: `{action.action_type}` {action.action_id} {action.title} - {action.description}"
                 )
             if diagnostic.decision_point is not None:
                 lines.append(
                     f"  - Decision: {diagnostic.decision_point.title} - {diagnostic.decision_point.prompt}"
                 )
+                for action in diagnostic.decision_point.available_operator_actions:
+                    marker = "Recommended" if action.recommended else "Available"
+                    lines.append(
+                        f"  - {marker} operator action: `{action.action_type}` {action.action_id} - {action.title}"
+                    )
         return lines

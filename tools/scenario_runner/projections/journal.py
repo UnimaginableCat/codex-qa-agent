@@ -40,6 +40,14 @@ def build_journal_projection(
                     "resumable": summary.resumable,
                     "pause_state_path": None if summary.pause_state_path is None else str(summary.pause_state_path),
                     "resume_token": None if summary.resume_token is None else summary.resume_token.to_dict(),
+                    "available_operator_actions": [
+                        action.to_dict() for action in summary.available_operator_actions
+                    ],
+                    "decision_resolution": (
+                        None
+                        if summary.decision_resolution is None
+                        else summary.decision_resolution.to_dict()
+                    ),
                 },
             )
         )

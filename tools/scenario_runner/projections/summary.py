@@ -15,6 +15,7 @@ from ..domain.execution import (
     issue_messages,
 )
 from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
+from ..domain.manual import OperatorActionType
 from ..domain.pause import RunContinuationState
 from .guided import build_guided_projection
 from .models import ExecutionProjectionState
@@ -41,8 +42,14 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
     )
     executed_step_count = len(step_results)
     total_step_count = len(state.scenario_definition.steps)
+    aborted_by_operator = (
+        state.decision_resolution is not None
+        and state.decision_resolution.selected_action.action_type == OperatorActionType.ABORT_RUN
+    )
 
-    if state.continuation_state == RunContinuationState.PAUSED:
+    if aborted_by_operator:
+        message = "Scenario execution ended after operator aborted the paused run."
+    elif state.continuation_state == RunContinuationState.PAUSED:
         message = f"Scenario execution paused with status {final_status.value}."
     elif state.resumed_from_pause and final_status == StepStatus.PASS and executed_step_count == total_step_count:
         message = "Scenario execution resumed and completed."
@@ -88,6 +95,10 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
         resumable=state.pause_state is not None and state.pause_state.resumable,
         resume_token=None if state.pause_state is None else state.pause_state.resume_token,
         pause_state_path=None if state.pause_state is None else state.pause_state.pause_state_path,
+        available_operator_actions=(
+            [] if state.pause_state is None else list(state.pause_state.available_operator_actions)
+        ),
+        decision_resolution=state.decision_resolution,
         resumed_from_pause=state.resumed_from_pause,
         details={
             "scenario_name": state.scenario_definition.scenario_name,
@@ -114,6 +125,14 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
             "guided_decision_points_count": len(guided_projection.decision_points),
             "continuation_state": state.continuation_state.value,
             "resumable": state.pause_state is not None and state.pause_state.resumable,
+            "available_operator_actions": (
+                []
+                if state.pause_state is None
+                else [action.to_dict() for action in state.pause_state.available_operator_actions]
+            ),
+            "decision_resolution": (
+                None if state.decision_resolution is None else state.decision_resolution.to_dict()
+            ),
             "variable_keys": sorted(state.run_context.variables.keys()),
             "warnings": warnings,
             "artifact_policy": "Artifacts are immutable outputs/evidence only; never write source code into artifacts/.",

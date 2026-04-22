@@ -97,6 +97,7 @@ def restore_session_from_pause_state(
         execution_events=[],
     )
     session.pause_state = pause_state
+    session.decision_resolution = pause_state.decision_resolution
     return restored_scenario, session
 
 

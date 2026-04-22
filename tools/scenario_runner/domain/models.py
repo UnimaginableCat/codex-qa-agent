@@ -14,6 +14,7 @@ from .pause import RunContinuationState
 
 if TYPE_CHECKING:
     from .guided import GuidedDiagnostic
+    from .manual import AvailableOperatorAction, DecisionResolution
     from .pause import ResumeToken
 
 
@@ -159,6 +160,8 @@ class ScenarioExecutionSummary:
     resumable: bool = False
     resume_token: "ResumeToken | None" = None
     pause_state_path: Path | None = None
+    available_operator_actions: list["AvailableOperatorAction"] = field(default_factory=list)
+    decision_resolution: "DecisionResolution | None" = None
     resumed_from_pause: bool = False
     details: dict[str, Any] = field(default_factory=dict)
 
@@ -188,6 +191,12 @@ class ScenarioExecutionSummary:
         payload["resumable"] = self.resumable
         payload["resume_token"] = None if self.resume_token is None else self.resume_token.to_dict()
         payload["pause_state_path"] = None if self.pause_state_path is None else str(self.pause_state_path)
+        payload["available_operator_actions"] = [
+            action.to_dict() for action in self.available_operator_actions
+        ]
+        payload["decision_resolution"] = (
+            None if self.decision_resolution is None else self.decision_resolution.to_dict()
+        )
         payload["resumed_from_pause"] = self.resumed_from_pause
         return payload
 

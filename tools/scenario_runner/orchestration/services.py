@@ -7,12 +7,14 @@ from pathlib import Path
 from tools.common.errors import ValidationError
 
 from ..domain.execution import ExecutionOutcome, ExecutionPhase, utc_now_iso
+from ..domain.manual import OperatorActionSelection
 from ..domain.pause import ResumeRequest, RunContinuationState
 from ..domain.models import ScenarioDefinition, ScenarioExecutionSummary
 from ..persistence import load_pause_state, restore_session_from_pause_state
 from ..projections.finalization import ScenarioRunFinalizer
 from .context import initialize_run_context
 from .engine import ScenarioExecutionEngine
+from .manual import resolve_operator_action_selection
 
 
 class ScenarioRunnerService:
@@ -76,11 +78,26 @@ class ScenarioRunnerService:
         pause_state_path: Path,
         *,
         scenario_definition: ScenarioDefinition | None = None,
+        operator_action_selection: OperatorActionSelection | None = None,
         selected_action_id: str | None = None,
     ) -> ScenarioExecutionSummary:
         pause_state = load_pause_state(pause_state_path)
         if not pause_state.resumable:
             raise ValidationError("Pause state is not active or resumable.")
+        if operator_action_selection is not None and selected_action_id is not None:
+            if operator_action_selection.action_id != selected_action_id:
+                raise ValidationError("Conflicting operator action selection inputs were provided.")
+
+        resolved_selection = operator_action_selection
+        if resolved_selection is None and selected_action_id is not None:
+            if not pause_state.decision_point_id:
+                raise ValidationError("Pause state is missing a decision point for operator action selection.")
+            resolved_selection = OperatorActionSelection(
+                decision_point_id=pause_state.decision_point_id,
+                action_id=selected_action_id,
+            )
+        decision_resolution = resolve_operator_action_selection(pause_state, resolved_selection)
+
         restored_scenario_definition, session = restore_session_from_pause_state(
             pause_state,
             scenario_definition=scenario_definition,
@@ -94,10 +111,11 @@ class ScenarioRunnerService:
             scenario,
             ResumeRequest(
                 resume_token=pause_state.resume_token,
-                selected_action_id=selected_action_id,
+                selected_action_id=decision_resolution.selected_action_id,
+                decision_resolution=decision_resolution,
             ),
         )
-        pause_state.mark_resumed(selected_action_id, utc_now_iso())
+        pause_state.mark_resolved(decision_resolution, utc_now_iso())
         summary = self._finalizer.finalize(
             session,
             scenario,

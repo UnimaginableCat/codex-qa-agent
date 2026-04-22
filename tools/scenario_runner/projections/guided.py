@@ -48,6 +48,8 @@ def build_guided_projection(state: ExecutionProjectionState) -> GuidedRunProject
         if diagnostic is not None:
             diagnostics.append(diagnostic)
 
+    diagnostics = [_enrich_diagnostic_with_operator_actions(state, diagnostic) for diagnostic in diagnostics]
+
     stop_reason = next(
         (
             diagnostic
@@ -74,6 +76,42 @@ def build_guided_projection(state: ExecutionProjectionState) -> GuidedRunProject
         diagnostics=tuple(diagnostics),
         stop_reason=stop_reason,
         decision_points=decision_points,
+    )
+
+
+def _enrich_diagnostic_with_operator_actions(
+    state: ExecutionProjectionState,
+    diagnostic: GuidedDiagnostic,
+) -> GuidedDiagnostic:
+    if (
+        state.pause_state is None
+        or diagnostic.decision_point is None
+        or state.pause_state.decision_point_id != diagnostic.decision_point.decision_id
+    ):
+        return diagnostic
+    return GuidedDiagnostic(
+        diagnostic_id=diagnostic.diagnostic_id,
+        title=diagnostic.title,
+        summary=diagnostic.summary,
+        phase=diagnostic.phase,
+        status=diagnostic.status,
+        step=diagnostic.step,
+        issue_code=diagnostic.issue_code,
+        continuation_policy=diagnostic.continuation_policy,
+        tags=diagnostic.tags,
+        actions=diagnostic.actions,
+        decision_point=DecisionPoint(
+            decision_id=diagnostic.decision_point.decision_id,
+            title=diagnostic.decision_point.title,
+            prompt=diagnostic.decision_point.prompt,
+            continuation_policy=diagnostic.decision_point.continuation_policy,
+            recommended_action_id=diagnostic.decision_point.recommended_action_id,
+            actions=diagnostic.decision_point.actions,
+            available_operator_actions=state.pause_state.available_operator_actions,
+            recommended_operator_action_id=state.pause_state.recommended_operator_action_id,
+            details=diagnostic.decision_point.details,
+        ),
+        details=diagnostic.details,
     )
 
 

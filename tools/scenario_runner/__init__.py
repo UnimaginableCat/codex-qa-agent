@@ -2,8 +2,10 @@
 
 from .domain import (
     ApiStepDefinition,
+    AvailableOperatorAction,
     ContinuationPolicy,
     DbStepDefinition,
+    DecisionResolution,
     DecisionPoint,
     ExpectationCheckResult,
     RunContext,
@@ -21,9 +23,12 @@ from .domain import (
     GuidedActionType,
     GuidedDiagnostic,
     GuidedDiagnosticTag,
+    OperatorActionSelection,
+    OperatorActionType,
     PauseState,
     ResumeRequest,
     ResumeToken,
+    ResumeStrategy,
     ScenarioRunLifecycleState,
     ScenarioRunState,
     RunContinuationState,
@@ -40,6 +45,7 @@ from .orchestration import (
     ScenarioExecutionSession,
     ScenarioPreflightChecker,
     ScenarioRunnerService,
+    resolve_operator_action_selection,
 )
 from .runtime import (
     PlaceholderInterpolator,
@@ -53,11 +59,13 @@ from .parser import MarkdownScenarioParser
 
 __all__ = [
     "ApiStepDefinition",
+    "AvailableOperatorAction",
     "CompileCheckResult",
     "CompileResult",
     "CompiledScenario",
     "ContinuationPolicy",
     "DbStepDefinition",
+    "DecisionResolution",
     "DecisionPoint",
     "ExpectationCheckResult",
     "ExecutionEvent",
@@ -69,6 +77,8 @@ __all__ = [
     "GuidedActionType",
     "GuidedDiagnostic",
     "GuidedDiagnosticTag",
+    "OperatorActionSelection",
+    "OperatorActionType",
     "PauseState",
     "MarkdownScenarioParser",
     "PlaceholderInterpolator",
@@ -78,6 +88,7 @@ __all__ = [
     "RunContext",
     "ResumeRequest",
     "ResumeToken",
+    "ResumeStrategy",
     "RunContinuationState",
     "SensitiveDataRedactor",
     "ScenarioDefinition",
@@ -96,4 +107,5 @@ __all__ = [
     "StepExecutionLifecycleState",
     "StepExecutionState",
     "redact_sensitive_data",
+    "resolve_operator_action_selection",
 ]

@@ -50,6 +50,7 @@ def build_report_context(summary: ScenarioExecutionSummary) -> ReportContext:
                     tags=[tag.value for tag in diagnostic.tags],
                     actions=[
                         GuidedActionData(
+                            action_id=action.action_id,
                             title=action.title,
                             description=action.description,
                             action_type=action.action_type.value,
@@ -65,6 +66,17 @@ def build_report_context(summary: ScenarioExecutionSummary) -> ReportContext:
                             prompt=diagnostic.decision_point.prompt,
                             continuation_policy=diagnostic.decision_point.continuation_policy.value,
                             recommended_action_id=diagnostic.decision_point.recommended_action_id,
+                            available_operator_actions=[
+                                GuidedActionData(
+                                    action_id=action.action_id,
+                                    title=action.title,
+                                    description=action.description,
+                                    action_type=action.action_type.value,
+                                    recommended=action.recommended,
+                                )
+                                for action in diagnostic.decision_point.available_operator_actions
+                            ],
+                            recommended_operator_action_id=diagnostic.decision_point.recommended_operator_action_id,
                         )
                     ),
                 )
@@ -91,6 +103,7 @@ def build_report_context(summary: ScenarioExecutionSummary) -> ReportContext:
                     tags=[tag.value for tag in summary.guided_stop_reason.tags],
                     actions=[
                         GuidedActionData(
+                            action_id=action.action_id,
                             title=action.title,
                             description=action.description,
                             action_type=action.action_type.value,
@@ -106,6 +119,19 @@ def build_report_context(summary: ScenarioExecutionSummary) -> ReportContext:
                             prompt=summary.guided_stop_reason.decision_point.prompt,
                             continuation_policy=summary.guided_stop_reason.decision_point.continuation_policy.value,
                             recommended_action_id=summary.guided_stop_reason.decision_point.recommended_action_id,
+                            available_operator_actions=[
+                                GuidedActionData(
+                                    action_id=action.action_id,
+                                    title=action.title,
+                                    description=action.description,
+                                    action_type=action.action_type.value,
+                                    recommended=action.recommended,
+                                )
+                                for action in summary.guided_stop_reason.decision_point.available_operator_actions
+                            ],
+                            recommended_operator_action_id=(
+                                summary.guided_stop_reason.decision_point.recommended_operator_action_id
+                            ),
                         )
                     ),
                 )
@@ -114,6 +140,19 @@ def build_report_context(summary: ScenarioExecutionSummary) -> ReportContext:
             resumable=summary.resumable,
             resume_token=None if summary.resume_token is None else summary.resume_token.to_dict(),
             pause_state_path=None if summary.pause_state_path is None else str(summary.pause_state_path),
+            available_operator_actions=[
+                GuidedActionData(
+                    action_id=action.action_id,
+                    title=action.title,
+                    description=action.description,
+                    action_type=action.action_type.value,
+                    recommended=action.recommended,
+                )
+                for action in summary.available_operator_actions
+            ],
+            decision_resolution=(
+                None if summary.decision_resolution is None else summary.decision_resolution.to_dict()
+            ),
             resumed_from_pause=summary.resumed_from_pause,
         ),
     )

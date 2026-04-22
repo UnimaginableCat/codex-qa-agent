@@ -12,6 +12,7 @@ from tools.common.statuses import StepStatus
 
 if TYPE_CHECKING:
     from .guided import ContinuationPolicy
+    from .manual import AvailableOperatorAction, DecisionResolution
 
 
 class RunContinuationState(StrEnum):
@@ -41,11 +42,15 @@ class ResumeToken:
 class ResumeRequest:
     resume_token: ResumeToken
     selected_action_id: str | None = None
+    decision_resolution: "DecisionResolution | None" = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "resume_token": self.resume_token.to_dict(),
             "selected_action_id": self.selected_action_id,
+            "decision_resolution": (
+                None if self.decision_resolution is None else self.decision_resolution.to_dict()
+            ),
         }
 
 
@@ -66,6 +71,9 @@ class PauseState:
     decision_point_id: str | None = None
     diagnostic_id: str | None = None
     diagnostic_snapshot: dict[str, Any] = field(default_factory=dict)
+    available_operator_actions: tuple["AvailableOperatorAction", ...] = ()
+    recommended_operator_action_id: str | None = None
+    decision_resolution: "DecisionResolution | None" = None
     snapshot: dict[str, Any] = field(default_factory=dict)
     active: bool = True
     selected_action_id: str | None = None
@@ -94,6 +102,13 @@ class PauseState:
                 "decision_point_id": self.decision_point_id,
                 "diagnostic_id": self.diagnostic_id,
                 "diagnostic_snapshot": self.diagnostic_snapshot,
+                "available_operator_actions": [
+                    action.to_dict() for action in self.available_operator_actions
+                ],
+                "recommended_operator_action_id": self.recommended_operator_action_id,
+                "decision_resolution": (
+                    None if self.decision_resolution is None else self.decision_resolution.to_dict()
+                ),
                 "snapshot": self.snapshot,
                 "active": self.active,
                 "selected_action_id": self.selected_action_id,
@@ -106,10 +121,12 @@ class PauseState:
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "PauseState":
         from .guided import ContinuationPolicy
+        from .manual import AvailableOperatorAction, DecisionResolution
 
         continuation_policy_raw = str(payload.get("continuation_policy", "")).strip() or ContinuationPolicy.STOP_AND_FIX.value
         status_raw = str(payload.get("status", "")).strip() or StepStatus.BLOCKED.value
         pause_state_path_raw = payload.get("pause_state_path")
+        decision_resolution_raw = payload.get("decision_resolution")
         return cls(
             pause_id=str(payload.get("pause_id", "")).strip(),
             run_id=str(payload.get("run_id", "")).strip(),
@@ -128,12 +145,37 @@ class PauseState:
             ),
             diagnostic_id=str(payload.get("diagnostic_id", "")).strip() or None,
             diagnostic_snapshot=dict(payload.get("diagnostic_snapshot") or {}),
+            available_operator_actions=tuple(
+                AvailableOperatorAction.from_mapping(item)
+                for item in payload.get("available_operator_actions") or []
+                if isinstance(item, dict)
+            ),
+            recommended_operator_action_id=(
+                str(payload.get("recommended_operator_action_id", "")).strip() or None
+            ),
+            decision_resolution=(
+                None
+                if not isinstance(decision_resolution_raw, dict)
+                else DecisionResolution.from_mapping(decision_resolution_raw)
+            ),
             snapshot=dict(payload.get("snapshot") or {}),
             active=bool(payload.get("active", True)),
             selected_action_id=str(payload.get("selected_action_id", "")).strip() or None,
             resumed_at=str(payload.get("resumed_at", "")).strip() or None,
             pause_state_path=None if pause_state_path_raw in {None, ""} else Path(str(pause_state_path_raw)),
         )
+
+    def mark_resolved(
+        self,
+        decision_resolution: "DecisionResolution | None",
+        resumed_at: str,
+    ) -> None:
+        self.active = False
+        self.decision_resolution = decision_resolution
+        self.selected_action_id = (
+            None if decision_resolution is None else decision_resolution.selected_action_id
+        )
+        self.resumed_at = resumed_at
 
     def mark_resumed(self, selected_action_id: str | None, resumed_at: str) -> None:
         self.active = False

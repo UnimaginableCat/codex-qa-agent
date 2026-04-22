@@ -9,6 +9,8 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
+from tools.common.errors import ValidationError
+from tools.scenario_runner.domain.manual import OperatorActionSelection
 from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     ScenarioDefinition,
@@ -70,10 +72,7 @@ class ScenarioPauseResumeTests(unittest.TestCase):
             pause_payload = json.loads(paused_summary.pause_state_path.read_text(encoding="utf-8"))
             report_content = paused_summary.report_path.read_text(encoding="utf-8")
 
-            resumed_summary = service.resume(
-                paused_summary.pause_state_path,
-                selected_action_id="retry_after_fixing_producer",
-            )
+            resumed_summary = service.resume(paused_summary.pause_state_path)
             journal_lines = (
                 resumed_summary.run_state_dir / "journal.jsonl"
             ).read_text(encoding="utf-8").splitlines()
@@ -87,7 +86,13 @@ class ScenarioPauseResumeTests(unittest.TestCase):
             self.assertEqual(pause_payload["resume_from_step_index"], 0)
             self.assertEqual(pause_payload["resume_from_step_id"], "step-1")
             self.assertEqual(pause_payload["continuation_policy"], "wait_for_decision")
+            self.assertEqual(
+                [item["action_type"] for item in pause_payload["available_operator_actions"]],
+                ["continue_if_fixed", "skip_step", "abort_run"],
+            )
+            self.assertEqual(pause_payload["recommended_operator_action_id"], "continue_if_fixed")
             self.assertIn("- Continuation state: `paused`", report_content)
+            self.assertIn("## Operator actions", report_content)
             self.assertIn("## Resume", report_content)
 
             self.assertEqual(resumed_summary.run_id, paused_summary.run_id)
@@ -95,12 +100,147 @@ class ScenarioPauseResumeTests(unittest.TestCase):
             self.assertEqual(resumed_summary.continuation_state, RunContinuationState.RESUMED)
             self.assertFalse(resumed_summary.resumable)
             self.assertTrue(resumed_summary.resumed_from_pause)
+            self.assertIsNotNone(resumed_summary.decision_resolution)
+            self.assertEqual(
+                resumed_summary.decision_resolution.selected_action.action_type.value,
+                "continue_if_fixed",
+            )
             self.assertEqual([step.step_id for step in resumed_summary.steps], ["step-1", "step-2"])
             self.assertTrue(all(step.status == StepStatus.PASS for step in resumed_summary.steps))
             self.assertEqual(executor.execute_count, 3)
+            self.assertTrue(any(json.loads(line)["event_type"] == "decision_resolved" for line in journal_lines))
             self.assertTrue(any(json.loads(line)["event_type"] == "run_paused" for line in journal_lines))
             self.assertTrue(any(json.loads(line)["event_type"] == "run_resumed" for line in journal_lines))
             self.assertIn("- Continuation state: `resumed`", resumed_report)
+            self.assertIn("## Decision resolution", resumed_report)
+
+    def test_invalid_operator_action_is_rejected(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_workspace(root)
+            executor = _SequencedExecutorFactory(
+                [
+                    StepExecutionOutcome(
+                        step_result=StepExecutionResult(
+                            step_id="step-1",
+                            step_number=1,
+                            step_type=ScenarioStepType.API,
+                            status=StepStatus.FAIL,
+                            message="create failed",
+                        )
+                    )
+                ]
+            )
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+            paused_summary = service.run(self._scenario(root), workspace_root=root)
+
+            with self.assertRaises(ValidationError):
+                service.resume(
+                    paused_summary.pause_state_path,
+                    operator_action_selection=OperatorActionSelection(
+                        decision_point_id="decision:wrong",
+                        action_id="not_allowed",
+                    ),
+                )
+
+    def test_skip_step_action_continues_from_next_step_and_keeps_skipped_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_workspace(root)
+            executor = _SequencedExecutorFactory(
+                [
+                    StepExecutionOutcome(
+                        step_result=StepExecutionResult(
+                            step_id="step-1",
+                            step_number=1,
+                            step_type=ScenarioStepType.API,
+                            status=StepStatus.PASS,
+                            message="first ok",
+                        )
+                    ),
+                    RuntimeError("downstream boom"),
+                    StepExecutionOutcome(
+                        step_result=StepExecutionResult(
+                            step_id="step-3",
+                            step_number=3,
+                            step_type=ScenarioStepType.API,
+                            status=StepStatus.PASS,
+                            message="third ok",
+                        )
+                    ),
+                ]
+            )
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+            paused_summary = service.run(self._three_step_runtime_failure_scenario(root), workspace_root=root)
+            resumed_summary = service.resume(
+                paused_summary.pause_state_path,
+                operator_action_selection=OperatorActionSelection(
+                    decision_point_id=paused_summary.guided_stop_reason.decision_point.decision_id,
+                    action_id="skip_step",
+                ),
+            )
+
+        self.assertEqual(paused_summary.final_status, StepStatus.ERROR)
+        self.assertEqual(
+            [action.action_type.value for action in paused_summary.available_operator_actions],
+            ["retry_from_anchor", "skip_step", "abort_run"],
+        )
+        self.assertEqual(resumed_summary.final_status, StepStatus.ERROR)
+        self.assertEqual(resumed_summary.continuation_state, RunContinuationState.RESUMED)
+        self.assertEqual([step.step_id for step in resumed_summary.steps], ["step-1", "step-2", "step-3"])
+        self.assertEqual(resumed_summary.steps[1].status, StepStatus.ERROR)
+        self.assertEqual(resumed_summary.steps[2].status, StepStatus.PASS)
+        self.assertEqual(resumed_summary.decision_resolution.selected_action.action_type.value, "skip_step")
+        self.assertEqual(executor.execute_count, 3)
+
+    def test_abort_run_action_finishes_without_executing_more_steps(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_workspace(root)
+            executor = _SequencedExecutorFactory(
+                [
+                    StepExecutionOutcome(
+                        step_result=StepExecutionResult(
+                            step_id="step-1",
+                            step_number=1,
+                            step_type=ScenarioStepType.API,
+                            status=StepStatus.PASS,
+                            message="first ok",
+                        )
+                    ),
+                    RuntimeError("downstream boom"),
+                ]
+            )
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+            paused_summary = service.run(self._three_step_runtime_failure_scenario(root), workspace_root=root)
+            resumed_summary = service.resume(
+                paused_summary.pause_state_path,
+                operator_action_selection=OperatorActionSelection(
+                    decision_point_id=paused_summary.guided_stop_reason.decision_point.decision_id,
+                    action_id="abort_run",
+                ),
+            )
+            report_content = resumed_summary.report_path.read_text(encoding="utf-8")
+            journal_lines = (
+                resumed_summary.run_state_dir / "journal.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(resumed_summary.final_status, StepStatus.ERROR)
+        self.assertEqual([step.step_id for step in resumed_summary.steps], ["step-1", "step-2"])
+        self.assertEqual(resumed_summary.decision_resolution.selected_action.action_type.value, "abort_run")
+        self.assertEqual(executor.execute_count, 2)
+        self.assertIn("operator aborted", resumed_summary.message.lower())
+        self.assertIn("## Decision resolution", report_content)
+        self.assertTrue(any(json.loads(line)["event_type"] == "run_aborted" for line in journal_lines))
 
     def test_non_resumable_compile_block_remains_terminal(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -217,9 +357,44 @@ class ScenarioPauseResumeTests(unittest.TestCase):
             ],
         )
 
+    @staticmethod
+    def _three_step_runtime_failure_scenario(root: Path) -> ScenarioDefinition:
+        scenario_path = root / "runtime-failure-scenario.md"
+        scenario_path.write_text("# Scenario: Runtime Failure\n", encoding="utf-8")
+        return ScenarioDefinition(
+            scenario_path=scenario_path,
+            scenario_slug="runtime-failure",
+            scenario_name="Runtime Failure",
+            project="code/demo-project",
+            environment="env/demo.env",
+            steps=[
+                ScenarioStep(
+                    step_id="step-1",
+                    step_number=1,
+                    title="First",
+                    step_type=ScenarioStepType.API,
+                    api=ApiStepDefinition(method="GET", path="/first"),
+                ),
+                ScenarioStep(
+                    step_id="step-2",
+                    step_number=2,
+                    title="Second",
+                    step_type=ScenarioStepType.API,
+                    api=ApiStepDefinition(method="GET", path="/second"),
+                ),
+                ScenarioStep(
+                    step_id="step-3",
+                    step_number=3,
+                    title="Third",
+                    step_type=ScenarioStepType.API,
+                    api=ApiStepDefinition(method="GET", path="/third"),
+                ),
+            ],
+        )
+
 
 class _SequencedExecutorFactory:
-    def __init__(self, outcomes: list[StepExecutionOutcome]) -> None:
+    def __init__(self, outcomes: list[StepExecutionOutcome | Exception]) -> None:
         self._outcomes = list(outcomes)
         self.execute_count = 0
 
@@ -228,7 +403,10 @@ class _SequencedExecutorFactory:
 
     def execute(self, run_context, scenario_definition, step: ScenarioStep) -> StepExecutionOutcome:
         self.execute_count += 1
-        return self._outcomes.pop(0)
+        next_outcome = self._outcomes.pop(0)
+        if isinstance(next_outcome, Exception):
+            raise next_outcome
+        return next_outcome
 
 
 class _UnusedExecutorFactory:

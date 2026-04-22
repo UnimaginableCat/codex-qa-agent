@@ -8,6 +8,7 @@ from typing import Any
 
 from ..domain.execution import ExecutionEvent, ExecutionIssue, ExecutionOutcome, ScenarioRunState
 from ..domain.guided import DecisionPoint, GuidedDiagnostic
+from ..domain.manual import DecisionResolution
 from ..domain.models import RunContext, ScenarioDefinition
 from ..domain.pause import PauseState, RunContinuationState
 
@@ -29,6 +30,7 @@ class ExecutionProjectionState:
     report_path: Path | None = None
     continuation_state: RunContinuationState = RunContinuationState.ACTIVE
     pause_state: PauseState | None = None
+    decision_resolution: DecisionResolution | None = None
     resumed_from_pause: bool = False
 
     @classmethod
@@ -54,6 +56,7 @@ class ExecutionProjectionState:
             report_path=report_path,
             continuation_state=session.continuation_state,
             pause_state=session.pause_state,
+            decision_resolution=session.decision_resolution,
             resumed_from_pause=session.resumed_from_pause,
         )
 

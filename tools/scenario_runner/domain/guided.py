@@ -10,6 +10,7 @@ from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 
 from .execution import ExecutionPhase, StepReference
+from .manual import AvailableOperatorAction
 
 
 class GuidedDiagnosticTag(StrEnum):
@@ -69,6 +70,8 @@ class DecisionPoint:
     continuation_policy: ContinuationPolicy
     recommended_action_id: str | None = None
     actions: tuple[GuidedAction, ...] = ()
+    available_operator_actions: tuple[AvailableOperatorAction, ...] = ()
+    recommended_operator_action_id: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -80,6 +83,10 @@ class DecisionPoint:
                 "continuation_policy": self.continuation_policy.value,
                 "recommended_action_id": self.recommended_action_id,
                 "actions": [action.to_dict() for action in self.actions],
+                "available_operator_actions": [
+                    action.to_dict() for action in self.available_operator_actions
+                ],
+                "recommended_operator_action_id": self.recommended_operator_action_id,
                 "details": self.details,
             }
         )

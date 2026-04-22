@@ -30,6 +30,7 @@ from ..runtime.variables import VariableResolutionError, build_initial_variables
 
 if TYPE_CHECKING:
     from ..domain.pause import PauseState
+    from ..domain.manual import DecisionResolution
 
 
 @dataclass(slots=True)
@@ -44,6 +45,7 @@ class ScenarioExecutionSession:
     execution_events: list[ExecutionEvent] = field(default_factory=list)
     continuation_state: RunContinuationState = RunContinuationState.ACTIVE
     pause_state: "PauseState | None" = None
+    decision_resolution: "DecisionResolution | None" = None
     resumed_from_pause: bool = False
 
     def append_event(self, event: ExecutionEvent) -> None:
@@ -132,26 +134,76 @@ class ScenarioExecutionEngine:
         if pause_state.resume_token != resume_request.resume_token:
             raise ValueError("Resume token does not match the paused run.")
 
-        self._prepare_session_for_resume(session, scenario_definition, pause_state.resume_from_step_index)
+        decision_resolution = resume_request.decision_resolution
+        selected_action_id = (
+            resume_request.selected_action_id
+            if resume_request.selected_action_id is not None
+            else None if decision_resolution is None else decision_resolution.selected_action_id
+        )
+        session.decision_resolution = decision_resolution
         session.continuation_state = RunContinuationState.RESUMED
         session.resumed_from_pause = True
         session.run_state.transition_to(ScenarioRunLifecycleState.RESUMING)
+        session.append_event(
+            ExecutionEvent.create(
+                event_type="decision_resolved",
+                run_state=session.run_state,
+                phase=ExecutionPhase.RUN_INITIALIZATION,
+                payload={
+                    "decision_point_id": None if decision_resolution is None else decision_resolution.decision_point_id,
+                    "selected_action_id": selected_action_id,
+                    "resume_strategy": (
+                        None
+                        if decision_resolution is None
+                        else decision_resolution.resume_strategy.value
+                    ),
+                },
+            )
+        )
+        plan = self._resume_plan_from_request(session, pause_state, decision_resolution)
+        if plan.prepare_from_step_index is not None:
+            self._prepare_session_for_resume(session, scenario_definition, plan.prepare_from_step_index)
+
+        if not plan.execute_steps:
+            session.append_event(
+                ExecutionEvent.create(
+                    event_type="run_aborted",
+                    run_state=session.run_state,
+                    phase=ExecutionPhase.RUN_INITIALIZATION,
+                    payload={
+                        "selected_action_id": selected_action_id,
+                        "resume_strategy": (
+                            None
+                            if decision_resolution is None
+                            else decision_resolution.resume_strategy.value
+                        ),
+                    },
+                )
+            )
+            self._set_terminal_execution_outcome(session, scenario_definition)
+            return session
+
         session.append_event(
             ExecutionEvent.create(
                 event_type="run_resumed",
                 run_state=session.run_state,
                 phase=ExecutionPhase.RUN_INITIALIZATION,
                 payload={
-                    "resume_from_step_id": pause_state.resume_from_step_id,
-                    "resume_from_step_index": pause_state.resume_from_step_index,
-                    "selected_action_id": resume_request.selected_action_id,
+                    "resume_from_step_id": plan.resume_from_step_id,
+                    "resume_from_step_index": plan.resume_from_step_index,
+                    "selected_action_id": selected_action_id,
+                    "resume_strategy": (
+                        None
+                        if decision_resolution is None
+                        else decision_resolution.resume_strategy.value
+                    ),
                 },
             )
         )
         self._execute_steps(
             session,
             scenario_definition,
-            start_step_index=pause_state.resume_from_step_index,
+            start_step_index=plan.resume_from_step_index,
         )
         self._set_terminal_execution_outcome(session, scenario_definition)
         return session
@@ -483,6 +535,62 @@ class ScenarioExecutionEngine:
         ]
         session.run_state.current_step = None
         session.run_state.final_outcome = None
+
+    @staticmethod
+    def _resume_plan_from_request(
+        session: ScenarioExecutionSession,
+        pause_state,
+        decision_resolution,
+    ):
+        from dataclasses import dataclass
+
+        from ..domain.manual import ResumeStrategy
+
+        @dataclass(frozen=True, slots=True)
+        class _ResumePlan:
+            prepare_from_step_index: int | None
+            resume_from_step_index: int
+            resume_from_step_id: str
+            execute_steps: bool
+
+        if decision_resolution is None:
+            return _ResumePlan(
+                prepare_from_step_index=pause_state.resume_from_step_index,
+                resume_from_step_index=pause_state.resume_from_step_index,
+                resume_from_step_id=pause_state.resume_from_step_id,
+                execute_steps=True,
+            )
+
+        selected_action = decision_resolution.selected_action
+        if decision_resolution.resume_strategy == ResumeStrategy.ABORT:
+            return _ResumePlan(
+                prepare_from_step_index=None,
+                resume_from_step_index=pause_state.resume_from_step_index,
+                resume_from_step_id=pause_state.resume_from_step_id,
+                execute_steps=False,
+            )
+
+        target_step_index = (
+            pause_state.resume_from_step_index
+            if selected_action.target_step_index is None
+            else selected_action.target_step_index
+        )
+        target_step_id = selected_action.target_step_id or pause_state.resume_from_step_id
+
+        if decision_resolution.resume_strategy == ResumeStrategy.CONTINUE_FROM_NEXT_STEP:
+            return _ResumePlan(
+                prepare_from_step_index=target_step_index + 1,
+                resume_from_step_index=target_step_index + 1,
+                resume_from_step_id=target_step_id,
+                execute_steps=True,
+            )
+
+        return _ResumePlan(
+            prepare_from_step_index=target_step_index,
+            resume_from_step_index=target_step_index,
+            resume_from_step_id=target_step_id,
+            execute_steps=True,
+        )
 
     def _validate_expectations(
         self,

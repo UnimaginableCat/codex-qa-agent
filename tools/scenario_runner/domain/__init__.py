@@ -8,6 +8,13 @@ from .guided import (
     GuidedDiagnostic,
     GuidedDiagnosticTag,
 )
+from .manual import (
+    AvailableOperatorAction,
+    DecisionResolution,
+    OperatorActionSelection,
+    OperatorActionType,
+    ResumeStrategy,
+)
 from .pause import PauseState, ResumeRequest, ResumeToken, RunContinuationState
 from .execution import (
     ExecutionEvent,
@@ -39,8 +46,10 @@ from .models import (
 
 __all__ = [
     "ApiStepDefinition",
+    "AvailableOperatorAction",
     "ContinuationPolicy",
     "DbStepDefinition",
+    "DecisionResolution",
     "DecisionPoint",
     "ExpectationCheckResult",
     "ExecutionEvent",
@@ -52,7 +61,10 @@ __all__ = [
     "GuidedActionType",
     "GuidedDiagnostic",
     "GuidedDiagnosticTag",
+    "OperatorActionSelection",
+    "OperatorActionType",
     "PauseState",
+    "ResumeStrategy",
     "ResumeRequest",
     "ResumeToken",
     "RunContext",
