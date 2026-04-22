@@ -117,6 +117,11 @@ class SummaryData:
     artifacts: list[str] = field(default_factory=list)
     guided_diagnostics: list[GuidedDiagnosticData] = field(default_factory=list)
     guided_stop_reason: GuidedDiagnosticData | None = None
+    continuation_state: str = "terminal"
+    resumable: bool = False
+    resume_token: dict[str, Any] | None = None
+    pause_state_path: str | None = None
+    resumed_from_pause: bool = False
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "SummaryData":
@@ -145,6 +150,9 @@ class SummaryData:
         guided_stop_reason_raw = payload.get("guided_stop_reason")
         if guided_stop_reason_raw is not None and not isinstance(guided_stop_reason_raw, dict):
             raise ValidationError("Field 'guided_stop_reason' must be an object")
+        resume_token_raw = payload.get("resume_token")
+        if resume_token_raw is not None and not isinstance(resume_token_raw, dict):
+            raise ValidationError("Field 'resume_token' must be an object")
 
         return cls(
             final_status=final_status,
@@ -163,6 +171,11 @@ class SummaryData:
             guided_stop_reason=(
                 None if guided_stop_reason_raw is None else GuidedDiagnosticData.from_mapping(guided_stop_reason_raw)
             ),
+            continuation_state=str(payload.get("continuation_state", "terminal")).strip() or "terminal",
+            resumable=bool(payload.get("resumable", False)),
+            resume_token=None if resume_token_raw is None else dict(resume_token_raw),
+            pause_state_path=cls._read_optional_string(payload, "pause_state_path"),
+            resumed_from_pause=bool(payload.get("resumed_from_pause", False)),
         )
 
     @staticmethod

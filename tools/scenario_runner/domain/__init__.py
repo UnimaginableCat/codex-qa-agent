@@ -8,6 +8,7 @@ from .guided import (
     GuidedDiagnostic,
     GuidedDiagnosticTag,
 )
+from .pause import PauseState, ResumeRequest, ResumeToken, RunContinuationState
 from .execution import (
     ExecutionEvent,
     ExecutionIssue,
@@ -51,7 +52,11 @@ __all__ = [
     "GuidedActionType",
     "GuidedDiagnostic",
     "GuidedDiagnosticTag",
+    "PauseState",
+    "ResumeRequest",
+    "ResumeToken",
     "RunContext",
+    "RunContinuationState",
     "ScenarioDefinition",
     "ScenarioExecutionSummary",
     "ScenarioRunLifecycleState",

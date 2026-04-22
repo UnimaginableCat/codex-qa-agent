@@ -38,8 +38,10 @@ class ScenarioRunLifecycleState(StrEnum):
     COMPILING = "compiling"
     PREFLIGHT_RUNNING = "preflight_running"
     READY = "ready"
+    RESUMING = "resuming"
     STEP_RUNNING = "step_running"
     FINALIZING = "finalizing"
+    PAUSED = "paused"
     FINISHED = "finished"
 
 

@@ -15,6 +15,7 @@ from ..domain.execution import (
     issue_messages,
 )
 from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
+from ..domain.pause import RunContinuationState
 from .guided import build_guided_projection
 from .models import ExecutionProjectionState
 
@@ -41,7 +42,11 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
     executed_step_count = len(step_results)
     total_step_count = len(state.scenario_definition.steps)
 
-    if state.finalization_outcomes and final_status == StepStatus.ERROR:
+    if state.continuation_state == RunContinuationState.PAUSED:
+        message = f"Scenario execution paused with status {final_status.value}."
+    elif state.resumed_from_pause and final_status == StepStatus.PASS and executed_step_count == total_step_count:
+        message = "Scenario execution resumed and completed."
+    elif state.finalization_outcomes and final_status == StepStatus.ERROR:
         message = "Scenario finalization failed with status ERROR."
     elif compile_failed:
         message = f"Scenario compilation failed with status {final_status.value}."
@@ -79,6 +84,11 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
         code_analysis_used=False,
         guided_diagnostics=list(guided_projection.diagnostics),
         guided_stop_reason=guided_projection.stop_reason,
+        continuation_state=state.continuation_state,
+        resumable=state.pause_state is not None and state.pause_state.resumable,
+        resume_token=None if state.pause_state is None else state.pause_state.resume_token,
+        pause_state_path=None if state.pause_state is None else state.pause_state.pause_state_path,
+        resumed_from_pause=state.resumed_from_pause,
         details={
             "scenario_name": state.scenario_definition.scenario_name,
             "project": state.scenario_definition.project,
@@ -102,6 +112,8 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
             ],
             "guided_diagnostics_count": len(guided_projection.diagnostics),
             "guided_decision_points_count": len(guided_projection.decision_points),
+            "continuation_state": state.continuation_state.value,
+            "resumable": state.pause_state is not None and state.pause_state.resumable,
             "variable_keys": sorted(state.run_context.variables.keys()),
             "warnings": warnings,
             "artifact_policy": "Artifacts are immutable outputs/evidence only; never write source code into artifacts/.",
@@ -160,6 +172,7 @@ def build_scenario_summary(
             for status in finalization_statuses or []
         ),
         report_path=report_path,
+        continuation_state=RunContinuationState.TERMINAL,
     )
     return build_summary_projection(state)
 

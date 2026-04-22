@@ -9,6 +9,7 @@ from typing import Any
 from ..domain.execution import ExecutionEvent, ExecutionIssue, ExecutionOutcome, ScenarioRunState
 from ..domain.guided import DecisionPoint, GuidedDiagnostic
 from ..domain.models import RunContext, ScenarioDefinition
+from ..domain.pause import PauseState, RunContinuationState
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,9 @@ class ExecutionProjectionState:
     finalization_outcomes: tuple[ExecutionOutcome, ...] = ()
     execution_events: tuple[ExecutionEvent, ...] = ()
     report_path: Path | None = None
+    continuation_state: RunContinuationState = RunContinuationState.ACTIVE
+    pause_state: PauseState | None = None
+    resumed_from_pause: bool = False
 
     @classmethod
     def from_session(
@@ -48,6 +52,9 @@ class ExecutionProjectionState:
             finalization_outcomes=tuple(finalization_outcomes or []),
             execution_events=tuple(session.execution_events),
             report_path=report_path,
+            continuation_state=session.continuation_state,
+            pause_state=session.pause_state,
+            resumed_from_pause=session.resumed_from_pause,
         )
 
     @property

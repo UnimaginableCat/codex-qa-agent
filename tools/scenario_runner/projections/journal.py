@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..domain.execution import ExecutionEvent, ExecutionOutcome, ExecutionPhase
 from ..domain.models import ScenarioExecutionSummary
+from ..domain.pause import RunContinuationState
 from .models import ExecutionProjectionState, JournalProjection
 
 
@@ -16,9 +17,14 @@ def build_journal_projection(
     entries = list(state.execution_events)
 
     if include_run_finished:
+        event_type = (
+            "run_paused"
+            if summary.continuation_state == RunContinuationState.PAUSED
+            else "run_finished"
+        )
         entries.append(
             ExecutionEvent.create(
-                event_type="run_finished",
+                event_type=event_type,
                 run_state=state.run_state,
                 phase=ExecutionPhase.FINALIZATION,
                 outcome=ExecutionOutcome.from_status(
@@ -30,6 +36,10 @@ def build_journal_projection(
                 payload={
                     "executed_step_count": state.executed_step_count,
                     "report_path": None if state.report_path is None else str(state.report_path),
+                    "continuation_state": summary.continuation_state.value,
+                    "resumable": summary.resumable,
+                    "pause_state_path": None if summary.pause_state_path is None else str(summary.pause_state_path),
+                    "resume_token": None if summary.resume_token is None else summary.resume_token.to_dict(),
                 },
             )
         )

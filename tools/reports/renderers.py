@@ -15,7 +15,13 @@ class MarkdownReportRenderer:
             f"- Project: `{context.project}`",
             f"- Scenario: `{context.scenario}`",
             f"- Final status: `{context.summary.final_status}`",
+            f"- Continuation state: `{context.summary.continuation_state}`",
         ]
+
+        if context.summary.resumable:
+            lines.append("- Resumable: `true`")
+        if context.summary.pause_state_path:
+            lines.append(f"- Pause state: `{context.summary.pause_state_path}`")
 
         if context.summary.executive_summary:
             lines.extend(["", "## Executive summary", context.summary.executive_summary])
@@ -44,6 +50,11 @@ class MarkdownReportRenderer:
         if context.summary.guided_stop_reason is not None:
             lines.extend(["", "## Guided stop reason"])
             lines.extend(self._render_guided_diagnostics([context.summary.guided_stop_reason]))
+
+        if context.summary.resume_token is not None:
+            lines.extend(["", "## Resume"])
+            lines.append(f"- Run ID: `{context.summary.resume_token.get('run_id', '')}`")
+            lines.append(f"- Pause ID: `{context.summary.resume_token.get('pause_id', '')}`")
 
         return "\n".join(lines) + "\n"
 

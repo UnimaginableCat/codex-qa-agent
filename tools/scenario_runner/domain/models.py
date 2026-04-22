@@ -10,8 +10,11 @@ from typing import TYPE_CHECKING, Any
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 
+from .pause import RunContinuationState
+
 if TYPE_CHECKING:
     from .guided import GuidedDiagnostic
+    from .pause import ResumeToken
 
 
 class ScenarioStepType(StrEnum):
@@ -152,6 +155,11 @@ class ScenarioExecutionSummary:
     code_analysis_used: bool = False
     guided_diagnostics: list[GuidedDiagnostic] = field(default_factory=list)
     guided_stop_reason: GuidedDiagnostic | None = None
+    continuation_state: "RunContinuationState" = field(default_factory=lambda: RunContinuationState.TERMINAL)
+    resumable: bool = False
+    resume_token: "ResumeToken | None" = None
+    pause_state_path: Path | None = None
+    resumed_from_pause: bool = False
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -176,6 +184,11 @@ class ScenarioExecutionSummary:
             for diagnostic in self.guided_diagnostics
             if diagnostic.decision_point is not None
         ]
+        payload["continuation_state"] = self.continuation_state.value
+        payload["resumable"] = self.resumable
+        payload["resume_token"] = None if self.resume_token is None else self.resume_token.to_dict()
+        payload["pause_state_path"] = None if self.pause_state_path is None else str(self.pause_state_path)
+        payload["resumed_from_pause"] = self.resumed_from_pause
         return payload
 
     def build_notes(self) -> list[str]:
@@ -214,4 +227,6 @@ class ScenarioExecutionSummary:
         artifacts = [str(self.artifact_dir), str(self.run_state_dir)]
         if self.report_path is not None:
             artifacts.append(str(self.report_path))
+        if self.pause_state_path is not None:
+            artifacts.append(str(self.pause_state_path))
         return artifacts

@@ -15,9 +15,11 @@ from ..domain.execution import (
     ScenarioRunLifecycleState,
 )
 from ..domain.models import ScenarioDefinition, ScenarioExecutionSummary
+from ..domain.pause import RunContinuationState
 from ..persistence.artifacts import ScenarioRunArtifactStore
 from .journal import build_journal_projection
 from .models import ExecutionProjectionState
+from .pause import build_pause_state
 from .reporting import build_report_context
 from .summary import build_summary_projection
 
@@ -34,6 +36,9 @@ class ScenarioRunFinalizer:
         scenario_definition: ScenarioDefinition,
     ) -> None:
         self._artifact_store.write_initial_state(session, scenario_definition)
+
+    def persist_pause_state(self, run_context, pause_state) -> Path:
+        return self._artifact_store.write_pause_state(run_context, pause_state)
 
     def finalize(
         self,
@@ -63,6 +68,39 @@ class ScenarioRunFinalizer:
                     exc=exc,
                 )
                 allow_report = False
+
+        session.continuation_state = (
+            RunContinuationState.RESUMED if session.resumed_from_pause else RunContinuationState.TERMINAL
+        )
+        if not session.resumed_from_pause:
+            session.pause_state = None
+        projection_state = ExecutionProjectionState.from_session(
+            session,
+            scenario_definition,
+            finalization_outcomes=outcomes,
+            report_path=report_path if allow_report else None,
+        )
+        pause_state = build_pause_state(projection_state)
+        if pause_state is not None:
+            try:
+                pause_path = self._artifact_store.write_pause_state(session.run_context, pause_state)
+                pause_state.set_path(pause_path)
+                session.pause_state = pause_state
+                session.continuation_state = RunContinuationState.PAUSED
+                session.run_state.transition_to(ScenarioRunLifecycleState.PAUSED)
+            except Exception as exc:  # noqa: BLE001
+                self.record_finalization_error(
+                    session=session,
+                    finalization_outcomes=outcomes,
+                    phase=ExecutionPhase.PERSISTENCE,
+                    code="pause_state_persistence_failed",
+                    message="pause state persistence failed",
+                    exc=exc,
+                )
+                session.continuation_state = (
+                    RunContinuationState.RESUMED if session.resumed_from_pause else RunContinuationState.TERMINAL
+                )
+                session.pause_state = None
 
         projection_state = ExecutionProjectionState.from_session(
             session,
@@ -168,7 +206,11 @@ class ScenarioRunFinalizer:
                 phase=ExecutionPhase.FINALIZATION,
             )
         )
-        session.run_state.transition_to(ScenarioRunLifecycleState.FINISHED)
+        session.run_state.transition_to(
+            ScenarioRunLifecycleState.PAUSED
+            if summary.continuation_state == RunContinuationState.PAUSED
+            else ScenarioRunLifecycleState.FINISHED
+        )
         return summary
 
     def _try_write_context(
@@ -219,7 +261,8 @@ class ScenarioRunFinalizer:
     ) -> bool:
         try:
             journal = build_journal_projection(projection_state, summary, include_run_finished=True)
-            self._artifact_store.write_journal(session.run_context, journal.persisted_entries(skip=1))
+            skip_count = 1 if session.execution_events and session.execution_events[0].event_type == "run_initialized" else 0
+            self._artifact_store.write_journal(session.run_context, journal.persisted_entries(skip=skip_count))
             return True
         except Exception as exc:  # noqa: BLE001
             self.record_finalization_error(

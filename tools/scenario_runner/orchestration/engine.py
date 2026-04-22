@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from tools.common.statuses import StepStatus
 
 from .compiler import CompileCheckResult, CompiledScenario, ScenarioCompiler
+from ..domain.pause import ResumeRequest, RunContinuationState
 from ..domain.execution import (
     ExecutionEvent,
     ExecutionIssue,
@@ -26,6 +28,9 @@ from ..projections.summary import resolve_final_status
 from ..runtime.validators import ExpectationValidationError, ScenarioStepValidator
 from ..runtime.variables import VariableResolutionError, build_initial_variables, resolve_step_variables
 
+if TYPE_CHECKING:
+    from ..domain.pause import PauseState
+
 
 @dataclass(slots=True)
 class ScenarioExecutionSession:
@@ -37,6 +42,9 @@ class ScenarioExecutionSession:
     preflight_outcomes: list[ExecutionOutcome] = field(default_factory=list)
     preflight_checks: list[PreflightCheckResult] = field(default_factory=list)
     execution_events: list[ExecutionEvent] = field(default_factory=list)
+    continuation_state: RunContinuationState = RunContinuationState.ACTIVE
+    pause_state: "PauseState | None" = None
+    resumed_from_pause: bool = False
 
     def append_event(self, event: ExecutionEvent) -> None:
         self.execution_events.append(event)
@@ -109,6 +117,42 @@ class ScenarioExecutionEngine:
             return session
 
         self._execute_steps(session, compiled_scenario.scenario_definition)
+        self._set_terminal_execution_outcome(session, scenario_definition)
+        return session
+
+    def resume(
+        self,
+        session: ScenarioExecutionSession,
+        scenario_definition: ScenarioDefinition,
+        resume_request: ResumeRequest,
+    ) -> ScenarioExecutionSession:
+        pause_state = session.pause_state
+        if pause_state is None:
+            raise ValueError("Session is not paused and cannot be resumed.")
+        if pause_state.resume_token != resume_request.resume_token:
+            raise ValueError("Resume token does not match the paused run.")
+
+        self._prepare_session_for_resume(session, scenario_definition, pause_state.resume_from_step_index)
+        session.continuation_state = RunContinuationState.RESUMED
+        session.resumed_from_pause = True
+        session.run_state.transition_to(ScenarioRunLifecycleState.RESUMING)
+        session.append_event(
+            ExecutionEvent.create(
+                event_type="run_resumed",
+                run_state=session.run_state,
+                phase=ExecutionPhase.RUN_INITIALIZATION,
+                payload={
+                    "resume_from_step_id": pause_state.resume_from_step_id,
+                    "resume_from_step_index": pause_state.resume_from_step_index,
+                    "selected_action_id": resume_request.selected_action_id,
+                },
+            )
+        )
+        self._execute_steps(
+            session,
+            scenario_definition,
+            start_step_index=pause_state.resume_from_step_index,
+        )
         self._set_terminal_execution_outcome(session, scenario_definition)
         return session
 
@@ -304,8 +348,11 @@ class ScenarioExecutionEngine:
         self,
         session: ScenarioExecutionSession,
         scenario_definition: ScenarioDefinition,
+        *,
+        start_step_index: int = 0,
     ) -> None:
-        for step_index, step in enumerate(scenario_definition.steps):
+        for step_index in range(start_step_index, len(scenario_definition.steps)):
+            step = scenario_definition.steps[step_index]
             step_reference = StepReference.from_step(step)
             session.run_state.transition_to(
                 ScenarioRunLifecycleState.STEP_RUNNING,
@@ -406,6 +453,36 @@ class ScenarioExecutionEngine:
                 break
 
             session.run_state.transition_to(ScenarioRunLifecycleState.READY)
+
+    def _prepare_session_for_resume(
+        self,
+        session: ScenarioExecutionSession,
+        scenario_definition: ScenarioDefinition,
+        resume_from_step_index: int,
+    ) -> None:
+        rerun_step_ids = {
+            step.step_id for step in scenario_definition.steps[resume_from_step_index:]
+        }
+        session.run_context.step_results = [
+            result for result in session.run_context.step_results if result.step_id not in rerun_step_ids
+        ]
+        session.run_state.step_states = [
+            step_state
+            for step_state in session.run_state.step_states
+            if step_state.step.step_id not in rerun_step_ids
+        ]
+        session.tooling_issues = [
+            issue
+            for issue in session.tooling_issues
+            if issue.step is None or issue.step.step_id not in rerun_step_ids
+        ]
+        session.run_state.issues = [
+            issue
+            for issue in session.run_state.issues
+            if issue.step is None or issue.step.step_id not in rerun_step_ids
+        ]
+        session.run_state.current_step = None
+        session.run_state.final_outcome = None
 
     def _validate_expectations(
         self,

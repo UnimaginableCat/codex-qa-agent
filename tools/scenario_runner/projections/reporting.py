@@ -110,5 +110,10 @@ def build_report_context(summary: ScenarioExecutionSummary) -> ReportContext:
                     ),
                 )
             ),
+            continuation_state=summary.continuation_state.value,
+            resumable=summary.resumable,
+            resume_token=None if summary.resume_token is None else summary.resume_token.to_dict(),
+            pause_state_path=None if summary.pause_state_path is None else str(summary.pause_state_path),
+            resumed_from_pause=summary.resumed_from_pause,
         ),
     )

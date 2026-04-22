@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..domain.execution import ExecutionOutcome, ExecutionPhase
+from tools.common.errors import ValidationError
+
+from ..domain.execution import ExecutionOutcome, ExecutionPhase, utc_now_iso
+from ..domain.pause import ResumeRequest, RunContinuationState
 from ..domain.models import ScenarioDefinition, ScenarioExecutionSummary
+from ..persistence import load_pause_state, restore_session_from_pause_state
 from ..projections.finalization import ScenarioRunFinalizer
 from .context import initialize_run_context
 from .engine import ScenarioExecutionEngine
@@ -66,3 +70,40 @@ class ScenarioRunnerService:
             allow_report=True,
             finalization_outcomes=finalization_outcomes,
         )
+
+    def resume(
+        self,
+        pause_state_path: Path,
+        *,
+        scenario_definition: ScenarioDefinition | None = None,
+        selected_action_id: str | None = None,
+    ) -> ScenarioExecutionSummary:
+        pause_state = load_pause_state(pause_state_path)
+        if not pause_state.resumable:
+            raise ValidationError("Pause state is not active or resumable.")
+        restored_scenario_definition, session = restore_session_from_pause_state(
+            pause_state,
+            scenario_definition=scenario_definition,
+        )
+        scenario = scenario_definition or restored_scenario_definition
+        session.pause_state = pause_state
+
+        finalization_outcomes: list[ExecutionOutcome] = []
+        session = self._engine.resume(
+            session,
+            scenario,
+            ResumeRequest(
+                resume_token=pause_state.resume_token,
+                selected_action_id=selected_action_id,
+            ),
+        )
+        pause_state.mark_resumed(selected_action_id, utc_now_iso())
+        summary = self._finalizer.finalize(
+            session,
+            scenario,
+            allow_report=True,
+            finalization_outcomes=finalization_outcomes,
+        )
+        if summary.continuation_state != RunContinuationState.PAUSED:
+            self._finalizer.persist_pause_state(session.run_context, pause_state)
+        return summary

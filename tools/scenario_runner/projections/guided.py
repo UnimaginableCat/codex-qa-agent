@@ -52,6 +52,17 @@ def build_guided_projection(state: ExecutionProjectionState) -> GuidedRunProject
         (
             diagnostic
             for diagnostic in diagnostics
+            if diagnostic.decision_point is not None
+            and diagnostic.continuation_policy in {
+                ContinuationPolicy.WAIT_FOR_DECISION,
+                ContinuationPolicy.RETRY_MANUALLY,
+            }
+        ),
+        None,
+    ) or next(
+        (
+            diagnostic
+            for diagnostic in diagnostics
             if diagnostic.continuation_policy != ContinuationPolicy.CONTINUE
         ),
         None,

@@ -12,6 +12,7 @@ from tools.common.io import write_text_file
 
 from ..domain.execution import ExecutionEvent
 from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
+from ..domain.pause import PauseState
 from ..runtime.redaction import redact_sensitive_data
 
 PARSED_PLANS_DIRNAME = Path(".codex-qa/parsed-plans")
@@ -20,6 +21,7 @@ ARTIFACTS_DIRNAME = Path("artifacts/agent")
 CONTEXT_FILENAME = "context.json"
 SUMMARY_FILENAME = "summary.json"
 JOURNAL_FILENAME = "journal.jsonl"
+PAUSE_STATE_FILENAME = "pause-state.json"
 COMPILED_PLAN_FILENAME = "compiled-plan.json"
 MANIFEST_FILENAME = "manifest.json"
 FORBIDDEN_ARTIFACT_SUFFIXES = {
@@ -108,12 +110,20 @@ class ScenarioRunArtifactStore:
         return create_report_path(run_context)
 
     @staticmethod
+    def create_pause_state_path(run_context: RunContext) -> Path:
+        return create_pause_state_path(run_context)
+
+    @staticmethod
     def write_context(run_context: RunContext) -> Path:
         return write_context_json(run_context)
 
     @staticmethod
     def write_summary(run_context: RunContext, summary: ScenarioExecutionSummary) -> Path:
         return write_summary_json(run_context, summary)
+
+    @staticmethod
+    def write_pause_state(run_context: RunContext, pause_state: PauseState) -> Path:
+        return write_pause_state_json(run_context, pause_state)
 
     @staticmethod
     def write_journal(
@@ -198,6 +208,11 @@ def create_report_path(run_context: RunContext) -> Path:
     return ensure_artifact_output_path(target_path, run_context.artifacts_root_dir)
 
 
+def create_pause_state_path(run_context: RunContext) -> Path:
+    target_path = run_context.artifact_dir / PAUSE_STATE_FILENAME
+    return ensure_artifact_output_path(target_path, run_context.artifacts_root_dir)
+
+
 def write_context_json(run_context: RunContext) -> Path:
     target_path = run_context.run_state_dir / CONTEXT_FILENAME
     payload = _strip_run_state_network_debug(run_context.to_dict())
@@ -212,6 +227,16 @@ def write_summary_json(run_context: RunContext, summary: ScenarioExecutionSummar
     payload = _strip_run_state_network_debug(summary.to_dict())
     _write_json_file(target_path, payload)
     _write_json_file(_bundle_file_path(run_context, SUMMARY_FILENAME), payload)
+    _write_manifest_json(run_context)
+    return target_path
+
+
+def write_pause_state_json(run_context: RunContext, pause_state: PauseState) -> Path:
+    target_path = run_context.run_state_dir / PAUSE_STATE_FILENAME
+    pause_state.set_path(target_path)
+    payload = pause_state.to_dict()
+    _write_json_file(target_path, payload)
+    _write_json_file(_bundle_file_path(run_context, PAUSE_STATE_FILENAME), payload)
     _write_manifest_json(run_context)
     return target_path
 
@@ -274,6 +299,7 @@ def _write_manifest_json(run_context: RunContext) -> Path:
             "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),
             "summary_path": str(run_context.artifact_dir / SUMMARY_FILENAME),
             "journal_path": str(run_context.artifact_dir / JOURNAL_FILENAME),
+            "pause_state_path": str(run_context.artifact_dir / PAUSE_STATE_FILENAME),
             "compiled_plan_path": str(run_context.artifact_dir / COMPILED_PLAN_FILENAME),
             "report_path": str(run_context.artifact_dir / "report.md"),
             "steps_dir": str(run_context.artifact_dir / "steps"),
@@ -282,6 +308,7 @@ def _write_manifest_json(run_context: RunContext) -> Path:
             "context_path": str(run_context.run_state_dir / CONTEXT_FILENAME),
             "summary_path": str(run_context.run_state_dir / SUMMARY_FILENAME),
             "journal_path": str(run_context.run_state_dir / JOURNAL_FILENAME),
+            "pause_state_path": str(run_context.run_state_dir / PAUSE_STATE_FILENAME),
         },
     }
     _write_json_file(target_path, payload)
