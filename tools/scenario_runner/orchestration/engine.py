@@ -10,16 +10,26 @@ from tools.common.statuses import StepStatus
 from .compiler import CompileCheckResult, CompiledScenario, ScenarioCompiler
 from ..domain.pause import ResumeRequest, RunContinuationState
 from ..domain.execution import (
+    AbortDisposition,
     ExecutionEvent,
     ExecutionIssue,
     ExecutionIssueKind,
     ExecutionOutcome,
     ExecutionPhase,
+    RunTermination,
+    RunTerminationKind,
     ScenarioRunLifecycleState,
     ScenarioRunState,
+    SkipDisposition,
     StepExecutionLifecycleState,
     StepExecutionState,
     StepReference,
+    StepTermination,
+    StepTerminationKind,
+    TerminationReason,
+    TerminationReasonSource,
+    completion_disposition,
+    run_termination_kind_from_status,
 )
 from ..runtime.executors import StepExecutionOutcome, StepExecutorFactory
 from ..domain.models import RunContext, ScenarioDefinition, ScenarioStep, StepExecutionResult
@@ -161,10 +171,43 @@ class ScenarioExecutionEngine:
             )
         )
         plan = self._resume_plan_from_request(session, pause_state, decision_resolution)
+        self._apply_operator_step_termination(session, decision_resolution)
         if plan.prepare_from_step_index is not None:
             self._prepare_session_for_resume(session, scenario_definition, plan.prepare_from_step_index)
 
         if not plan.execute_steps:
+            completed_step_count = self._completed_step_count(session)
+            total_step_count = len(scenario_definition.steps)
+            session.run_state.set_termination(
+                RunTermination(
+                    kind=RunTerminationKind.ABORTED,
+                    reason=TerminationReason(
+                        code="operator_aborted_run",
+                        message="Operator selected abort for the paused run.",
+                        source=TerminationReasonSource.OPERATOR,
+                        phase=ExecutionPhase.RUN_INITIALIZATION,
+                        details={
+                            "selected_action_id": selected_action_id,
+                            "resume_from_step_id": pause_state.resume_from_step_id,
+                        },
+                    ),
+                    completion_disposition=completion_disposition(
+                        executed_step_count=completed_step_count,
+                        total_step_count=total_step_count,
+                    ),
+                    outcome_status=resolve_final_status(
+                        [step_result.status for step_result in session.run_context.step_results]
+                        + [outcome.status for outcome in session.compile_outcomes]
+                        + [outcome.status for outcome in session.preflight_outcomes]
+                    ),
+                    abort_disposition=AbortDisposition.OPERATOR,
+                    operator_resolution=(
+                        None if decision_resolution is None else decision_resolution.to_dict()
+                    ),
+                    completed_step_count=completed_step_count,
+                    total_step_count=total_step_count,
+                )
+            )
             session.append_event(
                 ExecutionEvent.create(
                     event_type="run_aborted",
@@ -499,6 +542,17 @@ class ScenarioExecutionEngine:
                                 deferred_blocked_result,
                                 phase=ExecutionPhase.CAPTURE,
                             ),
+                            termination=StepTermination(
+                                kind=StepTerminationKind.BLOCKED,
+                                reason=TerminationReason(
+                                    code="deferred_capture_blocked",
+                                    message=deferred_blocked_result.message,
+                                    source=TerminationReasonSource.EXECUTION,
+                                    phase=ExecutionPhase.CAPTURE,
+                                    details=dict(deferred_blocked_result.details),
+                                ),
+                                outcome_status=StepStatus.BLOCKED,
+                            ),
                             issues=[deferred_issue],
                         )
                     )
@@ -535,6 +589,7 @@ class ScenarioExecutionEngine:
         ]
         session.run_state.current_step = None
         session.run_state.final_outcome = None
+        session.run_state.termination = None
 
     @staticmethod
     def _resume_plan_from_request(
@@ -689,6 +744,131 @@ class ScenarioExecutionEngine:
                 phase=self._terminal_phase(session),
             )
         )
+        if session.run_state.termination is None:
+            session.run_state.set_termination(
+                self._build_run_termination(
+                    session=session,
+                    scenario_definition=scenario_definition,
+                    final_status=final_status,
+                    message=message,
+                )
+            )
+
+    def _build_run_termination(
+        self,
+        *,
+        session: ScenarioExecutionSession,
+        scenario_definition: ScenarioDefinition,
+        final_status: StepStatus,
+        message: str,
+    ) -> RunTermination:
+        phase = self._terminal_phase(session)
+        completed_step_count = self._completed_step_count(session)
+        total_step_count = len(scenario_definition.steps)
+        return RunTermination(
+            kind=run_termination_kind_from_status(final_status),
+            reason=TerminationReason(
+                code=self._terminal_reason_code(session, final_status),
+                message=message,
+                source=self._terminal_reason_source(session, phase),
+                phase=phase,
+            ),
+            completion_disposition=completion_disposition(
+                executed_step_count=completed_step_count,
+                total_step_count=total_step_count,
+            ),
+            outcome_status=final_status,
+            operator_resolution=(
+                None if session.decision_resolution is None else session.decision_resolution.to_dict()
+            ),
+            completed_step_count=completed_step_count,
+            total_step_count=total_step_count,
+        )
+
+    @staticmethod
+    def _completed_step_count(session: ScenarioExecutionSession) -> int:
+        return sum(1 for step_result in session.run_context.step_results if step_result.status == StepStatus.PASS)
+
+    @staticmethod
+    def _terminal_reason_code(session: ScenarioExecutionSession, final_status: StepStatus) -> str:
+        if session.tooling_issues:
+            return session.tooling_issues[-1].code
+        if session.compile_outcomes and any(outcome.status != StepStatus.PASS for outcome in session.compile_outcomes):
+            return "compilation_stopped"
+        if session.preflight_outcomes and final_status != StepStatus.PASS:
+            return "preflight_stopped"
+        return f"run_{run_termination_kind_from_status(final_status).value}"
+
+    @staticmethod
+    def _terminal_reason_source(
+        session: ScenarioExecutionSession,
+        phase: ExecutionPhase,
+    ) -> TerminationReasonSource:
+        if session.decision_resolution is not None:
+            return TerminationReasonSource.OPERATOR
+        if phase == ExecutionPhase.COMPILATION:
+            return TerminationReasonSource.COMPILATION
+        if phase == ExecutionPhase.PREFLIGHT:
+            return TerminationReasonSource.PREFLIGHT
+        if phase == ExecutionPhase.FINALIZATION:
+            return TerminationReasonSource.FINALIZATION
+        if session.tooling_issues and session.tooling_issues[-1].issue_type == ExecutionIssueKind.TOOLING:
+            return TerminationReasonSource.RUNTIME
+        return TerminationReasonSource.EXECUTION
+
+    @staticmethod
+    def _apply_operator_step_termination(
+        session: ScenarioExecutionSession,
+        decision_resolution: "DecisionResolution | None",
+    ) -> None:
+        if decision_resolution is None:
+            return
+        if decision_resolution.selected_action.action_type.value != "skip_step":
+            return
+
+        selected_action = decision_resolution.selected_action
+        target_step_id = selected_action.target_step_id
+        target_step_index = selected_action.target_step_index
+        if target_step_id is None and target_step_index is not None:
+            for step_state in session.run_state.step_states:
+                if step_state.step.step_number == target_step_index + 1:
+                    target_step_id = step_state.step.step_id
+                    break
+        if target_step_id is None:
+            return
+
+        for index, step_state in enumerate(session.run_state.step_states):
+            if step_state.step.step_id != target_step_id:
+                continue
+            outcome_status = None if step_state.outcome is None else step_state.outcome.status
+            session.run_state.step_states[index] = step_state.with_termination(
+                StepTermination(
+                    kind=StepTerminationKind.SKIPPED,
+                    reason=TerminationReason(
+                        code="operator_skipped_step",
+                        message="Operator selected skip for this paused step.",
+                        source=TerminationReasonSource.OPERATOR,
+                        phase=None if step_state.outcome is None else step_state.outcome.phase,
+                        details={"selected_action_id": decision_resolution.selected_action_id},
+                    ),
+                    outcome_status=outcome_status,
+                    skip_disposition=SkipDisposition.OPERATOR,
+                    operator_resolution=decision_resolution.to_dict(),
+                )
+            )
+            session.append_event(
+                ExecutionEvent.create(
+                    event_type="step_skipped",
+                    run_state=session.run_state,
+                    phase=ExecutionPhase.RUN_INITIALIZATION,
+                    step_state=session.run_state.step_states[index],
+                    payload={
+                        "skip_disposition": SkipDisposition.OPERATOR.value,
+                        "selected_action_id": decision_resolution.selected_action_id,
+                    },
+                )
+            )
+            return
 
     @staticmethod
     def _terminal_phase(session: ScenarioExecutionSession) -> ExecutionPhase:

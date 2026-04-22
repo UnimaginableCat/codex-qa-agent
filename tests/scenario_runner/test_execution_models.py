@@ -10,16 +10,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
 from tools.scenario_runner.domain.execution import (
+    CompletionDisposition,
     ExecutionEvent,
     ExecutionIssue,
     ExecutionIssueKind,
     ExecutionOutcome,
     ExecutionPhase,
+    RunTermination,
+    RunTerminationKind,
     ScenarioRunLifecycleState,
     ScenarioRunState,
     StepExecutionLifecycleState,
     StepExecutionState,
     StepReference,
+    StepTermination,
+    StepTerminationKind,
+    TerminationReason,
+    TerminationReasonSource,
 )
 from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
@@ -56,6 +63,19 @@ class ExecutionModelTests(unittest.TestCase):
             scenario_name="Demo",
             scenario_path=Path("scenario.md"),
             lifecycle_state=ScenarioRunLifecycleState.STEP_RUNNING,
+            termination=RunTermination(
+                kind=RunTerminationKind.COMPLETED,
+                reason=TerminationReason(
+                    code="run_completed",
+                    message="done",
+                    source=TerminationReasonSource.EXECUTION,
+                    phase=ExecutionPhase.STEP_EXECUTION,
+                ),
+                completion_disposition=CompletionDisposition.COMPLETE,
+                outcome_status=StepStatus.PASS,
+                completed_step_count=1,
+                total_step_count=1,
+            ),
         )
         step_state = StepExecutionState(
             step=StepReference(step_id="step-1", step_number=1, step_type=ScenarioStepType.API),
@@ -64,6 +84,16 @@ class ExecutionModelTests(unittest.TestCase):
                 StepStatus.PASS,
                 "ok",
                 phase=ExecutionPhase.STEP_EXECUTION,
+            ),
+            termination=StepTermination(
+                kind=StepTerminationKind.COMPLETED,
+                reason=TerminationReason(
+                    code="step_completed",
+                    message="ok",
+                    source=TerminationReasonSource.EXECUTION,
+                    phase=ExecutionPhase.STEP_EXECUTION,
+                ),
+                outcome_status=StepStatus.PASS,
             ),
         )
 
@@ -80,7 +110,25 @@ class ExecutionModelTests(unittest.TestCase):
         self.assertEqual(payload["run_lifecycle_state"], ScenarioRunLifecycleState.STEP_RUNNING.value)
         self.assertEqual(payload["step_lifecycle_state"], StepExecutionLifecycleState.FINISHED.value)
         self.assertEqual(payload["outcome"]["status"], StepStatus.PASS.value)
+        self.assertEqual(payload["run_termination"]["kind"], RunTerminationKind.COMPLETED.value)
+        self.assertEqual(payload["step_termination"]["kind"], StepTerminationKind.COMPLETED.value)
         self.assertEqual(payload["payload"]["captures"], ["id"])
+
+    def test_step_finish_derives_termination_without_changing_legacy_outcome(self) -> None:
+        step_state = StepExecutionState(
+            step=StepReference(step_id="step-1", step_number=1, step_type=ScenarioStepType.API)
+        ).finish(
+            ExecutionOutcome.from_status(
+                StepStatus.BLOCKED,
+                "missing variable",
+                phase=ExecutionPhase.STEP_VARIABLE_RESOLUTION,
+            )
+        )
+
+        self.assertEqual(step_state.outcome.status, StepStatus.BLOCKED)
+        self.assertEqual(step_state.termination.kind, StepTerminationKind.BLOCKED)
+        self.assertEqual(step_state.termination.reason.source, TerminationReasonSource.EXECUTION)
+        self.assertEqual(step_state.to_dict()["termination"]["outcome_status"], StepStatus.BLOCKED.value)
 
     def test_service_journal_uses_typed_event_shape(self) -> None:
         with TemporaryDirectory() as tmp:

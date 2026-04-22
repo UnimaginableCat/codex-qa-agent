@@ -9,16 +9,25 @@ from tools.common import ValidationError, read_json_file
 from tools.common.statuses import StepStatus
 
 from ..domain.execution import (
+    AbortDisposition,
+    CompletionDisposition,
     ExecutionEvent,
     ExecutionIssue,
     ExecutionIssueKind,
     ExecutionOutcome,
     ExecutionPhase,
+    RunTermination,
+    RunTerminationKind,
     ScenarioRunLifecycleState,
     ScenarioRunState,
+    SkipDisposition,
     StepExecutionLifecycleState,
     StepExecutionState,
     StepReference,
+    StepTermination,
+    StepTerminationKind,
+    TerminationReason,
+    TerminationReasonSource,
 )
 from ..domain.models import (
     ApiStepDefinition,
@@ -230,6 +239,11 @@ def _run_state_from_mapping(payload: dict[str, Any]) -> ScenarioRunState:
             if not isinstance(payload.get("final_outcome"), dict)
             else _execution_outcome_from_mapping(payload["final_outcome"])
         ),
+        termination=(
+            None
+            if not isinstance(payload.get("termination"), dict)
+            else _run_termination_from_mapping(payload["termination"])
+        ),
         current_step=(
             None if not isinstance(payload.get("current_step"), dict) else _step_reference_from_mapping(payload["current_step"])
         ),
@@ -280,15 +294,67 @@ def _execution_issue_from_mapping(payload: dict[str, Any]) -> ExecutionIssue:
 
 def _step_execution_state_from_mapping(payload: dict[str, Any]) -> StepExecutionState:
     raw_outcome = payload.get("outcome")
+    raw_termination = payload.get("termination")
     return StepExecutionState(
         step=_step_reference_from_mapping(payload.get("step") or {}),
         lifecycle_state=StepExecutionLifecycleState(
             str(payload.get("lifecycle_state", StepExecutionLifecycleState.FINISHED.value))
         ),
         outcome=None if not isinstance(raw_outcome, dict) else _execution_outcome_from_mapping(raw_outcome),
+        termination=(
+            None
+            if not isinstance(raw_termination, dict)
+            else _step_termination_from_mapping(raw_termination)
+        ),
         issues=[
             _execution_issue_from_mapping(item)
             for item in payload.get("issues") or []
             if isinstance(item, dict)
         ],
+    )
+
+
+def _termination_reason_from_mapping(payload: dict[str, Any]) -> TerminationReason:
+    raw_phase = payload.get("phase")
+    return TerminationReason(
+        code=str(payload.get("code", "")).strip(),
+        message=str(payload.get("message", "")).strip(),
+        source=TerminationReasonSource(str(payload.get("source", TerminationReasonSource.EXECUTION.value))),
+        phase=None if raw_phase in {None, ""} else ExecutionPhase(str(raw_phase)),
+        details=dict(payload.get("details") or {}),
+    )
+
+
+def _step_termination_from_mapping(payload: dict[str, Any]) -> StepTermination:
+    raw_outcome_status = payload.get("outcome_status")
+    raw_skip_disposition = payload.get("skip_disposition")
+    return StepTermination(
+        kind=StepTerminationKind(str(payload.get("kind", StepTerminationKind.COMPLETED.value))),
+        reason=_termination_reason_from_mapping(payload.get("reason") or {}),
+        outcome_status=None if raw_outcome_status in {None, ""} else StepStatus(str(raw_outcome_status)),
+        skip_disposition=None if raw_skip_disposition in {None, ""} else SkipDisposition(str(raw_skip_disposition)),
+        operator_resolution=(
+            None if not isinstance(payload.get("operator_resolution"), dict) else dict(payload["operator_resolution"])
+        ),
+        terminated_at=str(payload.get("terminated_at", "")).strip(),
+    )
+
+
+def _run_termination_from_mapping(payload: dict[str, Any]) -> RunTermination:
+    raw_outcome_status = payload.get("outcome_status")
+    raw_abort_disposition = payload.get("abort_disposition")
+    return RunTermination(
+        kind=RunTerminationKind(str(payload.get("kind", RunTerminationKind.COMPLETED.value))),
+        reason=_termination_reason_from_mapping(payload.get("reason") or {}),
+        completion_disposition=CompletionDisposition(
+            str(payload.get("completion_disposition", CompletionDisposition.NONE.value))
+        ),
+        outcome_status=None if raw_outcome_status in {None, ""} else StepStatus(str(raw_outcome_status)),
+        abort_disposition=None if raw_abort_disposition in {None, ""} else AbortDisposition(str(raw_abort_disposition)),
+        operator_resolution=(
+            None if not isinstance(payload.get("operator_resolution"), dict) else dict(payload["operator_resolution"])
+        ),
+        completed_step_count=int(payload.get("completed_step_count", 0)),
+        total_step_count=int(payload.get("total_step_count", 0)),
+        terminated_at=str(payload.get("terminated_at", "")).strip(),
     )

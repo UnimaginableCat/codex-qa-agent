@@ -37,6 +37,8 @@ def build_journal_projection(
                     "executed_step_count": state.executed_step_count,
                     "report_path": None if state.report_path is None else str(state.report_path),
                     "continuation_state": summary.continuation_state.value,
+                    "run_termination": summary.details.get("run_termination"),
+                    "partial_completion": summary.details.get("partial_completion"),
                     "resumable": summary.resumable,
                     "pause_state_path": None if summary.pause_state_path is None else str(summary.pause_state_path),
                     "resume_token": None if summary.resume_token is None else summary.resume_token.to_dict(),

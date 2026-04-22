@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..domain.execution import ExecutionEvent, ExecutionIssue, ExecutionOutcome, ScenarioRunState
+from ..domain.execution import ExecutionEvent, ExecutionIssue, ExecutionOutcome, RunTermination, ScenarioRunState
 from ..domain.guided import DecisionPoint, GuidedDiagnostic
 from ..domain.manual import DecisionResolution
 from ..domain.models import RunContext, ScenarioDefinition
@@ -75,6 +75,10 @@ class ExecutionProjectionState:
     @property
     def parse_warnings(self) -> list[str]:
         return [str(item) for item in self.scenario_definition.metadata.get("parse_warnings", [])]
+
+    @property
+    def run_termination(self) -> RunTermination | None:
+        return None if self.run_state is None else self.run_state.termination
 
 
 @dataclass(frozen=True, slots=True)

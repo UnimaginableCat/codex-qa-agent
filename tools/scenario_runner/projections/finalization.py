@@ -8,11 +8,17 @@ from tools.common.statuses import StepStatus
 from tools.reports import build_service
 
 from ..domain.execution import (
+    CompletionDisposition,
     ExecutionIssue,
     ExecutionIssueKind,
     ExecutionOutcome,
     ExecutionPhase,
+    RunTermination,
+    RunTerminationKind,
     ScenarioRunLifecycleState,
+    TerminationReason,
+    TerminationReasonSource,
+    completion_disposition,
 )
 from ..domain.models import ScenarioDefinition, ScenarioExecutionSummary
 from ..domain.pause import RunContinuationState
@@ -74,6 +80,7 @@ class ScenarioRunFinalizer:
         )
         if not session.resumed_from_pause:
             session.pause_state = None
+        self._apply_finalization_termination_if_needed(session, scenario_definition, outcomes)
         projection_state = ExecutionProjectionState.from_session(
             session,
             scenario_definition,
@@ -87,6 +94,28 @@ class ScenarioRunFinalizer:
                 pause_state.set_path(pause_path)
                 session.pause_state = pause_state
                 session.continuation_state = RunContinuationState.PAUSED
+                session.run_state.set_termination(
+                    RunTermination(
+                        kind=RunTerminationKind.PAUSED,
+                        reason=TerminationReason(
+                            code="paused_waiting_for_decision",
+                            message="Scenario paused while waiting for an operator decision.",
+                            source=TerminationReasonSource.OPERATOR,
+                            phase=ExecutionPhase.FINALIZATION,
+                            details={
+                                "decision_point_id": pause_state.decision_point_id,
+                                "diagnostic_id": pause_state.diagnostic_id,
+                            },
+                        ),
+                        completion_disposition=completion_disposition(
+                            executed_step_count=self._completed_step_count(session),
+                            total_step_count=len(scenario_definition.steps),
+                        ),
+                        outcome_status=pause_state.status,
+                        completed_step_count=self._completed_step_count(session),
+                        total_step_count=len(scenario_definition.steps),
+                    )
+                )
                 session.run_state.transition_to(ScenarioRunLifecycleState.PAUSED)
             except Exception as exc:  # noqa: BLE001
                 self.record_finalization_error(
@@ -206,12 +235,78 @@ class ScenarioRunFinalizer:
                 phase=ExecutionPhase.FINALIZATION,
             )
         )
+        if session.run_state.termination is None:
+            session.run_state.set_termination(
+                RunTermination(
+                    kind=RunTerminationKind.ERRORED
+                    if summary.final_status == StepStatus.ERROR
+                    else RunTerminationKind.BLOCKED
+                    if summary.final_status == StepStatus.BLOCKED
+                    else RunTerminationKind.FAILED
+                    if summary.final_status == StepStatus.FAIL
+                    else RunTerminationKind.COMPLETED,
+                    reason=TerminationReason(
+                        code="summary_finalized",
+                        message=summary.message,
+                        source=TerminationReasonSource.FINALIZATION,
+                        phase=ExecutionPhase.FINALIZATION,
+                    ),
+                    completion_disposition=CompletionDisposition.PARTIAL
+                    if summary.details.get("executed_step_count", 0) < summary.details.get("step_count", 0)
+                    and summary.details.get("executed_step_count", 0) > 0
+                    else CompletionDisposition.COMPLETE
+                    if summary.details.get("step_count", 0)
+                    else CompletionDisposition.NONE,
+                    outcome_status=summary.final_status,
+                    operator_resolution=(
+                        None if summary.decision_resolution is None else summary.decision_resolution.to_dict()
+                    ),
+                    completed_step_count=int(summary.details.get("executed_step_count", 0)),
+                    total_step_count=int(summary.details.get("step_count", 0)),
+                )
+            )
         session.run_state.transition_to(
             ScenarioRunLifecycleState.PAUSED
             if summary.continuation_state == RunContinuationState.PAUSED
             else ScenarioRunLifecycleState.FINISHED
         )
         return summary
+
+    @staticmethod
+    def _apply_finalization_termination_if_needed(
+        session,
+        scenario_definition: ScenarioDefinition,
+        outcomes: list[ExecutionOutcome],
+    ) -> None:
+        error_outcome = next((outcome for outcome in reversed(outcomes) if outcome.status == StepStatus.ERROR), None)
+        if error_outcome is None:
+            return
+        session.run_state.set_termination(
+            RunTermination(
+                kind=RunTerminationKind.ERRORED,
+                reason=TerminationReason(
+                    code="finalization_failed",
+                    message=error_outcome.message,
+                    source=TerminationReasonSource.FINALIZATION,
+                    phase=error_outcome.phase or ExecutionPhase.FINALIZATION,
+                    details=error_outcome.details,
+                ),
+                completion_disposition=completion_disposition(
+                    executed_step_count=ScenarioRunFinalizer._completed_step_count(session),
+                    total_step_count=len(scenario_definition.steps),
+                ),
+                outcome_status=StepStatus.ERROR,
+                operator_resolution=(
+                    None if session.decision_resolution is None else session.decision_resolution.to_dict()
+                ),
+                completed_step_count=ScenarioRunFinalizer._completed_step_count(session),
+                total_step_count=len(scenario_definition.steps),
+            )
+        )
+
+    @staticmethod
+    def _completed_step_count(session) -> int:
+        return sum(1 for step_result in session.run_context.step_results if step_result.status == StepStatus.PASS)
 
     def _try_write_context(
         self,

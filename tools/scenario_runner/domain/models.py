@@ -206,6 +206,23 @@ class ScenarioExecutionSummary:
             f"Run ID: {self.run_id}",
             f"Code analysis used: {self.code_analysis_used}",
         ]
+        run_termination = self.details.get("run_termination")
+        if isinstance(run_termination, dict):
+            reason = run_termination.get("reason") or {}
+            notes.append(
+                "Run termination: "
+                f"{run_termination.get('kind', 'unknown')} "
+                f"({run_termination.get('completion_disposition', 'unknown')})"
+            )
+            if isinstance(reason, dict) and reason.get("message"):
+                notes.append(f"Termination reason: {reason['message']}")
+            notes.append(f"Termination source: {reason.get('source', 'unknown')}")
+            if run_termination.get("partial"):
+                notes.append(
+                    "Partial completion: "
+                    f"{run_termination.get('completed_step_count', 0)}/"
+                    f"{run_termination.get('total_step_count', 0)} steps completed before stop"
+                )
         notes.extend(self.tooling_issues)
         return notes
 

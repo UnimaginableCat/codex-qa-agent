@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.common.statuses import StepStatus
 from tools.common.errors import ValidationError
 from tools.scenario_runner.domain.manual import OperatorActionSelection
+from tools.scenario_runner.domain.execution import RunTerminationKind, StepTerminationKind, TerminationReasonSource
 from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     ScenarioDefinition,
@@ -80,6 +81,9 @@ class ScenarioPauseResumeTests(unittest.TestCase):
 
             self.assertEqual(paused_summary.final_status, StepStatus.BLOCKED)
             self.assertEqual(paused_summary.continuation_state, RunContinuationState.PAUSED)
+            self.assertEqual(paused_summary.details["run_termination"]["kind"], RunTerminationKind.PAUSED.value)
+            self.assertFalse(paused_summary.details["run_termination"]["terminal"])
+            self.assertEqual(paused_summary.details["run_termination"]["completed_step_count"], 0)
             self.assertTrue(paused_summary.resumable)
             self.assertIsNotNone(paused_summary.resume_token)
             self.assertTrue(paused_summary.pause_state_path.exists())
@@ -98,6 +102,12 @@ class ScenarioPauseResumeTests(unittest.TestCase):
             self.assertEqual(resumed_summary.run_id, paused_summary.run_id)
             self.assertEqual(resumed_summary.final_status, StepStatus.PASS)
             self.assertEqual(resumed_summary.continuation_state, RunContinuationState.RESUMED)
+            self.assertEqual(resumed_summary.details["run_termination"]["kind"], RunTerminationKind.COMPLETED.value)
+            self.assertEqual(
+                resumed_summary.details["run_termination"]["reason"]["source"],
+                TerminationReasonSource.OPERATOR.value,
+            )
+            self.assertFalse(resumed_summary.details["partial_completion"])
             self.assertFalse(resumed_summary.resumable)
             self.assertTrue(resumed_summary.resumed_from_pause)
             self.assertIsNotNone(resumed_summary.decision_resolution)
@@ -196,6 +206,18 @@ class ScenarioPauseResumeTests(unittest.TestCase):
         self.assertEqual([step.step_id for step in resumed_summary.steps], ["step-1", "step-2", "step-3"])
         self.assertEqual(resumed_summary.steps[1].status, StepStatus.ERROR)
         self.assertEqual(resumed_summary.steps[2].status, StepStatus.PASS)
+        self.assertEqual(
+            resumed_summary.details["step_terminations"][1]["termination"]["kind"],
+            StepTerminationKind.SKIPPED.value,
+        )
+        self.assertEqual(
+            resumed_summary.details["step_terminations"][1]["termination"]["outcome_status"],
+            StepStatus.ERROR.value,
+        )
+        self.assertEqual(
+            resumed_summary.details["legacy_status_projection"]["final_status"],
+            StepStatus.ERROR.value,
+        )
         self.assertEqual(resumed_summary.decision_resolution.selected_action.action_type.value, "skip_step")
         self.assertEqual(executor.execute_count, 3)
 
@@ -235,6 +257,12 @@ class ScenarioPauseResumeTests(unittest.TestCase):
             ).read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(resumed_summary.final_status, StepStatus.ERROR)
+        self.assertEqual(resumed_summary.details["run_termination"]["kind"], RunTerminationKind.ABORTED.value)
+        self.assertEqual(
+            resumed_summary.details["run_termination"]["reason"]["source"],
+            TerminationReasonSource.OPERATOR.value,
+        )
+        self.assertTrue(resumed_summary.details["partial_completion"])
         self.assertEqual([step.step_id for step in resumed_summary.steps], ["step-1", "step-2"])
         self.assertEqual(resumed_summary.decision_resolution.selected_action.action_type.value, "abort_run")
         self.assertEqual(executor.execute_count, 2)
@@ -311,6 +339,8 @@ class ScenarioPauseResumeTests(unittest.TestCase):
 
         self.assertEqual(summary.final_status, StepStatus.PASS)
         self.assertEqual(summary.continuation_state, RunContinuationState.TERMINAL)
+        self.assertEqual(summary.details["run_termination"]["kind"], RunTerminationKind.COMPLETED.value)
+        self.assertEqual(summary.details["legacy_status_projection"]["final_status"], StepStatus.PASS.value)
         self.assertFalse(summary.resumable)
         self.assertIn("notes", payload)
         self.assertIn("checks", payload)

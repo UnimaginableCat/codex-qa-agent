@@ -11,11 +11,11 @@ from ..domain.execution import (
     ExecutionIssueKind,
     ExecutionOutcome,
     ExecutionPhase,
+    RunTerminationKind,
     coerce_terminal_status,
     issue_messages,
 )
 from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
-from ..domain.manual import OperatorActionType
 from ..domain.pause import RunContinuationState
 from .guided import build_guided_projection
 from .models import ExecutionProjectionState
@@ -42,14 +42,11 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
     )
     executed_step_count = len(step_results)
     total_step_count = len(state.scenario_definition.steps)
-    aborted_by_operator = (
-        state.decision_resolution is not None
-        and state.decision_resolution.selected_action.action_type == OperatorActionType.ABORT_RUN
-    )
+    run_termination = state.run_termination
 
-    if aborted_by_operator:
+    if run_termination is not None and run_termination.kind == RunTerminationKind.ABORTED:
         message = "Scenario execution ended after operator aborted the paused run."
-    elif state.continuation_state == RunContinuationState.PAUSED:
+    elif run_termination is not None and run_termination.kind == RunTerminationKind.PAUSED:
         message = f"Scenario execution paused with status {final_status.value}."
     elif state.resumed_from_pause and final_status == StepStatus.PASS and executed_step_count == total_step_count:
         message = "Scenario execution resumed and completed."
@@ -121,6 +118,22 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
             "finalization_statuses": [
                 coerce_terminal_status(status).value for status in state.finalization_outcomes
             ],
+            "run_termination": None if run_termination is None else run_termination.to_dict(),
+            "step_terminations": _step_terminations(state),
+            "partial_completion": (
+                False if run_termination is None else run_termination.completion_disposition.value == "partial"
+            ),
+            "completed_step_count": None if run_termination is None else run_termination.completed_step_count,
+            "remaining_step_count": (
+                None
+                if run_termination is None
+                else max(run_termination.total_step_count - run_termination.completed_step_count, 0)
+            ),
+            "legacy_status_projection": {
+                "final_status": final_status.value,
+                "source": "projection",
+                "rule": "ERROR > BLOCKED > FAIL > PASS over execution, compile, preflight, and finalization outcomes",
+            },
             "guided_diagnostics_count": len(guided_projection.diagnostics),
             "guided_decision_points_count": len(guided_projection.decision_points),
             "continuation_state": state.continuation_state.value,
@@ -225,3 +238,15 @@ def _tooling_messages(extra_tooling_issues: list[str | ExecutionIssue]) -> list[
     messages = issue_messages(typed_issues)
     messages.extend(str(issue) for issue in extra_tooling_issues if not isinstance(issue, ExecutionIssue))
     return messages
+
+
+def _step_terminations(state: ExecutionProjectionState) -> list[dict]:
+    if state.run_state is None:
+        return []
+    return [
+        {
+            "step": step_state.step.to_dict(),
+            "termination": None if step_state.termination is None else step_state.termination.to_dict(),
+        }
+        for step_state in state.run_state.step_states
+    ]
