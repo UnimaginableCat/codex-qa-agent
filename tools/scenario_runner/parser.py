@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tools.common.errors import ValidationError
-
 from .models import (
     ApiStepDefinition,
     DbStepDefinition,
@@ -20,9 +18,23 @@ from .models import (
     ScenarioVariableDefinition,
     ScenarioVariableSource,
 )
+from .parsing.errors import ScenarioParseError as _ScenarioParseError
+from .parsing.interfaces import ScenarioParseOptions
+from .parsing.loader import load_scenario_source
+from .parsing.markdown_document import (
+    MARKDOWN_STEP_RE as _STEP_RE,
+    MarkdownSection,
+    parse_markdown_document,
+    split_step_blocks,
+)
+from .parsing.result import (
+    ParseDiagnostic,
+    ParseDiagnosticKind,
+    ParseDiagnosticSeverity,
+    ScenarioParseResult,
+    SourceLocation,
+)
 
-_SECTION_RE = re.compile(r"^##\s+(?P<name>.+?)\s*$")
-_STEP_RE = re.compile(r"^###\s+Step\s+(?P<number>\d+)\s*$", re.IGNORECASE)
 _FIELD_RE = re.compile(r"^(?P<name>[A-Za-z ]+):(?:\s*(?P<value>.*))?$")
 _VARIABLE_RE = re.compile(
     r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:(?:\s*=|\s*:)\s*(?P<value>.*))?$"
@@ -74,7 +86,6 @@ _SUPPORTED_GENERATED_VALUES = {
     "current_timestamp",
     "uuid",
 }
-_SCENARIO_TITLE_RE = re.compile(r"^#\s+Scenario:\s*(?P<name>.+?)\s*$")
 _SLUG_INVALID_CHARS_RE = re.compile(r"[^a-z0-9]+")
 _KNOWN_STEP_FIELDS = {
     "type",
@@ -91,7 +102,7 @@ _KNOWN_STEP_FIELDS = {
 }
 
 
-class ScenarioParseError(ValidationError):
+class ScenarioParseError(_ScenarioParseError):
     """Raised when a markdown scenario cannot be normalized safely."""
 
 
@@ -106,6 +117,8 @@ class _ScenarioStepDraft:
 class MarkdownScenarioParser:
     """Parses markdown scenario files into normalized typed definitions."""
 
+    source_format = "markdown"
+
     _simple_sections = {
         "project": "project",
         "environment": "environment",
@@ -119,35 +132,31 @@ class MarkdownScenarioParser:
     }
 
     def parse(self, scenario_path: Path) -> ScenarioDefinition:
-        if not scenario_path.exists():
-            raise ScenarioParseError(f"Scenario file does not exist: {scenario_path}")
-
-        resolved_scenario_path = scenario_path.resolve()
-        raw_lines = resolved_scenario_path.read_text(encoding="utf-8").splitlines()
-        title = self._parse_title(raw_lines, resolved_scenario_path)
-        sections = self._split_sections(raw_lines)
+        source = load_scenario_source(scenario_path, error_type=ScenarioParseError)
+        document = parse_markdown_document(source, error_type=ScenarioParseError)
+        resolved_scenario_path = document.source.path
 
         warnings: list[str] = []
         variable_warnings: list[str] = []
         variable_errors: list[str] = []
         scenario_definition = ScenarioDefinition(
             scenario_path=resolved_scenario_path,
-            scenario_slug=self._build_scenario_slug(title, resolved_scenario_path),
-            scenario_name=title,
+            scenario_slug=self._build_scenario_slug(document.title, resolved_scenario_path),
+            scenario_name=document.title,
         )
 
-        normalized_section_names = {section_name.lower() for section_name in sections}
-        for section_name, section_lines in sections.items():
-            normalized_name = section_name.lower()
+        normalized_section_names = {section.name.lower() for section in document.sections}
+        for section in document.sections:
+            normalized_name = section.name.lower()
             if normalized_name == "steps":
-                step_definitions, step_warnings = self._parse_steps(section_lines, resolved_scenario_path)
+                step_definitions, step_warnings = self._parse_steps(section, resolved_scenario_path)
                 scenario_definition.steps = step_definitions
                 warnings.extend(step_warnings)
                 continue
 
             if normalized_name == "variables":
                 variable_definitions, section_variable_warnings, section_variable_errors = self._parse_variables(
-                    section_lines
+                    section.lines
                 )
                 scenario_definition.variables = variable_definitions
                 variable_warnings.extend(section_variable_warnings)
@@ -159,7 +168,7 @@ class MarkdownScenarioParser:
                 setattr(
                     scenario_definition,
                     self._simple_sections[normalized_name],
-                    self._parse_text(section_lines),
+                    self._parse_text(section.lines),
                 )
                 continue
 
@@ -167,11 +176,11 @@ class MarkdownScenarioParser:
                 setattr(
                     scenario_definition,
                     self._list_sections[normalized_name],
-                    self._parse_bullets(section_lines),
+                    self._parse_bullets(section.lines),
                 )
                 continue
 
-            warnings.append(f"Unknown scenario section '{section_name}' was ignored.")
+            warnings.append(f"Unknown scenario section '{section.name}' was ignored.")
 
         if not scenario_definition.project:
             warnings.append("Section '## Project' is missing or empty.")
@@ -188,108 +197,75 @@ class MarkdownScenarioParser:
         }
         return scenario_definition
 
-    def _parse_title(self, lines: list[str], scenario_path: Path) -> str:
-        title: str | None = None
-        title_line_number = 0
-        inside_fence = False
-        for line_number, line in enumerate(lines, start=1):
-            stripped_line = line.strip()
-            if self._is_fence_line(stripped_line):
-                inside_fence = not inside_fence
+    def parse_result(
+        self,
+        scenario_path: Path,
+        options: ScenarioParseOptions | None = None,
+    ) -> ScenarioParseResult:
+        """Return the new parse-result contract without changing legacy parse behavior."""
 
-            match = _SCENARIO_TITLE_RE.match(stripped_line) if not inside_fence else None
-            if match:
-                if title is not None:
-                    raise ScenarioParseError(
-                        f"Scenario '{scenario_path}' is malformed: duplicate '# Scenario:' title "
-                        f"at line {line_number}; first declared at line {title_line_number}."
+        del options
+        source_path = Path(scenario_path)
+        try:
+            scenario_definition = self.parse(source_path)
+        except ScenarioParseError as exc:
+            return ScenarioParseResult(
+                scenario=None,
+                diagnostics=[
+                    ParseDiagnostic(
+                        severity=ParseDiagnosticSeverity.FATAL,
+                        code="scenario.parse_failed",
+                        message=str(exc),
+                        kind=ParseDiagnosticKind.SYNTAX,
+                        location=SourceLocation(path=source_path),
                     )
-                title = match.group("name").strip()
-                title_line_number = line_number
+                ],
+                source_format=self.source_format,
+                source_path=source_path,
+            )
 
-        if title is not None:
-            return title
-
-        raise ScenarioParseError(
-            f"Scenario '{scenario_path}' is malformed: missing '# Scenario: ...' title."
+        return ScenarioParseResult(
+            scenario=scenario_definition,
+            diagnostics=self._build_legacy_diagnostics(scenario_definition),
+            source_format=str(scenario_definition.metadata.get("source_format") or self.source_format),
+            source_path=scenario_definition.scenario_path,
         )
 
-    def _split_sections(self, lines: list[str]) -> dict[str, list[str]]:
-        sections: dict[str, list[str]] = {}
-        seen_sections: dict[str, int] = {}
-        current_name: str | None = None
-        current_lines: list[str] = []
-        inside_fence = False
-
-        for line_number, line in enumerate(lines, start=1):
-            stripped_line = line.strip()
-            if self._is_fence_line(stripped_line):
-                inside_fence = not inside_fence
-
-            match = _SECTION_RE.match(stripped_line) if not inside_fence else None
-            if match:
-                if current_name is not None:
-                    sections[current_name] = current_lines
-                current_name = match.group("name").strip()
-                normalized_name = current_name.lower()
-                if normalized_name in seen_sections:
-                    raise ScenarioParseError(
-                        f"Duplicate top-level section '## {current_name}' at line {line_number}; "
-                        f"first declared at line {seen_sections[normalized_name]}."
-                    )
-                seen_sections[normalized_name] = line_number
-                current_lines = []
-                continue
-
-            if current_name is not None:
-                current_lines.append(line)
-
-        if current_name is not None:
-            sections[current_name] = current_lines
-
-        return sections
+    @staticmethod
+    def _build_legacy_diagnostics(scenario_definition: ScenarioDefinition) -> list[ParseDiagnostic]:
+        diagnostics: list[ParseDiagnostic] = []
+        source_path = scenario_definition.scenario_path
+        for warning in scenario_definition.metadata.get("parse_warnings", []):
+            diagnostics.append(
+                ParseDiagnostic(
+                    severity=ParseDiagnosticSeverity.WARNING,
+                    code="scenario.parse_warning",
+                    message=str(warning),
+                    kind=ParseDiagnosticKind.COMPATIBILITY,
+                    location=SourceLocation(path=source_path),
+                )
+            )
+        for error in scenario_definition.metadata.get("variables_validation_errors", []):
+            diagnostics.append(
+                ParseDiagnostic(
+                    severity=ParseDiagnosticSeverity.ERROR,
+                    code="scenario.variables_validation_error",
+                    message=str(error),
+                    kind=ParseDiagnosticKind.VALIDATION,
+                    location=SourceLocation(path=source_path, section="Variables"),
+                )
+            )
+        return diagnostics
 
     def _parse_steps(
         self,
-        lines: list[str],
+        section: MarkdownSection,
         scenario_path: Path,
     ) -> tuple[list[ScenarioStep], list[str]]:
-        step_blocks: list[tuple[int, int, list[str]]] = []
-        current_step_number: int | None = None
-        current_step_line_number = 0
-        current_block: list[str] = []
-        warnings: list[str] = []
-        inside_fence = False
-
-        for offset, line in enumerate(lines, start=1):
-            stripped_line = line.strip()
-            if self._is_fence_line(stripped_line):
-                inside_fence = not inside_fence
-
-            match = _STEP_RE.match(stripped_line) if not inside_fence else None
-            if match:
-                if current_step_number is not None:
-                    step_blocks.append((current_step_number, current_step_line_number, current_block))
-                current_step_number = int(match.group("number"))
-                current_step_line_number = offset
-                current_block = []
-                continue
-
-            if current_step_number is None:
-                if line.strip():
-                    warnings.append(
-                        f"Ignored content before first step in '{scenario_path.name}': {line.strip()!r}"
-                    )
-                continue
-
-            current_block.append(line)
-
-        if current_step_number is not None:
-            step_blocks.append((current_step_number, current_step_line_number, current_block))
-
+        step_blocks, warnings = split_step_blocks(section, scenario_path)
         steps = [
-            self._build_step(self._parse_step_block(number, line_number, block_lines))
-            for number, line_number, block_lines in step_blocks
+            self._build_step(self._parse_step_block(block.step_number, block.line_number, block.lines))
+            for block in step_blocks
         ]
         return steps, warnings
 

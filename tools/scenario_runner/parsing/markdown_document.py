@@ -1,0 +1,192 @@
+"""Markdown document splitting for scenario sources."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+import re
+
+from .errors import ScenarioParseError
+from .loader import ScenarioSource
+
+MARKDOWN_SECTION_RE = re.compile(r"^##\s+(?P<name>.+?)\s*$")
+MARKDOWN_STEP_RE = re.compile(r"^###\s+Step\s+(?P<number>\d+)\s*$", re.IGNORECASE)
+MARKDOWN_SCENARIO_TITLE_RE = re.compile(r"^#\s+Scenario:\s*(?P<name>.+?)\s*$")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkdownSection:
+    """Top-level markdown section captured from a scenario document."""
+
+    name: str
+    line_number: int
+    lines: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class MarkdownStepBlock:
+    """Raw markdown lines for one scenario step before field-level parsing."""
+
+    step_number: int
+    line_number: int
+    lines: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class MarkdownScenarioDocument:
+    """Early parsed markdown scenario document before domain conversion."""
+
+    source: ScenarioSource
+    title: str
+    sections: list[MarkdownSection]
+
+
+def parse_markdown_document(
+    source: ScenarioSource,
+    error_type: type[ScenarioParseError] = ScenarioParseError,
+) -> MarkdownScenarioDocument:
+    """Split raw scenario markdown into title and top-level sections."""
+
+    return MarkdownScenarioDocument(
+        source=source,
+        title=parse_markdown_title(source.lines, source.path, error_type=error_type),
+        sections=split_top_level_sections(source.lines, error_type=error_type),
+    )
+
+
+def parse_markdown_title(
+    lines: list[str],
+    scenario_path: Path,
+    error_type: type[ScenarioParseError] = ScenarioParseError,
+) -> str:
+    title: str | None = None
+    title_line_number = 0
+    inside_fence = False
+    for line_number, line in enumerate(lines, start=1):
+        stripped_line = line.strip()
+        if is_fence_line(stripped_line):
+            inside_fence = not inside_fence
+
+        match = MARKDOWN_SCENARIO_TITLE_RE.match(stripped_line) if not inside_fence else None
+        if match:
+            if title is not None:
+                raise error_type(
+                    f"Scenario '{scenario_path}' is malformed: duplicate '# Scenario:' title "
+                    f"at line {line_number}; first declared at line {title_line_number}."
+                )
+            title = match.group("name").strip()
+            title_line_number = line_number
+
+    if title is not None:
+        return title
+
+    raise error_type(f"Scenario '{scenario_path}' is malformed: missing '# Scenario: ...' title.")
+
+
+def split_top_level_sections(
+    lines: list[str],
+    error_type: type[ScenarioParseError] = ScenarioParseError,
+) -> list[MarkdownSection]:
+    sections: list[MarkdownSection] = []
+    seen_sections: dict[str, int] = {}
+    current_name: str | None = None
+    current_line_number = 0
+    current_lines: list[str] = []
+    inside_fence = False
+
+    for line_number, line in enumerate(lines, start=1):
+        stripped_line = line.strip()
+        if is_fence_line(stripped_line):
+            inside_fence = not inside_fence
+
+        match = MARKDOWN_SECTION_RE.match(stripped_line) if not inside_fence else None
+        if match:
+            if current_name is not None:
+                sections.append(
+                    MarkdownSection(
+                        name=current_name,
+                        line_number=current_line_number,
+                        lines=current_lines,
+                    )
+                )
+            current_name = match.group("name").strip()
+            current_line_number = line_number
+            normalized_name = current_name.lower()
+            if normalized_name in seen_sections:
+                raise error_type(
+                    f"Duplicate top-level section '## {current_name}' at line {line_number}; "
+                    f"first declared at line {seen_sections[normalized_name]}."
+                )
+            seen_sections[normalized_name] = line_number
+            current_lines = []
+            continue
+
+        if current_name is not None:
+            current_lines.append(line)
+
+    if current_name is not None:
+        sections.append(
+            MarkdownSection(
+                name=current_name,
+                line_number=current_line_number,
+                lines=current_lines,
+            )
+        )
+
+    return sections
+
+
+def split_step_blocks(
+    section: MarkdownSection,
+    scenario_path: Path,
+) -> tuple[list[MarkdownStepBlock], list[str]]:
+    step_blocks: list[MarkdownStepBlock] = []
+    current_step_number: int | None = None
+    current_step_line_number = 0
+    current_block: list[str] = []
+    warnings: list[str] = []
+    inside_fence = False
+
+    for offset, line in enumerate(section.lines, start=1):
+        stripped_line = line.strip()
+        if is_fence_line(stripped_line):
+            inside_fence = not inside_fence
+
+        match = MARKDOWN_STEP_RE.match(stripped_line) if not inside_fence else None
+        if match:
+            if current_step_number is not None:
+                step_blocks.append(
+                    MarkdownStepBlock(
+                        step_number=current_step_number,
+                        line_number=current_step_line_number,
+                        lines=current_block,
+                    )
+                )
+            current_step_number = int(match.group("number"))
+            current_step_line_number = offset
+            current_block = []
+            continue
+
+        if current_step_number is None:
+            if line.strip():
+                warnings.append(
+                    f"Ignored content before first step in '{scenario_path.name}': {line.strip()!r}"
+                )
+            continue
+
+        current_block.append(line)
+
+    if current_step_number is not None:
+        step_blocks.append(
+            MarkdownStepBlock(
+                step_number=current_step_number,
+                line_number=current_step_line_number,
+                lines=current_block,
+            )
+        )
+
+    return step_blocks, warnings
+
+
+def is_fence_line(line: str) -> bool:
+    return line.startswith("```")
