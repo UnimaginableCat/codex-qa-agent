@@ -9,6 +9,15 @@ from psycopg.rows import dict_row
 
 from tools.common import ExecutionResult, JsonFileLoadError, StepStatus, ValidationError
 from tools.common.errors import EnvFileLoadError
+from tools.common.runtime_signals import (
+    ContinuationHint,
+    NormalizedRuntimeSignal,
+    RetryHint,
+    RuntimeFailureCategory,
+    RuntimeSignalSource,
+    RuntimeSignalTag,
+    ToolFailureCode,
+)
 
 from .errors import SqlSafetyError
 from .loaders import DbEnvLoader, QueryStepLoader
@@ -31,7 +40,10 @@ class DatabaseQueryService:
                     "Missing DB connection settings. Provide DATABASE_URL with embedded "
                     "credentials, or set DATABASE_URL with DATABASE_USER and DATABASE_PASSWORD."
                 ),
-                details={"sql": step.sql},
+                details={
+                    "sql": step.sql,
+                    "runtime_signal": _db_connection_configuration_signal().to_dict(),
+                },
             )
 
         try:
@@ -40,7 +52,10 @@ class DatabaseQueryService:
             return ExecutionResult(
                 status=StepStatus.BLOCKED,
                 message=str(exc),
-                details={"sql": step.sql},
+                details={
+                    "sql": step.sql,
+                    "runtime_signal": _db_connection_configuration_signal().to_dict(),
+                },
             )
 
         try:
@@ -69,6 +84,7 @@ class DatabaseQueryService:
                 details={
                     "sql": step.sql,
                     "executed_sql": prepared_sql.sql,
+                    "runtime_signal": _db_connection_failure_signal().to_dict(),
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -78,6 +94,7 @@ class DatabaseQueryService:
                 details={
                     "sql": step.sql,
                     "executed_sql": prepared_sql.sql,
+                    "runtime_signal": _runtime_tool_failure_signal().to_dict(),
                 },
             )
 
@@ -112,19 +129,28 @@ class DatabaseQueryRunner:
             return ExecutionResult(
                 status=StepStatus.BLOCKED,
                 message=str(exc),
-                details={"sql": step.sql},
+                details={
+                    "sql": step.sql,
+                    "runtime_signal": _db_read_only_guard_signal().to_dict(),
+                },
             )
         except ValidationError as exc:
             return ExecutionResult(
                 status=StepStatus.BLOCKED,
                 message=str(exc),
-                details={"sql": step.sql},
+                details={
+                    "sql": step.sql,
+                    "runtime_signal": _db_connection_configuration_signal().to_dict(),
+                },
             )
         except Exception as exc:  # noqa: BLE001
             return ExecutionResult(
                 status=StepStatus.ERROR,
                 message=f"Failed to validate SQL: {exc}",
-                details={"sql": step.sql},
+                details={
+                    "sql": step.sql,
+                    "runtime_signal": _runtime_tool_failure_signal().to_dict(),
+                },
             )
 
         return self._query_service.execute(env, step)
@@ -136,4 +162,56 @@ def build_runner() -> DatabaseQueryRunner:
         step_loader=QueryStepLoader(),
         sql_validator=ReadOnlySqlValidator(normalizer=SqlNormalizer()),
         query_service=DatabaseQueryService(sql_param_converter=NamedSqlParamConverter()),
+    )
+
+
+def _db_connection_configuration_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.DB_CONNECTION_CONFIGURATION_MISSING,
+        category=RuntimeFailureCategory.CONFIGURATION,
+        retry_hint=RetryHint.AFTER_OPERATOR_FIX,
+        continuation_hint=ContinuationHint.STOP_AND_FIX,
+        tags=(RuntimeSignalTag.ENVIRONMENT_BLOCKED, RuntimeSignalTag.USER_FIXABLE),
+        operator_fixable=True,
+    )
+
+
+def _db_connection_failure_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.DB_CONNECTION_FAILED,
+        category=RuntimeFailureCategory.DATABASE,
+        retry_hint=RetryHint.MANUAL_RETRY,
+        continuation_hint=ContinuationHint.RETRY_MANUALLY,
+        tags=(
+            RuntimeSignalTag.RETRYABLE,
+            RuntimeSignalTag.ENVIRONMENT_BLOCKED,
+            RuntimeSignalTag.USER_FIXABLE,
+        ),
+        resumable=True,
+        operator_fixable=True,
+    )
+
+
+def _db_read_only_guard_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.DB_READ_ONLY_GUARD_VIOLATION,
+        category=RuntimeFailureCategory.READ_ONLY_GUARD,
+        continuation_hint=ContinuationHint.STOP_AND_FIX,
+        tags=(RuntimeSignalTag.USER_FIXABLE,),
+        operator_fixable=True,
+    )
+
+
+def _runtime_tool_failure_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.RUNTIME_TOOL_FAILURE,
+        category=RuntimeFailureCategory.TOOL_RUNTIME,
+        retry_hint=RetryHint.MANUAL_RETRY,
+        continuation_hint=ContinuationHint.RETRY_MANUALLY,
+        tags=(RuntimeSignalTag.RETRYABLE,),
+        resumable=True,
     )

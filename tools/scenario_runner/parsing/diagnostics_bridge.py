@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.scenario_runner.models import ScenarioDefinition
+from tools.scenario_runner.domain.models import ScenarioDefinition
 
 from .contracts.result import (
     ParseDiagnostic,

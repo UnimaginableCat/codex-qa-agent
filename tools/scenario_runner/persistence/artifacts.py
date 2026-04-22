@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from tools.common.errors import ToolingError
 from tools.common.io import write_text_file
 
-from .models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
-from .redaction import redact_sensitive_data
+from ..domain.execution import ExecutionEvent
+from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
+from ..domain.pause import PauseState
+from ..runtime.redaction import redact_sensitive_data
 
 PARSED_PLANS_DIRNAME = Path(".codex-qa/parsed-plans")
 RUNS_DIRNAME = Path(".codex-qa/runs")
@@ -19,6 +21,7 @@ ARTIFACTS_DIRNAME = Path("artifacts/agent")
 CONTEXT_FILENAME = "context.json"
 SUMMARY_FILENAME = "summary.json"
 JOURNAL_FILENAME = "journal.jsonl"
+PAUSE_STATE_FILENAME = "pause-state.json"
 COMPILED_PLAN_FILENAME = "compiled-plan.json"
 MANIFEST_FILENAME = "manifest.json"
 FORBIDDEN_ARTIFACT_SUFFIXES = {
@@ -90,6 +93,47 @@ class WorkspaceDirectories:
     parsed_plans_dir: Path
     runs_root_dir: Path
     artifacts_root_dir: Path
+
+
+class ScenarioRunArtifactStore:
+    """Persists raw execution artifacts and projection outputs to disk."""
+
+    def write_initial_state(self, session, scenario_definition: ScenarioDefinition) -> None:
+        write_compiled_plan_json(session.run_context.compiled_plan_path, scenario_definition)
+        write_bundle_compiled_plan_json(session.run_context, scenario_definition)
+        write_context_json(session.run_context)
+        if session.execution_events:
+            self.write_journal(session.run_context, [session.execution_events[0]])
+
+    @staticmethod
+    def create_report_path(run_context: RunContext) -> Path:
+        return create_report_path(run_context)
+
+    @staticmethod
+    def create_pause_state_path(run_context: RunContext) -> Path:
+        return create_pause_state_path(run_context)
+
+    @staticmethod
+    def write_context(run_context: RunContext) -> Path:
+        return write_context_json(run_context)
+
+    @staticmethod
+    def write_summary(run_context: RunContext, summary: ScenarioExecutionSummary) -> Path:
+        return write_summary_json(run_context, summary)
+
+    @staticmethod
+    def write_pause_state(run_context: RunContext, pause_state: PauseState) -> Path:
+        return write_pause_state_json(run_context, pause_state)
+
+    @staticmethod
+    def write_journal(
+        run_context: RunContext,
+        entries: Iterable[dict[str, Any] | ExecutionEvent],
+    ) -> Path | None:
+        last_path: Path | None = None
+        for entry in entries:
+            last_path = write_journal_entry(run_context, entry)
+        return last_path
 
 
 def ensure_workspace_directories(workspace_root: Path) -> WorkspaceDirectories:
@@ -164,6 +208,11 @@ def create_report_path(run_context: RunContext) -> Path:
     return ensure_artifact_output_path(target_path, run_context.artifacts_root_dir)
 
 
+def create_pause_state_path(run_context: RunContext) -> Path:
+    target_path = run_context.artifact_dir / PAUSE_STATE_FILENAME
+    return ensure_artifact_output_path(target_path, run_context.artifacts_root_dir)
+
+
 def write_context_json(run_context: RunContext) -> Path:
     target_path = run_context.run_state_dir / CONTEXT_FILENAME
     payload = _strip_run_state_network_debug(run_context.to_dict())
@@ -182,9 +231,20 @@ def write_summary_json(run_context: RunContext, summary: ScenarioExecutionSummar
     return target_path
 
 
-def write_journal_entry(run_context: RunContext, entry: dict[str, Any]) -> Path:
+def write_pause_state_json(run_context: RunContext, pause_state: PauseState) -> Path:
+    target_path = run_context.run_state_dir / PAUSE_STATE_FILENAME
+    pause_state.set_path(target_path)
+    payload = pause_state.to_dict()
+    _write_json_file(target_path, payload)
+    _write_json_file(_bundle_file_path(run_context, PAUSE_STATE_FILENAME), payload)
+    _write_manifest_json(run_context)
+    return target_path
+
+
+def write_journal_entry(run_context: RunContext, entry: dict[str, Any] | ExecutionEvent) -> Path:
     target_path = run_context.run_state_dir / JOURNAL_FILENAME
-    serialized_entry = json.dumps(redact_sensitive_data(entry), ensure_ascii=False)
+    payload = entry.to_dict() if isinstance(entry, ExecutionEvent) else entry
+    serialized_entry = json.dumps(redact_sensitive_data(payload), ensure_ascii=False)
     _append_jsonl(target_path, serialized_entry)
     _append_jsonl(_bundle_file_path(run_context, JOURNAL_FILENAME), serialized_entry)
     _write_manifest_json(run_context)
@@ -239,6 +299,7 @@ def _write_manifest_json(run_context: RunContext) -> Path:
             "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),
             "summary_path": str(run_context.artifact_dir / SUMMARY_FILENAME),
             "journal_path": str(run_context.artifact_dir / JOURNAL_FILENAME),
+            "pause_state_path": str(run_context.artifact_dir / PAUSE_STATE_FILENAME),
             "compiled_plan_path": str(run_context.artifact_dir / COMPILED_PLAN_FILENAME),
             "report_path": str(run_context.artifact_dir / "report.md"),
             "steps_dir": str(run_context.artifact_dir / "steps"),
@@ -247,6 +308,7 @@ def _write_manifest_json(run_context: RunContext) -> Path:
             "context_path": str(run_context.run_state_dir / CONTEXT_FILENAME),
             "summary_path": str(run_context.run_state_dir / SUMMARY_FILENAME),
             "journal_path": str(run_context.run_state_dir / JOURNAL_FILENAME),
+            "pause_state_path": str(run_context.run_state_dir / PAUSE_STATE_FILENAME),
         },
     }
     _write_json_file(target_path, payload)

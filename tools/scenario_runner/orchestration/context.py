@@ -6,13 +6,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from .artifacts import (
+from ..persistence.artifacts import (
     create_artifact_directory,
     create_compiled_plan_path,
     create_run_state_directory,
     ensure_workspace_directories,
 )
-from .models import RunContext, ScenarioDefinition
+from ..domain.models import RunContext, ScenarioDefinition
 
 
 def create_run_id(now: datetime | None = None) -> str:

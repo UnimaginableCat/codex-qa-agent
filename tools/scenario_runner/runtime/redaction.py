@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 REDACTED = "***REDACTED***"
+_NON_SECRET_TOKEN_KEYS = {"resume_token"}
 _SENSITIVE_KEY_PATTERN = re.compile(
     r"(?i)("
     r"password|passwd|secret|token|api[_-]?key|access[_-]?key|refresh[_-]?token|authorization|"
@@ -81,6 +82,8 @@ class SensitiveDataRedactor:
 
     @staticmethod
     def _is_sensitive_key(key: str) -> bool:
+        if key.strip().lower() in _NON_SECRET_TOKEN_KEYS:
+            return False
         return bool(_SENSITIVE_KEY_PATTERN.search(key))
 
     @staticmethod

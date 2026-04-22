@@ -19,6 +19,9 @@ Before writing the report, collect:
 - target project path
 - scenario path/name
 - scenario file resolution details if the requested path did not match exactly
+- run mode (`auto`, `guided`, or `manual`) if produced by the runner
+- continuation state and run/step termination details if present
+- operator state, pause-state path, decision point, selected action, and resume result if the run was guided/manual
 - optional code-analysis summary
 - API step results
 - DB step results
@@ -33,11 +36,12 @@ Before writing the report, collect:
 
 1. Identify the target project and scenario.
 2. Review all step outcomes.
-3. Determine the final overall status.
+3. Determine the final overall legacy status without treating lifecycle labels as statuses.
 4. Summarize the most important findings first.
-5. Add step-by-step results.
-6. Add resolved variables, auth mode, assumptions, blockers, tooling issues, and evidence references.
-7. Write the final report to the expected location.
+5. Add lifecycle/termination context when available: completed, paused, resumed, aborted, skipped, partially completed, runtime failure, policy/config block.
+6. Add step-by-step results.
+7. Add resolved variables, auth mode, assumptions, blockers, tooling issues, and evidence references.
+8. Write the final report to the expected location.
 
 # Final status rules
 
@@ -56,6 +60,12 @@ If multiple statuses are present, use the highest-priority one from the list abo
 
 Tooling issues must influence final status only when they actually prevented or invalidated execution.
 Do not downgrade a legitimate business PASS unless the tooling issue materially affected confidence or correctness.
+
+Keep these concepts separate:
+- reporting status: legacy `PASS`, `FAIL`, `BLOCKED`, `ERROR`
+- lifecycle/continuation: active, paused, resumed, terminal
+- termination: completed, failed, blocked, errored, paused, skipped, aborted, partial completion
+- operator resolution: selected action and resume strategy
 
 # Required report structure
 
@@ -82,6 +92,10 @@ If the scenario path matched exactly, say so briefly or omit this section if unn
 Include:
 - target project
 - environment file used
+- run mode and continuation state if produced by the runner
+- run termination reason/source if present
+- pause-state path and active decision point if the run is paused
+- selected operator action and resume strategy if the run was resumed
 - resolved auth mode used for API execution, if relevant
 - whether code-analysis was used or skipped
 
@@ -105,6 +119,7 @@ For each step:
 - step name or number
 - type (API / DB / analysis / other)
 - status
+- termination kind/reason if available and materially different from status, for example `skipped` by operator
 - short factual result
 - key evidence
 
@@ -137,6 +152,8 @@ List output files or raw evidence paths if they exist.
 # Guardrails
 
 - Never expose secrets.
+- Do not confuse runner lifecycle/termination semantics with legacy report statuses.
+- Do not infer operator decisions from status alone; use decision resolution or operator state when available.
 - Do not hide assumptions.
 - Do not hide scenario path substitutions or variable resolutions that materially affected execution.
 - Do not mark a scenario PASS if critical steps were BLOCKED, FAIL, or ERROR.

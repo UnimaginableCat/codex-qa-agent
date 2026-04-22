@@ -6,8 +6,8 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.scenario_runner.executors import ApiStepExecutor, CaptureResolutionError
-from tools.scenario_runner.interpolator import PlaceholderInterpolator
+from tools.scenario_runner.runtime.executors import ApiStepExecutor, CaptureResolutionError
+from tools.scenario_runner.runtime.interpolator import PlaceholderInterpolator
 
 
 class CapturePathResolutionTests(unittest.TestCase):

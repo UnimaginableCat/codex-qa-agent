@@ -9,9 +9,11 @@ from typing import Any
 
 from tools.common.statuses import StepStatus
 
-from .artifacts import ARTIFACTS_DIRNAME, PARSED_PLANS_DIRNAME, RUNS_DIRNAME
-from .models import ScenarioDefinition, ScenarioStepType
-from .summary import resolve_final_status
+from ..persistence.artifacts import ARTIFACTS_DIRNAME, PARSED_PLANS_DIRNAME, RUNS_DIRNAME
+from .compiler import CompiledScenario, ExternalVariableRequirement
+from ..domain.models import ScenarioDefinition, ScenarioStepType
+from ..projections.summary import resolve_final_status
+from ..runtime.variables import _default_env_loader, _load_env_values, _lookup_env_variable
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +64,25 @@ class PreflightResult:
 class ScenarioPreflightChecker:
     """Runs deterministic checks before scenario steps are executed."""
 
-    def run(self, scenario_definition: ScenarioDefinition, workspace_root: Path) -> PreflightResult:
+    def run(
+        self,
+        compiled_scenario: CompiledScenario | ScenarioDefinition,
+        workspace_root: Path,
+    ) -> PreflightResult:
+        scenario_definition = (
+            compiled_scenario.scenario_definition
+            if isinstance(compiled_scenario, CompiledScenario)
+            else compiled_scenario
+        )
+        required_external_inputs = (
+            list(compiled_scenario.compile_result.required_external_inputs)
+            if isinstance(compiled_scenario, CompiledScenario)
+            else []
+        )
         checks: list[PreflightCheckResult] = []
         checks.extend(self._check_scenario_shape(scenario_definition, workspace_root))
         checks.extend(self._check_environment_and_project(scenario_definition, workspace_root))
+        checks.extend(self._check_external_variable_inputs(scenario_definition, required_external_inputs, workspace_root))
         checks.extend(self._check_required_dependencies(scenario_definition))
         checks.extend(self._check_tool_entrypoints(scenario_definition, workspace_root))
         checks.extend(self._check_output_directories(workspace_root))
@@ -176,6 +193,67 @@ class ScenarioPreflightChecker:
                 )
             )
         return checks
+
+    def _check_external_variable_inputs(
+        self,
+        scenario_definition: ScenarioDefinition,
+        requirements: list[ExternalVariableRequirement],
+        workspace_root: Path,
+    ) -> list[PreflightCheckResult]:
+        if not requirements:
+            return [
+                self._pass(
+                    "external_inputs_resolvable",
+                    "No unresolved external inputs require environment resolution before runtime.",
+                )
+            ]
+
+        definition_by_name = {definition.name: definition for definition in scenario_definition.variables}
+        try:
+            env_values = _load_env_values(
+                workspace_root,
+                scenario_definition.environment,
+                _default_env_loader(),
+            )
+        except Exception:  # noqa: BLE001
+            env_values = {}
+
+        missing_variables: list[str] = []
+        resolved_variables: list[str] = []
+        for variable_name in sorted({requirement.variable_name for requirement in requirements}):
+            definition = definition_by_name.get(variable_name)
+            declared_env_name = definition.env_name if definition is not None else None
+            if _lookup_env_variable(variable_name, declared_env_name, env_values) is None:
+                missing_variables.append(variable_name)
+            else:
+                resolved_variables.append(variable_name)
+
+        if not missing_variables:
+            return [
+                PreflightCheckResult(
+                    name="external_inputs_resolvable",
+                    status=StepStatus.PASS,
+                    message="Required external inputs are resolvable before runtime.",
+                    details={
+                        "required_variables": sorted({requirement.variable_name for requirement in requirements}),
+                        "resolved_variables": resolved_variables,
+                        "requirements": [requirement.to_dict() for requirement in requirements],
+                    },
+                )
+            ]
+
+        return [
+            PreflightCheckResult(
+                name="external_inputs_resolvable",
+                status=StepStatus.BLOCKED,
+                message="Required external inputs could not be resolved before runtime.",
+                details={
+                    "missing_variables": missing_variables,
+                    "resolved_variables": resolved_variables,
+                    "requirements": [requirement.to_dict() for requirement in requirements],
+                },
+            )
+        ]
 
     def _check_required_dependencies(self, scenario_definition: ScenarioDefinition) -> list[PreflightCheckResult]:
         checks: list[PreflightCheckResult] = []

@@ -12,11 +12,29 @@ import sys
 from tempfile import mkstemp
 from typing import Any
 
+from tools.common.runtime_signals import (
+    ContinuationHint,
+    NormalizedRuntimeSignal,
+    RetryHint,
+    RuntimeFailureCategory,
+    RuntimeSignalSource,
+    RuntimeSignalTag,
+    ToolFailureCode,
+)
 from tools.common.statuses import StepStatus
 
-from .artifacts import write_step_artifact_json
+from ..persistence.artifacts import write_step_artifact_json
+from ..domain.execution import (
+    ExecutionIssue,
+    ExecutionIssueKind,
+    ExecutionOutcome,
+    ExecutionPhase,
+    StepExecutionLifecycleState,
+    StepExecutionState,
+)
 from .interpolator import InterpolationError, PlaceholderInterpolator
-from .models import RunContext, ScenarioDefinition, ScenarioStep, ScenarioStepType, StepExecutionResult
+from ..domain.models import RunContext, ScenarioDefinition, ScenarioStep, ScenarioStepType, StepExecutionResult
+from .normalization import normalize_tool_runtime_signal
 from .path_lookup import resolve_path
 
 
@@ -30,6 +48,8 @@ class StepExecutionOutcome:
     captured_values: dict[str, Any] = field(default_factory=dict)
     tool_payload: dict[str, Any] | None = None
     journal_details: dict[str, Any] = field(default_factory=dict)
+    execution_state: StepExecutionState | None = None
+    issues: list[ExecutionIssue] = field(default_factory=list)
 
 
 class StepExecutorFactory:
@@ -57,16 +77,35 @@ class _BaseStepExecutor:
         scenario_definition: ScenarioDefinition,
         step: ScenarioStep,
     ) -> StepExecutionOutcome:
+        step_state = StepExecutionState.from_step(
+            step,
+            lifecycle_state=StepExecutionLifecycleState.PREPARING,
+        )
         try:
             step_payload = self._build_step_payload(run_context, step)
         except InterpolationError as exc:
+            step_result = self._build_step_result(
+                step=step,
+                status=StepStatus.BLOCKED,
+                message=str(exc),
+                details={"phase": ExecutionPhase.INTERPOLATION.value},
+            )
+            issue = ExecutionIssue(
+                code="step_interpolation_failed",
+                message=str(exc),
+                phase=ExecutionPhase.INTERPOLATION,
+                issue_type=ExecutionIssueKind.VALIDATION,
+                outcome=StepStatus.BLOCKED,
+                step=step_state.step,
+            )
             return StepExecutionOutcome(
-                step_result=self._build_step_result(
-                    step=step,
-                    status=StepStatus.BLOCKED,
-                    message=str(exc),
-                ),
+                step_result=step_result,
                 journal_details={"phase": "interpolation"},
+                execution_state=step_state.finish(
+                    ExecutionOutcome.from_step_result(step_result, phase=ExecutionPhase.INTERPOLATION),
+                    issues=[issue],
+                ),
+                issues=[issue],
             )
 
         input_artifact_path = write_step_artifact_json(
@@ -92,14 +131,35 @@ class _BaseStepExecutor:
             if isinstance(payload, dict) and payload.get("message") is not None
             else "Tool execution failed"
         )
+        runtime_signal = (
+            None
+            if not isinstance(payload, dict)
+            else normalize_tool_runtime_signal(
+                step_type=step.step_type,
+                status=status,
+                message=message,
+                payload=payload,
+            )
+        )
 
         captures: dict[str, Any] = {}
+        issues: list[ExecutionIssue] = []
         if status == StepStatus.PASS:
             try:
                 captures = self._apply_captures(step=step, payload=payload)
             except CaptureResolutionError as exc:
                 status = StepStatus.FAIL
                 message = str(exc)
+                issues.append(
+                    ExecutionIssue(
+                        code="step_capture_failed",
+                        message=str(exc),
+                        phase=ExecutionPhase.CAPTURE,
+                        issue_type=ExecutionIssueKind.VALIDATION,
+                        outcome=StepStatus.FAIL,
+                        step=step_state.step,
+                    )
+                )
 
         step_result = self._build_step_result(
             step=step,
@@ -109,11 +169,18 @@ class _BaseStepExecutor:
                 "input_artifact_path": str(input_artifact_path),
                 "result_artifact_path": str(result_artifact_path),
                 "tool_status": payload.get("status") if isinstance(payload, dict) else "ERROR",
+                "tool_classification": payload.get("classification") if isinstance(payload, dict) else None,
+                "runtime_signal": None if runtime_signal is None else runtime_signal.to_dict(),
                 "capture_keys": sorted(captures.keys()),
                 "tool_debug": tool_result.get("debug"),
                 "api_request_debug": payload.get("request_debug") if isinstance(payload, dict) else None,
                 "api_retry": payload.get("retry") if isinstance(payload, dict) else None,
             },
+        )
+        outcome_phase = ExecutionPhase.STEP_EXECUTION if not issues else ExecutionPhase.CAPTURE
+        execution_state = step_state.finish(
+            ExecutionOutcome.from_step_result(step_result, phase=outcome_phase),
+            issues=issues,
         )
 
         return StepExecutionOutcome(
@@ -125,10 +192,14 @@ class _BaseStepExecutor:
                 "result_artifact_path": str(result_artifact_path),
                 "captures": sorted(captures.keys()),
                 "tool_command": tool_result.get("command"),
+                "tool_classification": payload.get("classification") if isinstance(payload, dict) else None,
+                "runtime_signal": None if runtime_signal is None else runtime_signal.to_dict(),
                 "tool_debug": tool_result.get("debug"),
                 "api_request_debug": payload.get("request_debug") if isinstance(payload, dict) else None,
                 "api_retry": payload.get("retry") if isinstance(payload, dict) else None,
             },
+            execution_state=execution_state,
+            issues=issues,
         )
 
     def _run_cli(self, env_path: Path, step_payload: dict[str, Any]) -> dict[str, Any]:
@@ -172,6 +243,7 @@ class _BaseStepExecutor:
                 "result": {
                     "status": StepStatus.ERROR.value,
                     "message": f"Failed to launch tool: {exc}",
+                    "runtime_signal": _runtime_tool_failure_signal().to_dict(),
                 },
             }
 
@@ -207,6 +279,7 @@ class _BaseStepExecutor:
                 "message": f"Tool returned no structured JSON output.{error_suffix}",
                 "stderr": stderr,
                 "returncode": returncode,
+                "runtime_signal": _runtime_tool_failure_signal().to_dict(),
             }
 
         candidate = non_empty_lines[-1]
@@ -219,6 +292,7 @@ class _BaseStepExecutor:
                 "stdout": stdout,
                 "stderr": stderr,
                 "returncode": returncode,
+                "runtime_signal": _runtime_tool_failure_signal().to_dict(),
             }
 
         if not isinstance(payload, dict):
@@ -228,6 +302,7 @@ class _BaseStepExecutor:
                 "stdout": stdout,
                 "stderr": stderr,
                 "returncode": returncode,
+                "runtime_signal": _runtime_tool_failure_signal().to_dict(),
             }
 
         return payload
@@ -356,3 +431,15 @@ def _safe_child_env_debug_value(env: dict[str, str], key: str) -> str | None:
     if key.upper() in {"HTTP_PROXY", "HTTPS_PROXY"}:
         return re.sub(r"(?<=://)[^/@]+@", "<redacted>@", value)
     return value
+
+
+def _runtime_tool_failure_signal() -> NormalizedRuntimeSignal:
+    return NormalizedRuntimeSignal(
+        source=RuntimeSignalSource.TOOL,
+        code=ToolFailureCode.RUNTIME_TOOL_FAILURE,
+        category=RuntimeFailureCategory.TOOL_RUNTIME,
+        retry_hint=RetryHint.MANUAL_RETRY,
+        continuation_hint=ContinuationHint.RETRY_MANUALLY,
+        tags=(RuntimeSignalTag.RETRYABLE,),
+        resumable=True,
+    )

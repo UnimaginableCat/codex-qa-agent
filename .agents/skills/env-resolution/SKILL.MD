@@ -76,7 +76,7 @@ Use ready-to-execute when:
 
 - `api-workflow` should use this skill before sending requests if env is unclear.
 - `db-verification` should use this skill before opening DB connections.
-- `scenario-test-runner` should use this skill early for scenario readiness checks.
+- `runner-execution` relies on the runner preflight for scenario readiness; use this skill for manual clarification when env/config blockers need explanation.
 
 # Guardrails
 

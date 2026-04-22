@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     DbStepDefinition,
     ScenarioStep,

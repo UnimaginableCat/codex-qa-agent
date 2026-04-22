@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tools.scenario_runner.models import ScenarioDefinition, ScenarioVariableDefinition
+from tools.scenario_runner.domain.models import ScenarioDefinition, ScenarioVariableDefinition
 
 from .contracts.errors import ScenarioParseError
 from .scenario_converter import convert_step_drafts

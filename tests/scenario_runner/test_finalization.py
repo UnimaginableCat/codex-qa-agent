@@ -14,9 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
 from tools.scenario_runner.cli import main as cli_main
-from tools.scenario_runner.artifacts import write_context_json, write_summary_json
-from tools.scenario_runner.executors import StepExecutionOutcome
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     RunContext,
     ScenarioDefinition,
@@ -25,8 +23,12 @@ from tools.scenario_runner.models import (
     ScenarioStepType,
     StepExecutionResult,
 )
-from tools.scenario_runner.preflight import PreflightCheckResult, PreflightResult
-from tools.scenario_runner.services import ScenarioRunnerService
+from tools.scenario_runner.orchestration.preflight import PreflightCheckResult, PreflightResult
+from tools.scenario_runner.orchestration.services import ScenarioRunnerService
+from tools.scenario_runner.persistence.artifacts import ScenarioRunArtifactStore
+from tools.scenario_runner.projections.finalization import ScenarioRunFinalizer
+from tools.scenario_runner.persistence.artifacts import write_context_json, write_summary_json
+from tools.scenario_runner.runtime.executors import StepExecutionOutcome
 
 
 class ScenarioRunnerFinalizationTests(unittest.TestCase):
@@ -52,9 +54,10 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
 
     def test_report_generation_exception_upgrades_final_status_to_error(self) -> None:
         with TemporaryDirectory() as tmp:
-            service = _ReportFailingScenarioRunnerService(
+            service = ScenarioRunnerService(
                 step_executor_factory=_FakeStepExecutorFactory([self._step_outcome(StepStatus.PASS)]),
                 preflight_checker=_PassingPreflightChecker(),
+                finalizer=_ReportFailingFinalizer(),
             )
 
             summary = service.run(self._scenario(Path(tmp), with_step=True), workspace_root=Path(tmp))
@@ -83,13 +86,28 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
             service = ScenarioRunnerService(
                 step_executor_factory=_FakeStepExecutorFactory([self._step_outcome(StepStatus.PASS)]),
                 preflight_checker=_PassingPreflightChecker(),
+                finalizer=ScenarioRunFinalizer(artifact_store=_SummaryFailingArtifactStore()),
             )
 
-            with patch("tools.scenario_runner.services.write_summary_json", side_effect=OSError("summary denied")):
-                summary = service.run(self._scenario(Path(tmp), with_step=True), workspace_root=Path(tmp))
+            summary = service.run(self._scenario(Path(tmp), with_step=True), workspace_root=Path(tmp))
 
         self.assertEqual(summary.final_status, StepStatus.ERROR)
         self.assertTrue(any("summary persistence failed" in issue.lower() for issue in summary.tooling_issues))
+
+    def test_service_uses_injected_finalizer(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            finalizer = _SpyFinalizer()
+            service = ScenarioRunnerService(
+                step_executor_factory=_FakeStepExecutorFactory([self._step_outcome(StepStatus.PASS)]),
+                preflight_checker=_PassingPreflightChecker(),
+                finalizer=finalizer,
+            )
+
+            summary = service.run(self._scenario(root, with_step=True), workspace_root=root)
+
+        self.assertTrue(finalizer.finalize_called)
+        self.assertEqual(summary.final_status, StepStatus.PASS)
 
     def test_summary_report_and_cli_final_status_are_consistent(self) -> None:
         scenario_text = "\n".join(
@@ -121,7 +139,7 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
             output = io.StringIO()
             try:
                 os.chdir(root)
-                with patch("tools.scenario_runner.preflight.importlib.util.find_spec", return_value=object()):
+                with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
                     with redirect_stdout(output):
                         exit_code = cli_main(["--scenario", str(scenario_path)])
             finally:
@@ -378,10 +396,26 @@ class _FakeStepExecutorFactory:
         return self._outcomes.pop(0)
 
 
-class _ReportFailingScenarioRunnerService(ScenarioRunnerService):
+class _ReportFailingFinalizer(ScenarioRunFinalizer):
     @staticmethod
-    def _build_report(run_context, scenario_definition, report_path):
+    def _build_report(summary, report_path):
         raise RuntimeError("report renderer crashed")
+
+
+class _SummaryFailingArtifactStore(ScenarioRunArtifactStore):
+    @staticmethod
+    def write_summary(run_context, summary):
+        raise OSError("summary denied")
+
+
+class _SpyFinalizer(ScenarioRunFinalizer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.finalize_called = False
+
+    def finalize(self, *args, **kwargs):
+        self.finalize_called = True
+        return super().finalize(*args, **kwargs)
 
 
 class _PassingPreflightChecker:

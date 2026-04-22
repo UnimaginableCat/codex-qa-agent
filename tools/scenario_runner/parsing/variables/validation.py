@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.models import (
     ScenarioVariableDefinition,
     ScenarioVariableSource,
 )

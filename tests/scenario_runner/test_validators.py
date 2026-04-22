@@ -7,8 +7,8 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
-from tools.scenario_runner.models import ApiStepDefinition, DbStepDefinition, ScenarioStep, ScenarioStepType
-from tools.scenario_runner.validators import ScenarioStepValidator
+from tools.scenario_runner.domain.models import ApiStepDefinition, DbStepDefinition, ScenarioStep, ScenarioStepType
+from tools.scenario_runner.runtime.validators import ScenarioStepValidator
 
 
 class ScenarioStepValidatorTests(unittest.TestCase):
@@ -418,6 +418,13 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         self.assertEqual(results[0].status, StepStatus.BLOCKED)
         self.assertIn("Unsupported expectation rule: response magically works", results[0].detail)
         self.assertEqual(self.validator.final_status(results), StepStatus.BLOCKED)
+
+    def test_contract_inspection_marks_unsupported_expectation_before_runtime(self) -> None:
+        diagnostics = self.validator.inspect_contract(self._api_step(["response magically works"]))
+
+        self.assertEqual(len(diagnostics), 1)
+        self.assertFalse(diagnostics[0].supported)
+        self.assertIn("Unsupported expectation rule: response magically works", diagnostics[0].detail)
 
     def test_unsupported_comparison_syntax_does_not_become_missing_path(self) -> None:
         results = self.validator.validate(

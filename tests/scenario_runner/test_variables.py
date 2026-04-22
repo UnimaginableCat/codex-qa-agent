@@ -5,13 +5,12 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
-from tools.scenario_runner.executors import ApiStepExecutor
-from tools.scenario_runner.interpolator import PlaceholderInterpolator
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     ScenarioDefinition,
     ScenarioStep,
@@ -19,9 +18,11 @@ from tools.scenario_runner.models import (
     ScenarioVariableDefinition,
     ScenarioVariableSource,
 )
+from tools.scenario_runner.orchestration.preflight import PreflightCheckResult, PreflightResult
+from tools.scenario_runner.orchestration.services import ScenarioRunnerService
 from tools.scenario_runner.parser import MarkdownScenarioParser
-from tools.scenario_runner.preflight import PreflightCheckResult, PreflightResult
-from tools.scenario_runner.services import ScenarioRunnerService
+from tools.scenario_runner.runtime.executors import ApiStepExecutor
+from tools.scenario_runner.runtime.interpolator import PlaceholderInterpolator
 
 
 class ScenarioVariableTests(unittest.TestCase):
@@ -145,9 +146,10 @@ class ScenarioVariableTests(unittest.TestCase):
         self.assertEqual(summary.final_status, StepStatus.BLOCKED)
         self.assertEqual(executor.execute_count, 0)
         self.assertTrue(scenario.metadata["variables_validation_errors"])
-        self.assertTrue(any("variables_section_valid" in issue for issue in summary.tooling_issues))
+        self.assertTrue(any("compile_variables_section_invalid" in issue for issue in summary.tooling_issues))
         self.assertTrue(any("company_guid comes from environment" in warning for warning in summary.details["warnings"]))
         self.assertEqual(summary.details["executed_step_count"], 0)
+        self.assertEqual(summary.details["compile_statuses"], [StepStatus.BLOCKED.value])
 
     def test_variables_section_supports_tables_backticks_and_dash_assignments(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -403,6 +405,7 @@ class ScenarioVariableTests(unittest.TestCase):
         self.assertEqual(executor.execute_count, 0)
         self.assertIn("Variables section contains invalid definition", summary.tooling_issues[0])
         self.assertIn("lowercase form", summary.tooling_issues[0])
+        self.assertEqual(summary.message, "Scenario compilation failed with status BLOCKED.")
         self.assertTrue(summary.report_path is not None)
         self.assertIn("lowercase form", summary_json)
 
@@ -431,22 +434,25 @@ class ScenarioVariableTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._prepare_env(root, "COMPANY_GUID=company-789\n")
+            (root / "scenario.md").write_text("# Scenario: Variables Demo\n", encoding="utf-8")
+            (root / "code" / "demo").mkdir(parents=True, exist_ok=True)
+            (root / "tools" / "api").mkdir(parents=True, exist_ok=True)
+            (root / "tools" / "api" / "run_request.py").write_text("# api tool placeholder\n", encoding="utf-8")
             executor = _CapturingExecutorFactory()
             scenario = self._scenario(root)
             scenario.steps[0].api.body["missing"] = "{{missing_variable}}"
-            service = ScenarioRunnerService(
-                step_executor_factory=executor,
-                preflight_checker=_PassingPreflightChecker(),
-            )
-
-            summary = service.run(scenario, workspace_root=root)
+            service = ScenarioRunnerService(step_executor_factory=executor)
+            with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
+                summary = service.run(scenario, workspace_root=root)
 
         self.assertEqual(summary.final_status, StepStatus.BLOCKED)
         self.assertEqual(executor.execute_count, 0)
-        self.assertEqual(summary.steps[0].status, StepStatus.BLOCKED)
-        self.assertIn("missing_variable", summary.steps[0].message)
-        self.assertEqual(summary.steps[0].details["phase"], "step_variable_resolution")
-        self.assertIn("missing_variable", summary.steps[0].details["unresolved_variables"])
+        self.assertEqual(summary.steps, [])
+        self.assertEqual(summary.message, "Scenario preflight failed with status BLOCKED.")
+        self.assertEqual(summary.details["compile_statuses"], [StepStatus.PASS.value])
+        self.assertEqual(summary.details["preflight_statuses"], [StepStatus.BLOCKED.value])
+        self.assertTrue(any("external_inputs_resolvable" in issue for issue in summary.tooling_issues))
+        self.assertTrue(any("missing_variable" in issue for issue in summary.tooling_issues))
 
     def test_later_step_can_use_variable_captured_by_step_one_without_initial_block(self) -> None:
         with TemporaryDirectory() as tmp:

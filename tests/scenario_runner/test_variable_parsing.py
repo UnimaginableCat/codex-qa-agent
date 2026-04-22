@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.scenario_runner.models import ScenarioVariableSource
+from tools.scenario_runner.domain.models import ScenarioVariableSource
 from tools.scenario_runner.parser import MarkdownScenarioParser, ScenarioParseError
 from tools.scenario_runner.parsing.variables.parser import parse_variables_section
 
