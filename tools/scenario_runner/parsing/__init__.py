@@ -3,6 +3,14 @@
 from .errors import ScenarioParseError, ScenarioParsingError
 from .interfaces import ScenarioParseOptions, ScenarioParser
 from .loader import ScenarioSource, load_scenario_source
+from .markdown_backend import (
+    LineSpan,
+    MarkdownBackend,
+    MarkdownBlock,
+    MarkdownBlockKind,
+    MarkdownItBackend,
+    MarkdownTokenDocument,
+)
 from .markdown_document import (
     MARKDOWN_STEP_RE,
     MarkdownScenarioDocument,
@@ -28,6 +36,11 @@ __all__ = [
     "JsonObject",
     "JsonScalar",
     "JsonValue",
+    "LineSpan",
+    "MarkdownBackend",
+    "MarkdownBlock",
+    "MarkdownBlockKind",
+    "MarkdownItBackend",
     "ParseDiagnostic",
     "ParseDiagnosticKind",
     "ParseDiagnosticSeverity",
@@ -42,6 +55,7 @@ __all__ = [
     "MarkdownScenarioDocument",
     "MarkdownSection",
     "MarkdownStepBlock",
+    "MarkdownTokenDocument",
     "empty_json_object",
     "empty_parse_diagnostics",
     "load_scenario_source",
