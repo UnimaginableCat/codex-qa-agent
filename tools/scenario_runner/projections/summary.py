@@ -15,6 +15,7 @@ from ..domain.execution import (
     issue_messages,
 )
 from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
+from .guided import build_guided_projection
 from .models import ExecutionProjectionState
 
 
@@ -29,6 +30,7 @@ _STATUS_PRIORITY = {
 def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecutionSummary:
     step_results = list(state.run_context.step_results)
     warnings = state.parse_warnings + _tooling_messages(list(state.tooling_issues))
+    guided_projection = build_guided_projection(state)
     compile_failed = any(coerce_terminal_status(status) != StepStatus.PASS for status in state.compile_outcomes)
     final_status = resolve_final_status(
         [step_result.status for step_result in step_results]
@@ -75,6 +77,8 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
             extra_tooling_issues=list(state.tooling_issues),
         ),
         code_analysis_used=False,
+        guided_diagnostics=list(guided_projection.diagnostics),
+        guided_stop_reason=guided_projection.stop_reason,
         details={
             "scenario_name": state.scenario_definition.scenario_name,
             "project": state.scenario_definition.project,
@@ -96,6 +100,8 @@ def build_summary_projection(state: ExecutionProjectionState) -> ScenarioExecuti
             "finalization_statuses": [
                 coerce_terminal_status(status).value for status in state.finalization_outcomes
             ],
+            "guided_diagnostics_count": len(guided_projection.diagnostics),
+            "guided_decision_points_count": len(guided_projection.decision_points),
             "variable_keys": sorted(state.run_context.variables.keys()),
             "warnings": warnings,
             "artifact_policy": "Artifacts are immutable outputs/evidence only; never write source code into artifacts/.",

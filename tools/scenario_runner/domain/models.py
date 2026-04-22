@@ -5,10 +5,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
+
+if TYPE_CHECKING:
+    from .guided import GuidedDiagnostic
 
 
 class ScenarioStepType(StrEnum):
@@ -147,6 +150,8 @@ class ScenarioExecutionSummary:
     assumptions: list[str] = field(default_factory=list)
     tooling_issues: list[str] = field(default_factory=list)
     code_analysis_used: bool = False
+    guided_diagnostics: list[GuidedDiagnostic] = field(default_factory=list)
+    guided_stop_reason: GuidedDiagnostic | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -162,6 +167,15 @@ class ScenarioExecutionSummary:
         payload["blockers"] = self.build_blockers()
         payload["assumptions"] = list(self.assumptions)
         payload["artifacts"] = self.build_artifact_list()
+        payload["guided_diagnostics"] = [diagnostic.to_dict() for diagnostic in self.guided_diagnostics]
+        payload["guided_stop_reason"] = (
+            None if self.guided_stop_reason is None else self.guided_stop_reason.to_dict()
+        )
+        payload["guided_decision_points"] = [
+            diagnostic.decision_point.to_dict()
+            for diagnostic in self.guided_diagnostics
+            if diagnostic.decision_point is not None
+        ]
         return payload
 
     def build_notes(self) -> list[str]:

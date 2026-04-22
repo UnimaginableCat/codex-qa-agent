@@ -1,5 +1,13 @@
 """Scenario runner domain contracts."""
 
+from .guided import (
+    ContinuationPolicy,
+    DecisionPoint,
+    GuidedAction,
+    GuidedActionType,
+    GuidedDiagnostic,
+    GuidedDiagnosticTag,
+)
 from .execution import (
     ExecutionEvent,
     ExecutionIssue,
@@ -30,13 +38,19 @@ from .models import (
 
 __all__ = [
     "ApiStepDefinition",
+    "ContinuationPolicy",
     "DbStepDefinition",
+    "DecisionPoint",
     "ExpectationCheckResult",
     "ExecutionEvent",
     "ExecutionIssue",
     "ExecutionIssueKind",
     "ExecutionOutcome",
     "ExecutionPhase",
+    "GuidedAction",
+    "GuidedActionType",
+    "GuidedDiagnostic",
+    "GuidedDiagnosticTag",
     "RunContext",
     "ScenarioDefinition",
     "ScenarioExecutionSummary",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .models import CheckResult, ReportContext
+from .models import CheckResult, GuidedDiagnosticData, ReportContext
 
 
 class MarkdownReportRenderer:
@@ -38,6 +38,13 @@ class MarkdownReportRenderer:
         lines.extend(["", "## Artifacts"])
         lines.extend(self._render_string_list(context.summary.artifacts))
 
+        lines.extend(["", "## Guided diagnostics"])
+        lines.extend(self._render_guided_diagnostics(context.summary.guided_diagnostics))
+
+        if context.summary.guided_stop_reason is not None:
+            lines.extend(["", "## Guided stop reason"])
+            lines.extend(self._render_guided_diagnostics([context.summary.guided_stop_reason]))
+
         return "\n".join(lines) + "\n"
 
     @staticmethod
@@ -57,4 +64,27 @@ class MarkdownReportRenderer:
             if check.detail:
                 line += f": {check.detail}"
             lines.append(line)
+        return lines
+
+    @staticmethod
+    def _render_guided_diagnostics(diagnostics: list[GuidedDiagnosticData]) -> list[str]:
+        if not diagnostics:
+            return ["- None"]
+
+        lines: list[str] = []
+        for diagnostic in diagnostics:
+            prefix = f"- `{diagnostic.continuation_policy}` {diagnostic.title}"
+            if diagnostic.tags:
+                prefix += f" [{', '.join(diagnostic.tags)}]"
+            prefix += f": {diagnostic.summary}"
+            lines.append(prefix)
+            for action in diagnostic.actions:
+                marker = "Recommended" if action.recommended else "Action"
+                lines.append(
+                    f"  - {marker}: `{action.action_type}` {action.title} - {action.description}"
+                )
+            if diagnostic.decision_point is not None:
+                lines.append(
+                    f"  - Decision: {diagnostic.decision_point.title} - {diagnostic.decision_point.prompt}"
+                )
         return lines

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..domain.execution import ExecutionEvent, ExecutionIssue, ExecutionOutcome, ScenarioRunState
+from ..domain.guided import DecisionPoint, GuidedDiagnostic
 from ..domain.models import RunContext, ScenarioDefinition
 
 
@@ -76,3 +77,12 @@ class JournalProjection:
         if skip <= 0:
             return self.entries
         return self.entries[skip:]
+
+
+@dataclass(frozen=True, slots=True)
+class GuidedRunProjection:
+    """Projected operator-facing diagnostics derived from execution state."""
+
+    diagnostics: tuple[GuidedDiagnostic, ...]
+    stop_reason: GuidedDiagnostic | None = None
+    decision_points: tuple[DecisionPoint, ...] = ()
