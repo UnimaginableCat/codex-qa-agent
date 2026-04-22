@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -18,6 +19,10 @@ from tools.scenario_runner.parsing import (
     ScenarioParser,
     ScenarioParsingError,
     SourceLocation,
+)
+from tools.scenario_runner.parsing.markdown_document import (
+    parse_markdown_document,
+    parse_markdown_document_from_backend,
 )
 
 
@@ -139,6 +144,46 @@ class ParsingContractTests(unittest.TestCase):
             any(diagnostic.code == "scenario.variables_validation_error" for diagnostic in result.diagnostics)
         )
 
+    def test_markdown_parser_uses_backend_document_parser_by_default(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = _write_scenario(Path(tmp), _representative_scenario_text())
+            calls: list[str] = []
+
+            def backend_spy(source, *, error_type=ScenarioParseError):
+                calls.append("backend")
+                return parse_markdown_document_from_backend(source, error_type=error_type)
+
+            with patch("tools.scenario_runner.parser.parse_markdown_document_from_backend", side_effect=backend_spy):
+                scenario = MarkdownScenarioParser().parse(scenario_path)
+
+        self.assertEqual(calls, ["backend"])
+        self.assertEqual(scenario.scenario_name, "Parser Switch")
+        self.assertEqual(scenario.steps[0].metadata["source_line"], 2)
+
+    def test_markdown_parser_legacy_splitter_escape_hatch_matches_backend_default(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = _write_scenario(Path(tmp), _representative_scenario_text())
+
+            backend_scenario = MarkdownScenarioParser().parse(scenario_path)
+            legacy_scenario = MarkdownScenarioParser(use_backend_document_parser=False).parse(scenario_path)
+
+        self.assertEqual(backend_scenario.to_dict(), legacy_scenario.to_dict())
+        self.assertEqual(backend_scenario.steps[1].metadata["source_line"], 20)
+
+    def test_markdown_parser_can_explicitly_inject_legacy_document_parser(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = _write_scenario(Path(tmp), _representative_scenario_text())
+            calls: list[str] = []
+
+            def legacy_spy(source):
+                calls.append("legacy")
+                return parse_markdown_document(source, error_type=ScenarioParseError)
+
+            scenario = MarkdownScenarioParser(document_parser=legacy_spy).parse(scenario_path)
+
+        self.assertEqual(calls, ["legacy"])
+        self.assertEqual(scenario.scenario_name, "Parser Switch")
+
     def test_legacy_parse_error_is_parse_subsystem_error(self) -> None:
         error = ScenarioParseError("bad scenario")
 
@@ -162,6 +207,57 @@ def _write_scenario(root: Path, content: str) -> Path:
     scenario_path = root / "scenario.md"
     scenario_path.write_text(_dedent(content), encoding="utf-8")
     return scenario_path
+
+
+def _representative_scenario_text() -> str:
+    return """
+    # Scenario: Parser Switch
+
+    ## Project
+    code/demo
+
+    ## Environment
+    env/demo.env
+
+    ## Variables
+    - company_guid = env:COMPANY_GUID
+    - run_suffix = generated:run_suffix
+    - generated_name = template:Item {{run_suffix}}
+
+    ## Steps
+
+    ### Step 1
+    Type: api
+    Name: create
+    Method: post
+    Path: /companies/{{company_guid}}/items
+    Headers:
+    ```json
+    {"Content-Type": "application/json"}
+    ```
+    Body:
+    ```json
+    {"name": "{{generated_name}}"}
+    ```
+    Capture:
+    - response.body.id -> created_id
+    Expected:
+    - HTTP 200
+
+    ### Step 2
+    Type: db
+    Name: verify
+    SQL:
+    ```sql
+    SELECT id FROM items WHERE id = :id
+    ```
+    Params:
+    ```json
+    {"id": "{{created_id}}"}
+    ```
+    Expected:
+    - one row exists
+    """
 
 
 def _dedent(value: str) -> str:
