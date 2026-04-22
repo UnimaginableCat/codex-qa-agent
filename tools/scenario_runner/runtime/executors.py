@@ -14,8 +14,8 @@ from typing import Any
 
 from tools.common.statuses import StepStatus
 
-from .artifacts import write_step_artifact_json
-from .execution import (
+from ..persistence.artifacts import write_step_artifact_json
+from ..domain.execution import (
     ExecutionIssue,
     ExecutionIssueKind,
     ExecutionOutcome,
@@ -24,7 +24,7 @@ from .execution import (
     StepExecutionState,
 )
 from .interpolator import InterpolationError, PlaceholderInterpolator
-from .models import RunContext, ScenarioDefinition, ScenarioStep, ScenarioStepType, StepExecutionResult
+from ..domain.models import RunContext, ScenarioDefinition, ScenarioStep, ScenarioStepType, StepExecutionResult
 from .path_lookup import resolve_path
 
 

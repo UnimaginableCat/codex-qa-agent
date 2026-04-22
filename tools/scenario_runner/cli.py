@@ -16,8 +16,8 @@ from tools.common.result import ExecutionResult
 from tools.common.runtime import UnsupportedPythonVersionError, ensure_supported_python_version
 from tools.common.statuses import StepStatus
 from tools.scenario_runner.parser import MarkdownScenarioParser
-from tools.scenario_runner.redaction import redact_sensitive_data
-from tools.scenario_runner.services import ScenarioRunnerService
+from tools.scenario_runner.orchestration.services import ScenarioRunnerService
+from tools.scenario_runner.runtime.redaction import redact_sensitive_data
 
 
 def _build_parser() -> argparse.ArgumentParser:

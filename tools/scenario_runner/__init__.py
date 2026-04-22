@@ -1,6 +1,6 @@
 """Reusable scenario runner skeleton for QA orchestration."""
 
-from .models import (
+from .domain import (
     ApiStepDefinition,
     DbStepDefinition,
     ExpectationCheckResult,
@@ -8,35 +8,51 @@ from .models import (
     ScenarioDefinition,
     ScenarioExecutionSummary,
     ScenarioStep,
+    StepExecutionLifecycleState,
+    StepExecutionState,
     StepExecutionResult,
-)
-from .execution import (
     ExecutionEvent,
     ExecutionIssue,
     ExecutionOutcome,
     ExecutionPhase,
     ScenarioRunLifecycleState,
     ScenarioRunState,
-    StepExecutionLifecycleState,
-    StepExecutionState,
 )
-from .engine import ScenarioExecutionEngine, ScenarioExecutionSession
-from .executors import StepExecutorFactory
-from .interpolator import PlaceholderInterpolator
+from .orchestration import (
+    CompileCheckResult,
+    CompileResult,
+    CompiledScenario,
+    ExternalVariableRequirement,
+    PreflightCheckResult,
+    PreflightResult,
+    ScenarioCompiler,
+    ScenarioExecutionEngine,
+    ScenarioExecutionSession,
+    ScenarioPreflightChecker,
+    ScenarioRunnerService,
+)
+from .runtime import (
+    PlaceholderInterpolator,
+    REDACTED,
+    ScenarioStepValidator,
+    SensitiveDataRedactor,
+    StepExecutorFactory,
+    redact_sensitive_data,
+)
 from .parser import MarkdownScenarioParser
-from .preflight import PreflightCheckResult, PreflightResult, ScenarioPreflightChecker
-from .redaction import REDACTED, SensitiveDataRedactor, redact_sensitive_data
-from .services import ScenarioRunnerService
-from .validators import ScenarioStepValidator
 
 __all__ = [
     "ApiStepDefinition",
+    "CompileCheckResult",
+    "CompileResult",
+    "CompiledScenario",
     "DbStepDefinition",
     "ExpectationCheckResult",
     "ExecutionEvent",
     "ExecutionIssue",
     "ExecutionOutcome",
     "ExecutionPhase",
+    "ExternalVariableRequirement",
     "MarkdownScenarioParser",
     "PlaceholderInterpolator",
     "PreflightCheckResult",
@@ -46,6 +62,7 @@ __all__ = [
     "SensitiveDataRedactor",
     "ScenarioDefinition",
     "ScenarioExecutionSummary",
+    "ScenarioCompiler",
     "ScenarioExecutionEngine",
     "ScenarioExecutionSession",
     "ScenarioRunLifecycleState",

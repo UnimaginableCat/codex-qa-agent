@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from tools.scenario_runner.models import ScenarioDefinition
+from tools.scenario_runner.domain.models import ScenarioDefinition
 
 from .contracts.errors import ScenarioParseError
 from .contracts.result import ScenarioParseResult

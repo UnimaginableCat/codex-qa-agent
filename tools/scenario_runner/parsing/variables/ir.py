@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from tools.scenario_runner.models import ScenarioVariableDefinition
+from tools.scenario_runner.domain.models import ScenarioVariableDefinition
 
 
 def empty_variable_definitions() -> list[ScenarioVariableDefinition]:

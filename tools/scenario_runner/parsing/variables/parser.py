@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tools.scenario_runner.models import ScenarioVariableDefinition
+from tools.scenario_runner.domain.models import ScenarioVariableDefinition
 
 from ..contracts.errors import ScenarioParseError
 from .ir import VariableParseResult

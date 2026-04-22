@@ -11,7 +11,7 @@ from uuid import uuid4
 from tools.common.errors import EnvFileLoadError, ValidationError
 
 from .interpolator import PLACEHOLDER_PATTERN, PlaceholderInterpolator, UnresolvedPlaceholderError
-from .models import RunContext, ScenarioDefinition, ScenarioVariableDefinition, ScenarioVariableSource
+from ..domain.models import RunContext, ScenarioDefinition, ScenarioVariableDefinition, ScenarioVariableSource
 
 
 _GENERATED_TEMPLATE_FALLBACKS = {
@@ -383,6 +383,8 @@ def _resolve_runtime_variable(
 
 
 def _resolve_known_runtime_name(name: str, run_context: RunContext, resolved: dict[str, Any]) -> Any | None:
+    if not is_known_runtime_variable_name(name):
+        return resolved.get(name)
     normalized_name = name.strip().lower()
     if normalized_name == "run_id" or normalized_name.endswith("_run_id"):
         return run_context.run_id
@@ -397,6 +399,22 @@ def _resolve_known_runtime_name(name: str, run_context: RunContext, resolved: di
     ):
         return str(uuid4())
     return resolved.get(name)
+
+
+def is_known_runtime_variable_name(name: str) -> bool:
+    normalized_name = name.strip().lower()
+    return any(
+        (
+            normalized_name == "run_id",
+            normalized_name.endswith("_run_id"),
+            normalized_name == "run_suffix",
+            normalized_name.endswith("_suffix"),
+            normalized_name in {"timestamp", "generated_timestamp", "current_timestamp", "timestamp_suffix"},
+            normalized_name == "uuid",
+            normalized_name == "missing_user_id",
+            normalized_name.startswith("missing_") and normalized_name.endswith("_id"),
+        )
+    )
 
 
 def _runtime_name(definition: ScenarioVariableDefinition) -> str:

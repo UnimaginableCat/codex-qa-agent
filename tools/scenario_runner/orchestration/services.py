@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tools.common.statuses import StepStatus
 
-from .artifacts import (
+from ..persistence.artifacts import (
     create_report_path,
     write_bundle_compiled_plan_json,
     write_compiled_plan_json,
@@ -16,7 +16,7 @@ from .artifacts import (
 )
 from .context import initialize_run_context
 from .engine import ScenarioExecutionEngine, ScenarioExecutionSession
-from .execution import (
+from ..domain.execution import (
     ExecutionEvent,
     ExecutionIssue,
     ExecutionIssueKind,
@@ -24,8 +24,8 @@ from .execution import (
     ExecutionPhase,
     ScenarioRunLifecycleState,
 )
-from .models import ScenarioDefinition, ScenarioExecutionSummary
-from .summary import build_scenario_summary
+from ..domain.models import ScenarioDefinition, ScenarioExecutionSummary
+from ..projections.summary import build_scenario_summary
 
 
 class ScenarioRunnerService:
@@ -215,6 +215,8 @@ class ScenarioRunnerService:
             scenario_definition,
             report_path=report_path,
             extra_tooling_issues=session.tooling_issues,
+            compile_statuses=session.compile_outcomes,
+            compile_checks=[check.to_dict() for check in session.compile_checks],
             finalization_statuses=finalization_outcomes,
             preflight_statuses=session.preflight_outcomes,
             preflight_checks=[check.to_dict() for check in session.preflight_checks],

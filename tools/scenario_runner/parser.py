@@ -6,7 +6,7 @@ from hashlib import sha1
 import re
 from pathlib import Path
 
-from .models import ScenarioDefinition, ScenarioVariableDefinition
+from .domain.models import ScenarioDefinition, ScenarioVariableDefinition
 from .parsing.contracts.errors import ScenarioParseError as _ScenarioParseError
 from .parsing.contracts.interfaces import ScenarioParseOptions
 from .parsing.contracts.result import ScenarioParseResult

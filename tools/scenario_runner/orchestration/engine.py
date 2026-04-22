@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 
 from tools.common.statuses import StepStatus
 
-from .execution import (
+from .compiler import CompileCheckResult, CompiledScenario, ScenarioCompiler
+from ..domain.execution import (
     ExecutionEvent,
     ExecutionIssue,
     ExecutionIssueKind,
@@ -18,12 +19,12 @@ from .execution import (
     StepExecutionState,
     StepReference,
 )
-from .executors import StepExecutionOutcome, StepExecutorFactory
-from .models import RunContext, ScenarioDefinition, ScenarioStep, StepExecutionResult
+from ..runtime.executors import StepExecutionOutcome, StepExecutorFactory
+from ..domain.models import RunContext, ScenarioDefinition, ScenarioStep, StepExecutionResult
 from .preflight import PreflightCheckResult, PreflightResult, ScenarioPreflightChecker
-from .summary import resolve_final_status
-from .validators import ExpectationValidationError, ScenarioStepValidator
-from .variables import VariableResolutionError, build_initial_variables, resolve_step_variables
+from ..projections.summary import resolve_final_status
+from ..runtime.validators import ExpectationValidationError, ScenarioStepValidator
+from ..runtime.variables import VariableResolutionError, build_initial_variables, resolve_step_variables
 
 
 @dataclass(slots=True)
@@ -31,6 +32,8 @@ class ScenarioExecutionSession:
     run_context: RunContext
     run_state: ScenarioRunState
     tooling_issues: list[ExecutionIssue] = field(default_factory=list)
+    compile_outcomes: list[ExecutionOutcome] = field(default_factory=list)
+    compile_checks: list[CompileCheckResult] = field(default_factory=list)
     preflight_outcomes: list[ExecutionOutcome] = field(default_factory=list)
     preflight_checks: list[PreflightCheckResult] = field(default_factory=list)
     execution_events: list[ExecutionEvent] = field(default_factory=list)
@@ -54,10 +57,12 @@ class ScenarioExecutionEngine:
         step_executor_factory: StepExecutorFactory | None = None,
         step_validator: ScenarioStepValidator | None = None,
         preflight_checker: ScenarioPreflightChecker | None = None,
+        compiler: ScenarioCompiler | None = None,
     ) -> None:
         self._step_executor_factory = step_executor_factory or StepExecutorFactory()
         self._step_validator = step_validator or ScenarioStepValidator()
         self._preflight_checker = preflight_checker or ScenarioPreflightChecker()
+        self._compiler = compiler or ScenarioCompiler(step_validator=self._step_validator)
 
     def create_session(
         self,
@@ -90,25 +95,75 @@ class ScenarioExecutionEngine:
         session: ScenarioExecutionSession,
         scenario_definition: ScenarioDefinition,
     ) -> ScenarioExecutionSession:
-        if not self._run_preflight(session, scenario_definition):
+        compiled_scenario = self._compile_scenario(session, scenario_definition)
+        if compiled_scenario is None:
             self._set_terminal_execution_outcome(session, scenario_definition)
             return session
 
-        if not self._build_initial_context(session, scenario_definition):
+        if not self._run_preflight(session, compiled_scenario):
             self._set_terminal_execution_outcome(session, scenario_definition)
             return session
 
-        self._execute_steps(session, scenario_definition)
+        if not self._build_initial_context(session, compiled_scenario.scenario_definition):
+            self._set_terminal_execution_outcome(session, scenario_definition)
+            return session
+
+        self._execute_steps(session, compiled_scenario.scenario_definition)
         self._set_terminal_execution_outcome(session, scenario_definition)
         return session
+
+    def _compile_scenario(
+        self,
+        session: ScenarioExecutionSession,
+        scenario_definition: ScenarioDefinition,
+    ) -> CompiledScenario | None:
+        session.run_state.transition_to(ScenarioRunLifecycleState.COMPILING)
+        compiled_scenario = self._compiler.compile(scenario_definition)
+        session.compile_checks = compiled_scenario.compile_result.checks
+        compile_outcome = ExecutionOutcome.from_status(
+            compiled_scenario.compile_result.status,
+            f"Scenario compilation completed with status {compiled_scenario.compile_result.status.value}.",
+            phase=ExecutionPhase.COMPILATION,
+            details={
+                "required_external_inputs": [
+                    item.to_dict() for item in compiled_scenario.compile_result.required_external_inputs
+                ]
+            },
+        )
+        session.append_event(
+            ExecutionEvent.create(
+                event_type="compilation_completed",
+                run_state=session.run_state,
+                phase=ExecutionPhase.COMPILATION,
+                outcome=compile_outcome,
+                issue=(
+                    compiled_scenario.compile_result.issues[0]
+                    if compiled_scenario.compile_result.issues
+                    else None
+                ),
+                payload={
+                    "checks": [check.to_dict() for check in session.compile_checks],
+                    "required_external_inputs": [
+                        item.to_dict() for item in compiled_scenario.compile_result.required_external_inputs
+                    ],
+                },
+            )
+        )
+        session.compile_outcomes.append(compile_outcome)
+        if compiled_scenario.compile_result.passed:
+            return compiled_scenario
+
+        for issue in compiled_scenario.compile_result.issues:
+            session.add_issue(issue)
+        return None
 
     def _run_preflight(
         self,
         session: ScenarioExecutionSession,
-        scenario_definition: ScenarioDefinition,
+        compiled_scenario: CompiledScenario,
     ) -> bool:
         session.run_state.transition_to(ScenarioRunLifecycleState.PREFLIGHT_RUNNING)
-        preflight_result = self._preflight_checker.run(scenario_definition, session.run_context.workspace_root)
+        preflight_result = self._preflight_checker.run(compiled_scenario, session.run_context.workspace_root)
         session.preflight_checks = preflight_result.checks
         session.append_event(
             ExecutionEvent.create(
@@ -420,14 +475,18 @@ class ScenarioExecutionEngine:
         session: ScenarioExecutionSession,
         scenario_definition: ScenarioDefinition,
     ) -> None:
+        compile_failed = any(outcome.status != StepStatus.PASS for outcome in session.compile_outcomes)
         final_status = resolve_final_status(
             [step_result.status for step_result in session.run_context.step_results]
+            + [outcome.status for outcome in session.compile_outcomes]
             + [outcome.status for outcome in session.preflight_outcomes]
         )
         executed_step_count = len(session.run_context.step_results)
         total_step_count = len(scenario_definition.steps)
 
-        if session.preflight_outcomes and final_status != StepStatus.PASS:
+        if compile_failed:
+            message = f"Scenario compilation failed with status {final_status.value}."
+        elif session.preflight_outcomes and final_status != StepStatus.PASS:
             message = f"Scenario preflight failed with status {final_status.value}."
         elif not session.run_context.step_results:
             message = "Scenario run initialized. Scenario execution is not implemented yet."
@@ -458,6 +517,10 @@ class ScenarioExecutionEngine:
                 except ValueError:
                     pass
             return ExecutionPhase.STEP_EXECUTION
+        if session.preflight_checks:
+            return ExecutionPhase.PREFLIGHT
+        if session.compile_checks:
+            return ExecutionPhase.COMPILATION
         return ExecutionPhase.PREFLIGHT
 
     @staticmethod
@@ -466,6 +529,9 @@ class ScenarioExecutionEngine:
         errors = check.details.get("errors")
         if isinstance(errors, list) and errors:
             message = f"{message} {'; '.join(str(error) for error in errors)}"
+        missing_variables = check.details.get("missing_variables")
+        if isinstance(missing_variables, list) and missing_variables:
+            message = f"{message} Missing variables: {', '.join(str(item) for item in missing_variables)}."
         return ExecutionIssue(
             code=f"preflight_{check.name}",
             message=message,
@@ -660,7 +726,7 @@ class ScenarioExecutionEngine:
 
     @staticmethod
     def _step_placeholder_names(step: ScenarioStep) -> set[str]:
-        from .variables import _collect_placeholder_names
+        from ..runtime.variables import _collect_placeholder_names
 
         names: set[str] = set()
         if step.api is not None:

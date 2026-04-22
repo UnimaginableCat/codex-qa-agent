@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from tools.common.statuses import StepStatus
 
-from .execution import ExecutionIssue, ExecutionOutcome, coerce_terminal_status, issue_messages
-from .models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
+from ..domain.execution import ExecutionIssue, ExecutionOutcome, coerce_terminal_status, issue_messages
+from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
 
 
 _STATUS_PRIORITY = {
@@ -22,6 +22,8 @@ def build_scenario_summary(
     scenario_definition: ScenarioDefinition,
     report_path=None,
     extra_tooling_issues: list[str | ExecutionIssue] | None = None,
+    compile_statuses: list[StepStatus | ExecutionOutcome] | None = None,
+    compile_checks: list[dict] | None = None,
     finalization_statuses: list[StepStatus | ExecutionOutcome] | None = None,
     preflight_statuses: list[StepStatus | ExecutionOutcome] | None = None,
     preflight_checks: list[dict] | None = None,
@@ -29,8 +31,10 @@ def build_scenario_summary(
     step_results = list(run_context.step_results)
     parse_warnings = [str(item) for item in scenario_definition.metadata.get("parse_warnings", [])]
     warnings = parse_warnings + _tooling_messages(extra_tooling_issues or [])
+    compile_failed = any(coerce_terminal_status(status) != StepStatus.PASS for status in compile_statuses or [])
     final_status = resolve_final_status(
         [step_result.status for step_result in step_results]
+        + [coerce_terminal_status(status) for status in compile_statuses or []]
         + [coerce_terminal_status(status) for status in preflight_statuses or []]
         + [coerce_terminal_status(status) for status in finalization_statuses or []]
     )
@@ -39,6 +43,8 @@ def build_scenario_summary(
 
     if finalization_statuses and final_status == StepStatus.ERROR:
         message = "Scenario finalization failed with status ERROR."
+    elif compile_failed:
+        message = f"Scenario compilation failed with status {final_status.value}."
     elif preflight_statuses and final_status != StepStatus.PASS:
         message = f"Scenario preflight failed with status {final_status.value}."
     elif not step_results:
@@ -85,6 +91,8 @@ def build_scenario_summary(
             "bundle_compiled_plan_path": run_context.artifact_dir / "compiled-plan.json",
             "step_count": total_step_count,
             "executed_step_count": executed_step_count,
+            "compile_statuses": [coerce_terminal_status(status).value for status in compile_statuses or []],
+            "compile_checks": compile_checks or [],
             "preflight_statuses": [coerce_terminal_status(status).value for status in preflight_statuses or []],
             "preflight_checks": preflight_checks or [],
             "finalization_statuses": [coerce_terminal_status(status).value for status in finalization_statuses or []],

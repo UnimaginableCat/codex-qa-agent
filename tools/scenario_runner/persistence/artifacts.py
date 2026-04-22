@@ -10,9 +10,9 @@ from typing import Any
 from tools.common.errors import ToolingError
 from tools.common.io import write_text_file
 
-from .execution import ExecutionEvent
-from .models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
-from .redaction import redact_sensitive_data
+from ..domain.execution import ExecutionEvent
+from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
+from ..runtime.redaction import redact_sensitive_data
 
 PARSED_PLANS_DIRNAME = Path(".codex-qa/parsed-plans")
 RUNS_DIRNAME = Path(".codex-qa/runs")

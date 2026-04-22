@@ -14,9 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
 from tools.scenario_runner.cli import main as cli_main
-from tools.scenario_runner.artifacts import write_context_json, write_summary_json
-from tools.scenario_runner.executors import StepExecutionOutcome
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     RunContext,
     ScenarioDefinition,
@@ -25,8 +23,10 @@ from tools.scenario_runner.models import (
     ScenarioStepType,
     StepExecutionResult,
 )
-from tools.scenario_runner.preflight import PreflightCheckResult, PreflightResult
-from tools.scenario_runner.services import ScenarioRunnerService
+from tools.scenario_runner.orchestration.preflight import PreflightCheckResult, PreflightResult
+from tools.scenario_runner.orchestration.services import ScenarioRunnerService
+from tools.scenario_runner.persistence.artifacts import write_context_json, write_summary_json
+from tools.scenario_runner.runtime.executors import StepExecutionOutcome
 
 
 class ScenarioRunnerFinalizationTests(unittest.TestCase):
@@ -85,7 +85,7 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
                 preflight_checker=_PassingPreflightChecker(),
             )
 
-            with patch("tools.scenario_runner.services.write_summary_json", side_effect=OSError("summary denied")):
+            with patch("tools.scenario_runner.orchestration.services.write_summary_json", side_effect=OSError("summary denied")):
                 summary = service.run(self._scenario(Path(tmp), with_step=True), workspace_root=Path(tmp))
 
         self.assertEqual(summary.final_status, StepStatus.ERROR)
@@ -121,7 +121,7 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
             output = io.StringIO()
             try:
                 os.chdir(root)
-                with patch("tools.scenario_runner.preflight.importlib.util.find_spec", return_value=object()):
+                with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
                     with redirect_stdout(output):
                         exit_code = cli_main(["--scenario", str(scenario_path)])
             finally:

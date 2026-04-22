@@ -8,19 +8,19 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
-from tools.scenario_runner.context import initialize_run_context
-from tools.scenario_runner.engine import ScenarioExecutionEngine
-from tools.scenario_runner.executors import StepExecutionOutcome
-from tools.scenario_runner.execution import ExecutionPhase
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.execution import ExecutionPhase
+from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     ScenarioDefinition,
     ScenarioStep,
     ScenarioStepType,
     StepExecutionResult,
 )
-from tools.scenario_runner.preflight import PreflightCheckResult, PreflightResult
-from tools.scenario_runner.services import ScenarioRunnerService
+from tools.scenario_runner.orchestration.context import initialize_run_context
+from tools.scenario_runner.orchestration.engine import ScenarioExecutionEngine
+from tools.scenario_runner.orchestration.preflight import PreflightCheckResult, PreflightResult
+from tools.scenario_runner.orchestration.services import ScenarioRunnerService
+from tools.scenario_runner.runtime.executors import StepExecutionOutcome
 
 
 class ScenarioExecutionEngineTests(unittest.TestCase):
@@ -41,7 +41,8 @@ class ScenarioExecutionEngineTests(unittest.TestCase):
         self.assertEqual(session.run_state.final_outcome.status, StepStatus.BLOCKED)
         self.assertEqual(session.run_context.step_results, [])
         self.assertEqual(session.preflight_checks[0].status, StepStatus.BLOCKED)
-        self.assertEqual(session.execution_events[1].phase, ExecutionPhase.PREFLIGHT)
+        self.assertEqual(session.execution_events[1].phase, ExecutionPhase.COMPILATION)
+        self.assertEqual(session.execution_events[2].phase, ExecutionPhase.PREFLIGHT)
 
     def test_engine_stops_after_non_pass_step_and_adds_deferred_blocked_result(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -75,7 +76,13 @@ class ScenarioExecutionEngineTests(unittest.TestCase):
         self.assertEqual(session.run_state.final_outcome.status, StepStatus.BLOCKED)
         self.assertEqual(
             [event.event_type for event in session.execution_events],
-            ["run_initialized", "preflight_completed", "initial_context_built", "step_completed"],
+            [
+                "run_initialized",
+                "compilation_completed",
+                "preflight_completed",
+                "initial_context_built",
+                "step_completed",
+            ],
         )
 
     def test_service_uses_injected_engine(self) -> None:

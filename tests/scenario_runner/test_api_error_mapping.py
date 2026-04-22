@@ -12,17 +12,17 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
-from tools.scenario_runner.executors import ApiStepExecutor
-from tools.scenario_runner.interpolator import PlaceholderInterpolator
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     RunContext,
     ScenarioDefinition,
     ScenarioStep,
     ScenarioStepType,
 )
-from tools.scenario_runner.preflight import PreflightCheckResult, PreflightResult
-from tools.scenario_runner.services import ScenarioRunnerService
+from tools.scenario_runner.orchestration.preflight import PreflightCheckResult, PreflightResult
+from tools.scenario_runner.orchestration.services import ScenarioRunnerService
+from tools.scenario_runner.runtime.executors import ApiStepExecutor
+from tools.scenario_runner.runtime.interpolator import PlaceholderInterpolator
 
 
 class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
@@ -75,7 +75,7 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
                     "SSL_CERT_FILE": "/tmp/ssl.pem",
                 },
             ):
-                with patch("tools.scenario_runner.executors.subprocess.run", side_effect=fake_run):
+                with patch("tools.scenario_runner.runtime.executors.subprocess.run", side_effect=fake_run):
                     result = executor.invoke_cli_for_test(root / "env" / "demo.env", root / "step.json")
 
         self.assertEqual(captured["command"][0], sys.executable)
@@ -109,7 +109,7 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
                     "HTTPS_PROXY": "https://user:secret@proxy.local:8443",
                 },
             ):
-                with patch("tools.scenario_runner.executors.subprocess.run", side_effect=fake_run):
+                with patch("tools.scenario_runner.runtime.executors.subprocess.run", side_effect=fake_run):
                     result = executor.invoke_cli_for_test(root / "env" / "demo.env", root / "step.json")
 
         self.assertEqual(result["debug"]["HTTP_PROXY"], "http://<redacted>@proxy.local:8080")
@@ -155,7 +155,7 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
                     stderr="",
                 )
 
-            with patch("tools.scenario_runner.executors.subprocess.run", side_effect=fake_run):
+            with patch("tools.scenario_runner.runtime.executors.subprocess.run", side_effect=fake_run):
                 outcome = executor.execute(run_context, scenario, scenario.steps[0])
 
         self.assertEqual(outcome.step_result.status, StepStatus.PASS)

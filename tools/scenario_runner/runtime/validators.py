@@ -12,7 +12,7 @@ from tools.common.errors import ValidationError
 from tools.common.statuses import StepStatus
 
 from .interpolator import EXACT_PLACEHOLDER_PATTERN, InterpolationError, PlaceholderInterpolator
-from .models import ExpectationCheckResult, ScenarioStep, ScenarioStepType
+from ..domain.models import ExpectationCheckResult, ScenarioStep, ScenarioStepType
 from .path_lookup import PathLookupResult as _PathLookupResult
 from .path_lookup import resolve_path
 
@@ -46,6 +46,14 @@ class _ComparisonRule:
     left: str
     operator: str
     right: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectationContractDiagnostic:
+    rule: str
+    step_type: ScenarioStepType
+    supported: bool
+    detail: str
 
 
 class ExpectationValidationError(ValidationError):
@@ -95,6 +103,15 @@ class ScenarioStepValidator:
                 for index, expectation in enumerate(expectations)
             ]
         return [self._validate_db_expectation(expectation, tool_payload) for expectation in expectations]
+
+    def inspect_contract(self, step: ScenarioStep) -> list[ExpectationContractDiagnostic]:
+        diagnostics: list[ExpectationContractDiagnostic] = []
+        for expectation in self._expectations(step):
+            if step.step_type == ScenarioStepType.API:
+                diagnostics.append(self._inspect_api_expectation_contract(expectation))
+            else:
+                diagnostics.append(self._inspect_db_expectation_contract(expectation))
+        return diagnostics
 
     @staticmethod
     def final_status(expectation_results: list[ExpectationCheckResult]) -> StepStatus:
@@ -299,6 +316,59 @@ class ScenarioStepValidator:
             return self._unsupported_result(expectation, "DB")
 
         return self._unsupported_result(expectation, "DB")
+
+    def _inspect_api_expectation_contract(self, expectation: str) -> ExpectationContractDiagnostic:
+        normalized_expectation = self._normalize_keyword(expectation)
+        supported = any(
+            (
+                _HTTP_EXPECTATION_RE.fullmatch(expectation),
+                normalized_expectation == "response json exists",
+                normalized_expectation == "response json is an array",
+                _RESPONSE_CONTAINS_FIELD_RE.fullmatch(expectation),
+                _RESPONSE_LENGTH_RE.fullmatch(expectation),
+                _RESPONSE_NOT_NULL_RE.fullmatch(expectation),
+                _ARRAY_CONTAINS_RE.fullmatch(expectation),
+                (
+                    (_RESPONSE_VALUE_RE.fullmatch(expectation) is not None)
+                    and (
+                        self._split_comparison_rule(_RESPONSE_VALUE_RE.fullmatch(expectation).group(1)) is not None
+                    )
+                ),
+            )
+        )
+        return ExpectationContractDiagnostic(
+            rule=expectation,
+            step_type=ScenarioStepType.API,
+            supported=supported,
+            detail=(
+                f"Unsupported expectation rule: {expectation} (API)."
+                if not supported
+                else "Expectation syntax is supported."
+            ),
+        )
+
+    def _inspect_db_expectation_contract(self, expectation: str) -> ExpectationContractDiagnostic:
+        normalized_rule = self._normalize_db_expectation_rule(expectation)
+        normalized_expectation = self._normalize_keyword(normalized_rule)
+        supported = any(
+            (
+                normalized_expectation == "one row exists",
+                _DB_IS_NULL_RE.fullmatch(normalized_rule),
+                _DB_IS_NOT_NULL_RE.fullmatch(normalized_rule),
+                _DB_STARTS_WITH_RE.fullmatch(normalized_rule),
+                self._split_comparison_rule(normalized_rule) is not None,
+            )
+        )
+        return ExpectationContractDiagnostic(
+            rule=expectation,
+            step_type=ScenarioStepType.DB,
+            supported=supported,
+            detail=(
+                f"Unsupported expectation rule: {expectation} (DB)."
+                if not supported
+                else "Expectation syntax is supported."
+            ),
+        )
 
     @staticmethod
     def _expectations(step: ScenarioStep) -> list[str]:

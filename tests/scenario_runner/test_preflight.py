@@ -9,8 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
-from tools.scenario_runner.executors import StepExecutionOutcome
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.models import (
     ApiStepDefinition,
     DbStepDefinition,
     ScenarioDefinition,
@@ -18,7 +17,8 @@ from tools.scenario_runner.models import (
     ScenarioStepType,
     StepExecutionResult,
 )
-from tools.scenario_runner.services import ScenarioRunnerService
+from tools.scenario_runner.orchestration.services import ScenarioRunnerService
+from tools.scenario_runner.runtime.executors import StepExecutionOutcome
 
 
 class ScenarioRunnerPreflightTests(unittest.TestCase):
@@ -139,8 +139,11 @@ class ScenarioRunnerPreflightTests(unittest.TestCase):
 
         self.assertEqual(summary.final_status, StepStatus.BLOCKED)
         self.assertEqual(executor.execute_count, 0)
-        self.assertTrue(any("variables_section_valid" in issue for issue in summary.tooling_issues))
+        self.assertEqual(summary.message, "Scenario compilation failed with status BLOCKED.")
+        self.assertTrue(any("compile_variables_section_invalid" in issue for issue in summary.tooling_issues))
         self.assertTrue(any("email_suffix" in issue for issue in summary.tooling_issues))
+        self.assertEqual(summary.details["compile_statuses"], [StepStatus.BLOCKED.value])
+        self.assertTrue(summary.details["compile_checks"])
 
     @staticmethod
     def _scenario(root: Path, step_type: ScenarioStepType) -> ScenarioDefinition:
@@ -195,14 +198,14 @@ class ScenarioRunnerPreflightTests(unittest.TestCase):
 
     @staticmethod
     def _dependencies_available():
-        return patch("tools.scenario_runner.preflight.importlib.util.find_spec", return_value=object())
+        return patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object())
 
     @staticmethod
     def _missing_dependency(module_name: str):
         def fake_find_spec(candidate: str):
             return None if candidate == module_name else object()
 
-        return patch("tools.scenario_runner.preflight.importlib.util.find_spec", side_effect=fake_find_spec)
+        return patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", side_effect=fake_find_spec)
 
 
 class _CountingStepExecutorFactory:

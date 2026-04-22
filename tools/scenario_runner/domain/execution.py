@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 class ExecutionPhase(StrEnum):
     RUN_INITIALIZATION = "run_initialization"
+    COMPILATION = "compilation"
     PREFLIGHT = "preflight"
     INITIAL_CONTEXT = "initial_context"
     STEP_VARIABLE_RESOLUTION = "step_variable_resolution"
@@ -34,6 +35,7 @@ class ExecutionPhase(StrEnum):
 class ScenarioRunLifecycleState(StrEnum):
     CREATED = "created"
     INITIALIZING = "initializing"
+    COMPILING = "compiling"
     PREFLIGHT_RUNNING = "preflight_running"
     READY = "ready"
     STEP_RUNNING = "step_running"

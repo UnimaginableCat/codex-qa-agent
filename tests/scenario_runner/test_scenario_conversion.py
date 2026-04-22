@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.scenario_runner.models import (
+from tools.scenario_runner.domain.models import (
     ScenarioDefinition,
     ScenarioStepType,
     ScenarioVariableDefinition,

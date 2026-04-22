@@ -9,7 +9,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
-from tools.scenario_runner.execution import (
+from tools.scenario_runner.domain.execution import (
     ExecutionEvent,
     ExecutionIssue,
     ExecutionIssueKind,
@@ -21,10 +21,16 @@ from tools.scenario_runner.execution import (
     StepExecutionState,
     StepReference,
 )
-from tools.scenario_runner.executors import StepExecutionOutcome
-from tools.scenario_runner.models import ApiStepDefinition, ScenarioDefinition, ScenarioStep, ScenarioStepType, StepExecutionResult
-from tools.scenario_runner.preflight import PreflightCheckResult, PreflightResult
-from tools.scenario_runner.services import ScenarioRunnerService
+from tools.scenario_runner.domain.models import (
+    ApiStepDefinition,
+    ScenarioDefinition,
+    ScenarioStep,
+    ScenarioStepType,
+    StepExecutionResult,
+)
+from tools.scenario_runner.orchestration.preflight import PreflightCheckResult, PreflightResult
+from tools.scenario_runner.orchestration.services import ScenarioRunnerService
+from tools.scenario_runner.runtime.executors import StepExecutionOutcome
 
 
 class ExecutionModelTests(unittest.TestCase):

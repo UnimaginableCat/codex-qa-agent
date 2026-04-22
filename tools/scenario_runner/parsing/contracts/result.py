@@ -7,7 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TypeAlias
 
-from tools.scenario_runner.models import ScenarioDefinition
+from tools.scenario_runner.domain.models import ScenarioDefinition
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
