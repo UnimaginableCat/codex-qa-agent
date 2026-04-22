@@ -2,7 +2,7 @@
 
 ## Python Selection
 
-The runner requires Python 3.14+.
+The runner must be executed through the project/workspace venv. The venv must satisfy Python 3.14+.
 
 Resolution order:
 
@@ -12,16 +12,17 @@ Resolution order:
    - `.venv/Scripts/python.exe`
    - `venv/Scripts/python.exe`
 2. Verify interpreter version before using it.
-3. Use the local venv only if it satisfies Python 3.14+.
-4. If local venv is older, use a compatible system launcher such as `py` on Windows and report that choice.
+3. Use the local venv only if it satisfies Python 3.14+ and has required dependencies.
+4. If the local venv is missing, older than Python 3.14, or lacks dependencies, stop and report environment/tooling `BLOCKED`.
+5. Use system `python` or `py` only if the user explicitly authorizes a non-venv fallback for this run.
 
-Do not report an unsupported interpreter failure as product behavior.
+Do not report an unsupported venv/interpreter failure as product behavior.
 
 ## Dependency/Preflight Interpretation
 
 If runner preflight reports missing Python dependencies, classify the scenario as environment/tooling blocked in that execution context. Do not diagnose the target product from that result.
 
-If both a compatible interpreter and required dependencies are unavailable, report that a valid runner environment must be prepared before scenario execution can be meaningful.
+If the project venv is not runnable, report that a valid runner venv must be prepared before scenario execution can be meaningful.
 
 ## Network Checks
 

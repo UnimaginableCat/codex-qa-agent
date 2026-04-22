@@ -18,22 +18,24 @@ Prefer `scenario_runner` over manual API/DB replay when a valid scenario file ex
 
 # Core Commands
 
-Use a Python 3.14+ interpreter. In this workspace, `.venv` may be older than the runner guard; verify version before using it.
+Use the project/workspace venv interpreter for runner execution. Verify that the venv exists and satisfies Python 3.14+ before running the CLI.
 
 - Auto run: `python -m tools.scenario_runner.cli --scenario <scenario.md>`
 - Guided run: `python -m tools.scenario_runner.cli --scenario <scenario.md> --mode guided`
 - Inspect pause: `python -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
 - Resume: `python -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
 
-On Windows, `py -m tools.scenario_runner.cli ...` is acceptable when `py` resolves to Python 3.14+ and the local venv does not.
+Do not silently fall back to system `python` or `py`. If the project venv is missing, too old, or lacks dependencies, report the run as environment/tooling `BLOCKED` unless the user explicitly authorizes a non-venv fallback.
 
 # Default Guided Request
 
 When the user asks to run a scenario without specifying mode, treat this as the preferred guided workflow:
 
+Also apply this mandatory environment rule: use the project/workspace venv for the runner; if the venv cannot run the CLI, stop as environment/tooling `BLOCKED` instead of switching interpreters.
+
 ```text
 Выполни scenario через runner-execution в guided mode: scenarios/<path>.md.
-Используй scenario_runner CLI, проверь Python 3.14+ interpreter, запусти --mode guided.
+Используй scenario_runner CLI строго через venv проекта, проверь Python 3.14+ interpreter в этом venv, запусти --mode guided.
 Если run остановится на pause/decision point, покажи operator_state, available_actions и pause_state_path, но не выбирай action без моего подтверждения.
 После моего выбора продолжи через --resume <pause-state.json> --action <action_id>.
 В финале дай status, continuation/termination, summary/report paths и ключевые blockers/failures.
@@ -43,7 +45,7 @@ When the user asks to run a scenario without specifying mode, treat this as the 
 
 1. Read `AGENTS.md` and the target scenario.
 2. Identify the target project under `code/` and the declared env file.
-3. Resolve a Python 3.14+ runner interpreter.
+3. Resolve the project/workspace venv interpreter and verify Python 3.14+.
 4. Use auto mode unless the user asks for guided/manual flow or pause/resume handling.
 5. Execute the runner CLI and parse its JSON output.
 6. Inspect at least `.codex-qa/runs/<run-id>/summary.json` and `artifacts/agent/<scenario-slug>-<run-id>/report.md`.

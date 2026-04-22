@@ -7,7 +7,7 @@
 - Inspect pause: `python -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
 - Resume: `python -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
 
-Use `py -m ...` on Windows only when `py` resolves to Python 3.14+ and the local venv does not.
+Run these commands through the project/workspace venv interpreter. Do not use system `python` or `py` unless the user explicitly authorizes a non-venv fallback.
 
 ## Auto Output
 
