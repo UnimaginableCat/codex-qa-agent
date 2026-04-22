@@ -5,16 +5,8 @@ from __future__ import annotations
 from hashlib import sha1
 import re
 from pathlib import Path
-from typing import Any
 
-from .models import (
-    ApiStepDefinition,
-    DbStepDefinition,
-    ScenarioDefinition,
-    ScenarioStep,
-    ScenarioStepType,
-    ScenarioVariableDefinition,
-)
+from .models import ScenarioDefinition, ScenarioVariableDefinition
 from .parsing.contracts.errors import ScenarioParseError as _ScenarioParseError
 from .parsing.contracts.interfaces import ScenarioParseOptions
 from .parsing.contracts.result import (
@@ -27,6 +19,12 @@ from .parsing.contracts.result import (
 from .parsing.markdown.document import (
     MarkdownSection,
     parse_markdown_document_from_backend,
+)
+from .parsing.scenario_assembly import (
+    ScenarioAssemblyInput,
+    assemble_scenario_definition,
+    parse_section_bullets,
+    parse_section_text,
 )
 from .parsing.source.loader import load_scenario_source
 from .parsing.steps.blocks import split_step_blocks
@@ -63,21 +61,22 @@ class MarkdownScenarioParser:
         document = parse_markdown_document_from_backend(source, error_type=ScenarioParseError)
         resolved_scenario_path = document.source.path
 
-        warnings: list[str] = []
-        variable_warnings: list[str] = []
-        variable_errors: list[str] = []
-        scenario_definition = ScenarioDefinition(
+        assembly_input = ScenarioAssemblyInput(
             scenario_path=resolved_scenario_path,
             scenario_slug=self._build_scenario_slug(document.title, resolved_scenario_path),
             scenario_name=document.title,
+            source_format=self.source_format,
         )
+        warnings: list[str] = []
+        variable_warnings: list[str] = []
+        variable_errors: list[str] = []
 
         normalized_section_names = {section.name.lower() for section in document.sections}
         for section in document.sections:
             normalized_name = section.name.lower()
             if normalized_name == "steps":
-                step_definitions, step_warnings = self._parse_steps(section, resolved_scenario_path)
-                scenario_definition.steps = step_definitions
+                step_drafts, step_warnings = self._parse_steps(section, resolved_scenario_path)
+                assembly_input.step_drafts = step_drafts
                 warnings.extend(step_warnings)
                 continue
 
@@ -85,44 +84,37 @@ class MarkdownScenarioParser:
                 variable_definitions, section_variable_warnings, section_variable_errors = self._parse_variables(
                     section.lines
                 )
-                scenario_definition.variables = variable_definitions
+                assembly_input.variables = variable_definitions
                 variable_warnings.extend(section_variable_warnings)
                 variable_errors.extend(section_variable_errors)
                 warnings.extend(section_variable_warnings)
                 continue
 
             if normalized_name in self._simple_sections:
-                setattr(
-                    scenario_definition,
-                    self._simple_sections[normalized_name],
-                    self._parse_text(section.lines),
-                )
+                setattr(assembly_input, self._simple_sections[normalized_name], parse_section_text(section.lines))
                 continue
 
             if normalized_name in self._list_sections:
                 setattr(
-                    scenario_definition,
+                    assembly_input,
                     self._list_sections[normalized_name],
-                    self._parse_bullets(section.lines),
+                    parse_section_bullets(section.lines),
                 )
                 continue
 
             warnings.append(f"Unknown scenario section '{section.name}' was ignored.")
 
-        if not scenario_definition.project:
+        if not assembly_input.project:
             warnings.append("Section '## Project' is missing or empty.")
-        if not scenario_definition.environment:
+        if not assembly_input.environment:
             warnings.append("Section '## Environment' is missing or empty.")
         if "steps" not in normalized_section_names:
             warnings.append("Section '## Steps' is missing.")
 
-        scenario_definition.metadata = {
-            "parse_warnings": warnings,
-            "variables_parse_warnings": variable_warnings,
-            "variables_validation_errors": variable_errors,
-            "source_format": "markdown",
-        }
-        return scenario_definition
+        assembly_input.parse_warnings = warnings
+        assembly_input.variables_parse_warnings = variable_warnings
+        assembly_input.variables_validation_errors = variable_errors
+        return assemble_scenario_definition(assembly_input, error_type=ScenarioParseError)
 
     def parse_result(
         self,
@@ -188,13 +180,13 @@ class MarkdownScenarioParser:
         self,
         section: MarkdownSection,
         scenario_path: Path,
-    ) -> tuple[list[ScenarioStep], list[str]]:
+    ) -> tuple[list[ParsedStepDraft], list[str]]:
         step_blocks, warnings = split_step_blocks(section, scenario_path)
-        steps = [
-            self._build_step(parse_step_block(block, error_type=ScenarioParseError))
+        step_drafts = [
+            parse_step_block(block, error_type=ScenarioParseError)
             for block in step_blocks
         ]
-        return steps, warnings
+        return step_drafts, warnings
 
     def _parse_variables(
         self,
@@ -202,137 +194,6 @@ class MarkdownScenarioParser:
     ) -> tuple[list[ScenarioVariableDefinition], list[str], list[str]]:
         result = parse_variables_section(lines, error_type=ScenarioParseError)
         return result.definitions, result.warnings, result.errors
-
-    def _build_step(self, draft: ParsedStepDraft) -> ScenarioStep:
-        raw_type = str(draft.fields.get("type", "")).strip().lower()
-        if not raw_type:
-            raise ScenarioParseError(f"Step {draft.step_number} is malformed: missing 'Type:'.")
-
-        try:
-            step_type = ScenarioStepType(raw_type)
-        except ValueError as exc:
-            raise ScenarioParseError(
-                f"Step {draft.step_number} is malformed: unsupported type '{raw_type}'."
-            ) from exc
-
-        step_name = str(draft.fields.get("name") or "").strip()
-        if not step_name:
-            raise ScenarioParseError(f"Step {draft.step_number} is malformed: missing 'Name:'.")
-        step_id = f"step-{draft.step_number}"
-        capture = self._normalize_string_list(draft.fields.get("capture"))
-        expected = self._normalize_string_list(draft.fields.get("expected"))
-
-        if step_type == ScenarioStepType.API:
-            method = str(draft.fields.get("method", "")).strip().upper()
-            path = str(draft.fields.get("path", "")).strip()
-            if not method:
-                raise ScenarioParseError(
-                    f"Step {draft.step_number} is malformed: API step missing 'Method:'."
-                )
-            if not path:
-                raise ScenarioParseError(
-                    f"Step {draft.step_number} is malformed: API step missing 'Path:'."
-                )
-            api_definition = ApiStepDefinition(
-                name=step_name,
-                method=method,
-                path=path,
-                headers=self._normalize_mapping(
-                    draft.fields.get("headers"),
-                    step_number=draft.step_number,
-                    field_name="headers",
-                ),
-                params=self._normalize_mapping(
-                    draft.fields.get("params"),
-                    step_number=draft.step_number,
-                    field_name="params",
-                ),
-                body=draft.fields.get("body"),
-                retry=self._normalize_optional_mapping(
-                    draft.fields.get("retry"),
-                    step_number=draft.step_number,
-                    field_name="retry",
-                ),
-                capture=capture,
-                expected=expected,
-            )
-            return ScenarioStep(
-                step_id=step_id,
-                step_number=draft.step_number,
-                title=step_name,
-                step_type=step_type,
-                api=api_definition,
-                metadata={"parse_warnings": draft.warnings, "source_line": draft.line_number},
-            )
-
-        sql = str(draft.fields.get("sql", "")).strip()
-        if not sql:
-            raise ScenarioParseError(f"Step {draft.step_number} is malformed: DB step missing 'SQL:'.")
-        db_definition = DbStepDefinition(
-            name=step_name,
-            sql=sql,
-            params=self._normalize_mapping(
-                draft.fields.get("params"),
-                step_number=draft.step_number,
-                field_name="params",
-            ),
-            capture=capture,
-            expected=expected,
-        )
-        return ScenarioStep(
-            step_id=step_id,
-            step_number=draft.step_number,
-            title=step_name,
-            step_type=step_type,
-            db=db_definition,
-            metadata={"parse_warnings": draft.warnings, "source_line": draft.line_number},
-        )
-
-    @staticmethod
-    def _parse_text(lines: list[str]) -> str:
-        return "\n".join(line.strip() for line in MarkdownScenarioParser._trim_empty_lines(lines)).strip()
-
-    @staticmethod
-    def _parse_bullets(lines: list[str]) -> list[str]:
-        values = [line.strip()[2:].strip() for line in lines if line.strip().startswith("- ")]
-        return [value for value in values if value]
-
-    @staticmethod
-    def _trim_empty_lines(lines: list[str]) -> list[str]:
-        trimmed = list(lines)
-        while trimmed and not trimmed[0].strip():
-            trimmed.pop(0)
-        while trimmed and not trimmed[-1].strip():
-            trimmed.pop()
-        return trimmed
-
-    @staticmethod
-    def _normalize_mapping(value: Any, step_number: int, field_name: str) -> dict[str, Any]:
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            raise ScenarioParseError(
-                f"Step {step_number} is malformed: '{field_name}' must contain a JSON object."
-            )
-        return value
-
-    @staticmethod
-    def _normalize_optional_mapping(value: Any, step_number: int, field_name: str) -> dict[str, Any] | None:
-        if value is None:
-            return None
-        if not isinstance(value, dict):
-            raise ScenarioParseError(
-                f"Step {step_number} is malformed: '{field_name}' must contain an object."
-            )
-        return value
-
-    @staticmethod
-    def _normalize_string_list(value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        return [str(value).strip()] if str(value).strip() else []
 
     @classmethod
     def _build_scenario_slug(cls, title: str, scenario_path: Path) -> str:

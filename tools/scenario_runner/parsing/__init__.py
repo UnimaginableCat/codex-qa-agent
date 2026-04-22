@@ -27,6 +27,8 @@ from .markdown import (
     MarkdownTokenDocument,
     parse_markdown_document_from_backend,
 )
+from .scenario_assembly import ScenarioAssemblyInput, assemble_scenario_definition, parse_section_bullets, parse_section_text
+from .scenario_converter import convert_step_draft, convert_step_drafts
 from .source import ScenarioSource, load_scenario_source
 from .steps import MARKDOWN_STEP_RE, ParsedStepDraft, StepBlock, StepFieldKind, StepFieldValue, StepFields, parse_step_block, split_step_blocks
 from .variables import ParsedVariable, VariableParseResult, parse_variables_section
@@ -44,6 +46,7 @@ __all__ = [
     "ParseDiagnosticKind",
     "ParseDiagnosticSeverity",
     "ParsedVariable",
+    "ScenarioAssemblyInput",
     "ScenarioParseError",
     "ScenarioParseOptions",
     "ScenarioParseResult",
@@ -63,8 +66,13 @@ __all__ = [
     "VariableParseResult",
     "empty_json_object",
     "empty_parse_diagnostics",
+    "assemble_scenario_definition",
+    "convert_step_draft",
+    "convert_step_drafts",
     "load_scenario_source",
+    "parse_section_bullets",
     "parse_markdown_document_from_backend",
+    "parse_section_text",
     "parse_step_block",
     "parse_variables_section",
     "split_step_blocks",
