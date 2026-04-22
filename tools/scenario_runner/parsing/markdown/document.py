@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from .errors import ScenarioParseError
-from .loader import ScenarioSource
-from .markdown_backend import MarkdownBackend, MarkdownBlock, MarkdownItBackend
+from ..contracts.errors import ScenarioParseError
+from ..source.loader import ScenarioSource
+from .backend import MarkdownBackend, MarkdownBlock, MarkdownItBackend
 
 MARKDOWN_SCENARIO_TITLE_RE = re.compile(r"^#\s+Scenario:\s*(?P<name>.+?)\s*$")
 
@@ -114,4 +114,3 @@ def _sections_from_backend_headings(
         )
 
     return sections
-

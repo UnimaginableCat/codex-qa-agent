@@ -7,12 +7,12 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.scenario_runner.parsing.loader import load_scenario_source
-from tools.scenario_runner.parsing.markdown_backend import (
+from tools.scenario_runner.parsing.markdown.backend import (
     MarkdownBlock,
     MarkdownBlockKind,
     MarkdownItBackend,
 )
+from tools.scenario_runner.parsing.source.loader import load_scenario_source
 
 
 class MarkdownItBackendTests(unittest.TestCase):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import ScenarioParseError
+from ..contracts.errors import ScenarioParseError
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,10 +6,10 @@ import json
 import re
 from typing import cast
 
-from .errors import ScenarioParseError
-from .result import JsonObject, JsonValue
-from .step_blocks import MARKDOWN_STEP_RE
-from .step_ir import ParsedStepDraft, StepBlock, StepFieldKind, StepFields
+from ..contracts.errors import ScenarioParseError
+from ..contracts.result import JsonObject, JsonValue
+from .blocks import MARKDOWN_STEP_RE
+from .ir import ParsedStepDraft, StepBlock, StepFieldKind, StepFields
 
 FIELD_RE = re.compile(r"^(?P<name>[A-Za-z ]+):(?:\s*(?P<value>.*))?$")
 KNOWN_STEP_FIELDS = {field.value for field in StepFieldKind}

@@ -7,10 +7,10 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.scenario_runner.parser import ScenarioParseError
-from tools.scenario_runner.parsing.markdown_document import MarkdownSection
-from tools.scenario_runner.parsing.step_blocks import split_step_blocks
-from tools.scenario_runner.parsing.step_fields import parse_step_block
-from tools.scenario_runner.parsing.step_ir import StepBlock
+from tools.scenario_runner.parsing.markdown.document import MarkdownSection
+from tools.scenario_runner.parsing.steps.blocks import split_step_blocks
+from tools.scenario_runner.parsing.steps.fields import parse_step_block
+from tools.scenario_runner.parsing.steps.ir import StepBlock
 
 
 class StepBoundaryParsingTests(unittest.TestCase):

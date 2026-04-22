@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
-from .markdown_document import MarkdownSection
-from .step_ir import StepBlock
+from ..markdown.document import MarkdownSection
+from .ir import StepBlock
 
 MARKDOWN_STEP_RE = re.compile(r"^###\s+Step\s+(?P<number>\d+)\s*$", re.IGNORECASE)
 

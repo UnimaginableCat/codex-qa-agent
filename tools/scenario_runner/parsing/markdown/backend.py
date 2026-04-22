@@ -9,7 +9,7 @@ from typing import Protocol
 
 from markdown_it import MarkdownIt
 
-from .loader import ScenarioSource
+from ..source.loader import ScenarioSource
 
 
 class MarkdownBlockKind(StrEnum):

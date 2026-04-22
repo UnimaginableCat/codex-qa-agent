@@ -20,7 +20,7 @@ from tools.scenario_runner.parsing import (
     ScenarioParsingError,
     SourceLocation,
 )
-from tools.scenario_runner.parsing.markdown_document import (
+from tools.scenario_runner.parsing.markdown.document import (
     parse_markdown_document_from_backend,
 )
 

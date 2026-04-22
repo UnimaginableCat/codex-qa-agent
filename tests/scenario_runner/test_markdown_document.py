@@ -8,11 +8,11 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.scenario_runner.parser import MarkdownScenarioParser, ScenarioParseError
-from tools.scenario_runner.parsing.loader import load_scenario_source
-from tools.scenario_runner.parsing.markdown_document import (
+from tools.scenario_runner.parsing.markdown.document import (
     parse_markdown_document_from_backend,
 )
-from tools.scenario_runner.parsing.step_blocks import split_step_blocks
+from tools.scenario_runner.parsing.source.loader import load_scenario_source
+from tools.scenario_runner.parsing.steps.blocks import split_step_blocks
 
 
 class MarkdownDocumentParsingTests(unittest.TestCase):

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TypeAlias
 
-from .result import JsonValue
+from ..contracts.result import JsonValue
 
 StepFieldValue: TypeAlias = JsonValue | list[str]
 StepFields: TypeAlias = dict[str, StepFieldValue]
