@@ -12,6 +12,8 @@ The workspace contains:
 - execution artifacts and reports under `artifacts/agent/`
 - per-project environment files under `env/`
 
+`scenario_runner` is the primary orchestration path for runnable scenarios. Treat its CLI as an adapter over runner services, not as the source of orchestration semantics. Engine state, pause/resume, operator decisions, termination semantics, projections, persistence, and reporting must remain distinct.
+
 ## Core operating model
 
 The agent must treat this workspace as a QA execution environment.
@@ -23,6 +25,8 @@ Each scenario should be handled as:
 4. API execution if needed
 5. DB verification if needed
 6. final reporting
+
+When a scenario is runnable through `scenario_runner`, prefer runner execution over ad hoc API/DB replay. Use `auto` mode for ordinary execution and guided/manual mode when an operator decision, pause-state inspection, or explicit resume is needed.
 
 The goal is not only to execute steps, but to verify the intended functionality against actual implementation and persisted system state.
 
@@ -86,6 +90,12 @@ Priority of final scenario status:
 
 If multiple outcomes exist, the final scenario status must use the highest-priority status from the list above.
 
+Do not use legacy statuses as lifecycle labels. For runner artifacts, distinguish:
+- lifecycle/continuation state such as active, paused, resumed, terminal
+- termination semantics such as completed, failed, blocked, errored, skipped, aborted, partially completed
+- operator resolution such as selected action and resume strategy
+- reporting status such as PASS, FAIL, BLOCKED, ERROR
+
 ## Rules
 
 - Never print secrets.
@@ -139,7 +149,7 @@ The final report must include:
 
 Prefer using the dedicated skills:
 
-- `scenario-test-runner` for orchestration
+- `runner-execution` for scenario runner orchestration, auto/guided execution, pause inspection, and resume
 - `env-resolution` for env/config readiness
 - `code-analysis` for implementation tracing
 - `api-workflow` for HTTP/API steps
@@ -155,4 +165,4 @@ A scenario run is complete only when:
 - code analysis was performed
 - all executable runtime checks were attempted
 - statuses were assigned consistently
-- the final report was written
+- the final report was written, or a guided/manual pause with operator-facing next actions was reported

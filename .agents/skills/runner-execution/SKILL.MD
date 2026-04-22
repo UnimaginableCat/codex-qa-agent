@@ -1,6 +1,6 @@
 ---
 name: runner-execution
-description: Use this skill to execute a QA scenario through the local scenario runner, inspect the produced run artifacts, and return the final result. Prefer this skill over manual API/DB step execution when a runnable scenario file already exists.
+description: Use this skill to execute QA scenarios through the local scenario runner in auto or guided/manual mode, inspect produced artifacts, handle pause/decision/resume workflows, and return the final result. Prefer this skill over ad hoc API/DB step execution when a runnable scenario file exists.
 ---
 
 # Purpose
@@ -12,8 +12,22 @@ Use this skill when:
 - a markdown scenario file already exists
 - the local scenario runner is available
 - the user wants an end-to-end result with artifacts, summary, and final report
+- the user asks for guided/manual execution, pending decision inspection, or resume from a pause state
 
-Prefer this skill over manual step-by-step API/DB execution.
+Prefer this skill over ad hoc step-by-step API/DB execution.
+
+# Current runner model
+
+The runner has separate responsibilities:
+- engine: execution semantics, lifecycle, outcomes, pause/resume, operator decisions, and termination
+- projections: summary/report/operator-facing read models
+- persistence: run state, pause state, journal, summary, reports, and step artifacts
+- CLI: thin adapter over service/use-case contracts, not the source of orchestration truth
+
+Use explicit run modes:
+- `auto`: default legacy mode; CLI output is the compatibility summary payload
+- `guided`: operator-facing mode; CLI output includes `summary` plus `operator_state`
+- `manual`: explicit operator/manual workflow mode; treat like guided unless code provides narrower behavior
 
 # When to use this skill
 
@@ -21,9 +35,9 @@ Use this skill first if:
 - the scenario file is already written
 - the runner CLI exists
 - the user wants to validate a business flow end-to-end
-- the expected output is a final scenario result, not a partial debug trace
+- the expected output is a final scenario result, a guided pause/decision payload, or a resumed run result
 
-Do not default to manual API and DB execution if the scenario can be run through the runner.
+Do not default to ad hoc API and DB execution if the scenario can be run through the runner.
 
 # Inputs to read first
 
@@ -34,15 +48,15 @@ Do not default to manual API and DB execution if the scenario can be run through
 
 # Python environment policy
 
-Always prefer the workspace or project virtual environment for runner execution.
+Use a Python interpreter that satisfies the workspace runtime guard. This workspace requires Python 3.14+.
 
 Required order:
 1. first look for a local virtual environment
-2. if a local venv interpreter exists, use it for all runner invocations
-3. do not default to system `python` if a local venv is available
-4. use system `python` only as a fallback when no suitable local venv exists
-5. if system `python` is used, say so explicitly in the result
-6. if runner preflight fails due to missing dependencies under system `python`, retry with local venv before deeper investigation
+2. verify the interpreter version before using it
+3. use the local venv only if it satisfies Python 3.14+
+4. if the local venv is older, use a compatible system launcher such as `py` on Windows and say so explicitly
+5. do not report runner/CLI failure from an unsupported interpreter as a product or scenario result
+6. if runner preflight fails due to missing dependencies under a fallback interpreter, retry with a compatible local venv only if one exists
 
 ## Virtual environment discovery rules
 
@@ -74,12 +88,12 @@ A hidden directory such as `.venv` must still be checked explicitly.
 
 Do not conclude that no venv exists just because a generic file listing command returned nothing.
 
-If both system Python and a local venv are available, always use the local venv.
+If both system Python and a local venv are available, prefer the local venv only when it satisfies the runner's Python version requirement.
 
 Before reporting missing Python dependencies:
 - confirm which interpreter was used
 - confirm that explicit venv path checks were attempted
-- retry with the discovered venv interpreter if one exists
+- retry with the discovered venv interpreter only if it is compatible
 
 A failed venv lookup is not valid unless explicit path checks were performed.
 
@@ -166,7 +180,7 @@ Run the network precheck before rerunning the scenario if any of the following i
 ## Required precheck context
 
 The checks must run from the same interpreter and environment that will execute the runner:
-- use the resolved local venv interpreter if available
+- use the resolved Python 3.14+ runner interpreter
 - use the same working directory
 - do not run the checks from a different shell, host, or interpreter and assume equivalence
 
@@ -211,23 +225,50 @@ If the session indicates restricted network access, for example:
 
 then do not present the runner BLOCKED status as evidence of an application bug unless there is additional proof from a non-restricted environment.
 
-# Default execution policy
+# Runner modes and commands
 
 The runner is the primary execution mechanism.
+
+Use the CLI as an adapter over service contracts:
+- auto run: `python -m tools.scenario_runner.cli --scenario <scenario.md>`
+- guided run: `python -m tools.scenario_runner.cli --scenario <scenario.md> --mode guided`
+- inspect active decision: `python -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
+- resume with operator action: `python -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
+
+In guided mode, inspect the `operator_state` payload. It should include:
+- `run_id`
+- `run_mode`
+- `continuation_state`
+- `final_status`
+- `resumable`
+- `pause_state_path`
+- `active_decision_point`
+- `available_actions`
+- `recommended_action_id`
+- `required_inputs`
+- `resume_instructions`
+- `run_termination`
+
+When `operator_state.resumable` is true, do not invent a resolution. Present or select one of `available_actions[].action_id` according to the user's instruction. If the user did not choose an action, report the pending decision and stop.
+
+# Default execution policy
 
 Default flow:
 1. read the scenario
 2. confirm the scenario path
 3. identify the runner CLI command
-4. resolve the Python interpreter, preferring local venv
+4. resolve a Python 3.14+ interpreter
 5. load the env file and resolve initial variables
 6. if needed, run network/sandbox reachability precheck from the same execution context
-7. execute the scenario through the runner
-8. inspect produced artifacts:
+7. execute the scenario through the runner in `auto` unless guided/manual behavior was requested
+8. for guided/manual mode, inspect `operator_state`, pending decision, and available actions
+9. if the user selected an action, resume through `--resume ... --action ...`
+10. inspect produced artifacts:
    - `summary.json`
    - `report.md`
+   - `pause-state.json` if paused/resumed
    - step artifacts if needed
-9. return the final outcome
+11. return the final outcome or pending operator decision
 
 # Required behavior
 
@@ -235,16 +276,16 @@ Default flow:
 
 If a valid scenario file exists, do this first:
 - run the local scenario runner
-- use the local venv interpreter if available
-- wait for completion
+- use a Python 3.14+ interpreter
+- wait for completion or guided pause
 - inspect the generated artifacts
 - summarize the result
 
 Do not manually replay API and DB steps first.
 
-## 2. Use manual investigation only as fallback
+## 2. Use ad hoc investigation only as fallback
 
-Use manual analysis, direct API execution, DB inspection, or code scanning only if:
+Use ad hoc analysis, direct API execution, DB inspection, or code scanning only if:
 - the runner cannot start
 - the runner fails before scenario execution
 - the runner output is incomplete or contradictory
@@ -266,11 +307,13 @@ Do not invent alternative endpoints, SQL, or expectations unless clearly marked 
 
 Interpreter selection is not a minor detail.
 
-If the workspace has a local venv, runner execution through system `python` is considered an incorrect first attempt unless the user explicitly asked for that interpreter.
+If the workspace has a local venv that satisfies Python 3.14+, runner execution through system `python` is considered an incorrect first attempt unless the user explicitly asked for that interpreter.
+
+If the local venv is older than Python 3.14, do not use it for runner CLI checks. Use a compatible interpreter such as `py` on Windows and mention the reason.
 
 Before concluding that dependencies are missing or the runner is broken:
 - verify whether a local venv exists
-- retry with the local venv interpreter if available
+- retry with the local venv interpreter only if it is compatible
 
 ## 5. Treat agent network reachability as part of execution correctness
 
@@ -293,19 +336,24 @@ A runner result that is blocked by sandbox DNS failure is not a meaningful busin
    - report path if declared
 3. Locate the runner command.
 4. Resolve the Python interpreter with this priority:
-   - local venv python
-   - system python fallback
+   - compatible local venv Python 3.14+
+   - compatible system launcher fallback
 5. Load env-backed variables and generated runtime variables.
 6. If previous evidence suggests connectivity issues, run DNS/HTTPS precheck from the same execution context.
-7. Execute the runner against the scenario.
-8. Read the final outputs:
+7. Execute the runner against the scenario in the requested run mode.
+8. If guided/manual output includes `operator_state.resumable=true`, inspect and report the active decision point and available actions.
+9. If the user selected an action, resume through the CLI resume command.
+10. Read the final outputs:
    - final status
    - summary
    - report
-9. Return:
+   - operator state if guided/manual
+11. Return:
    - final status
    - short summary
    - key blockers/failures
+   - current continuation/termination state
+   - pending decision and actions if paused
    - exact artifact paths
    - which Python interpreter was used
    - whether network access was verified
@@ -318,6 +366,7 @@ At minimum inspect:
 - `artifacts/agent/<scenario-slug>-<run-id>/report.md`
 
 If needed, also inspect:
+- `.codex-qa/runs/<run-id>/pause-state.json`
 - step input artifacts
 - step result artifacts
 - journal files
@@ -329,9 +378,13 @@ Provide a concise factual result with:
 - scenario name
 - target project
 - final status
+- run mode
+- continuation state and run termination kind/reason when available
 - short explanation
 - key failed/blocked steps if any
+- active decision point and available actions if paused
 - exact paths to summary and report
+- pause-state path if resumable or resumed
 - interpreter used for execution
 - whether DNS worked
 - whether HTTPS worked
@@ -339,6 +392,8 @@ Provide a concise factual result with:
 - whether that explains the runner result
 
 # Status interpretation
+
+Do not confuse legacy status with lifecycle or termination. Use `continuation_state`, `run_termination`, and `operator_state` to explain whether the run completed, paused, resumed, was aborted, or stopped after partial completion.
 
 Interpret runner output using these statuses:
 - PASS
@@ -356,6 +411,7 @@ If the runner says BLOCKED because of DNS/connectivity failure and the same fail
 - Never expose secrets.
 - Never write new implementation code into `artifacts/`.
 - Do not bypass the runner unless necessary.
+- Do not duplicate pause/resume/operator decision logic outside the runner service/CLI contracts.
 - Do not manually execute destructive DB queries.
 - Do not claim a scenario passed without checking runner output artifacts.
 - Do not perform broad codebase scanning by default.
