@@ -35,13 +35,15 @@ Before writing the report, collect:
 # Reporting workflow
 
 1. Identify the target project and scenario.
-2. Review all step outcomes.
-3. Determine the final overall legacy status without treating lifecycle labels as statuses.
-4. Summarize the most important findings first.
-5. Add lifecycle/termination context when available: completed, paused, resumed, aborted, skipped, partially completed, runtime failure, policy/config block.
-6. Add step-by-step results.
-7. Add resolved variables, auth mode, assumptions, blockers, tooling issues, and evidence references.
-8. Write the final report to the expected location.
+2. Treat runner-generated artifacts as evidence, not as files to mutate.
+3. Review all step outcomes.
+4. Determine the final overall legacy status without treating lifecycle labels as statuses.
+5. Summarize the most important findings first.
+6. Add lifecycle/termination context when available: completed, paused, resumed, aborted, skipped, partially completed, runtime failure, policy/config block.
+7. Add operator context only when artifacts include a real `operator_state`, pause-state path, or decision point.
+8. Add step-by-step results.
+9. Add resolved variables, auth mode, assumptions, blockers, tooling issues, and evidence references.
+10. Write a separate final report only when the runner did not already produce the required report or the user explicitly asks for a custom report.
 
 # Final status rules
 
@@ -154,6 +156,8 @@ List output files or raw evidence paths if they exist.
 - Never expose secrets.
 - Do not confuse runner lifecycle/termination semantics with legacy report statuses.
 - Do not infer operator decisions from status alone; use decision resolution or operator state when available.
+- Do not invent guided/manual interaction when the run is terminal and no pause-state or active decision point exists.
+- Do not edit generated runner artifacts such as `report.md`, `summary.json`, `journal.jsonl`, `pause-state.json`, manifests, or raw step results unless the user explicitly asks to repair artifacts.
 - Do not hide assumptions.
 - Do not hide scenario path substitutions or variable resolutions that materially affected execution.
 - Do not mark a scenario PASS if critical steps were BLOCKED, FAIL, or ERROR.
@@ -168,4 +172,4 @@ This skill is complete when:
 - the final status is consistent with the step outcomes
 - assumptions, blockers, variable resolutions, and tooling issues are explicit
 - optional code-analysis findings are included only if code-analysis was used
-- the report is saved to the expected path
+- the existing runner report is referenced, or a separate report is saved only when needed

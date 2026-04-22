@@ -21,12 +21,13 @@ The agent must treat this workspace as a QA execution environment.
 Each scenario should be handled as:
 1. scenario understanding
 2. environment resolution
-3. code analysis
-4. API execution if needed
-5. DB verification if needed
-6. final reporting
+3. runner execution for runnable scenarios
+4. artifact reading
+5. optional targeted code analysis/debugging when runner results require it
+6. API or DB fallback only when the runner cannot execute the required check
+7. final reporting
 
-When a scenario is runnable through `scenario_runner`, prefer runner execution over ad hoc API/DB replay. Use `auto` mode for ordinary execution and guided/manual mode when an operator decision, pause-state inspection, or explicit resume is needed.
+When a scenario is runnable through `scenario_runner`, prefer runner execution over ad hoc API/DB replay. Use guided mode as the default operator-safe path unless the user explicitly asks for auto/non-interactive execution. Guided/manual mode must be driven by real runner pause-state and decision-point artifacts, not by simulated step-by-step prompts.
 
 The goal is not only to execute steps, but to verify the intended functionality against actual implementation and persisted system state.
 
@@ -34,11 +35,13 @@ The goal is not only to execute steps, but to verify the intended functionality 
 
 1. Read the selected scenario carefully.
 2. Identify the target project under `code/<project-name>`.
-3. Resolve environment readiness and required configuration.
-4. Analyze the relevant code path before executing runtime checks.
-5. Execute API steps if needed.
-6. Execute DB verification if needed.
-7. Produce a final report under `artifacts/agent/`.
+3. Resolve the project/workspace venv and runner readiness.
+4. Execute the scenario through `scenario_runner` before broad code analysis when the scenario is runnable.
+5. Read runner artifacts such as `summary.json`, `report.md`, `journal.jsonl`, and `pause-state.json` when present.
+6. If runner output exposes a real pause/decision point, show the operator state and wait for an explicit action.
+7. If the run is terminal without a pause-state, report the result without simulating an interactive guided flow.
+8. Perform targeted code analysis, API replay, or DB verification only when runner artifacts show FAIL/BLOCKED/ERROR, contradictory evidence, incomplete evidence, or the user explicitly asks for investigation.
+9. Produce or summarize the final report from runner artifacts and any additional evidence.
 
 ## Scenario Variables DSL
 
@@ -131,7 +134,7 @@ The final report must include:
 - scenario name/path
 - final status
 - concise execution summary
-- code analysis summary
+- code analysis summary only if code analysis was used
 - step-by-step outcomes
 - blockers and failures
 - assumptions
@@ -144,6 +147,10 @@ The final report must include:
 - Do not interpret missing infrastructure as product failure.
 - Do not overstate confidence when evidence is incomplete.
 - If the system behavior cannot be confirmed, state that clearly.
+- Do not run broad code analysis before the first runner execution for runnable scenarios unless the user asked for code analysis or the runner cannot be started without a narrow clarification.
+- Do not edit generated runner artifacts such as `report.md`, `summary.json`, `journal.jsonl`, `pause-state.json`, manifests, or raw step results unless the user explicitly asks to repair artifacts.
+- Do not ask the operator for guided/manual decisions unless runner output exposes a real pause-state or active decision point.
+- Do not treat a terminal guided run without pause-state as an interactive session.
 
 ## Skill usage policy
 
@@ -162,7 +169,9 @@ A scenario run is complete only when:
 - the scenario was read
 - the target project was identified
 - environment readiness was checked
-- code analysis was performed
-- all executable runtime checks were attempted
+- the runner was executed for runnable scenarios, or the reason it could not be executed was reported
+- generated runner artifacts were read when available
+- code analysis was performed only if needed for ambiguity, failure/debugging, or explicit user request
+- all required runtime checks were attempted by the runner or a justified fallback
 - statuses were assigned consistently
 - the final report was written, or a guided/manual pause with operator-facing next actions was reported

@@ -20,12 +20,28 @@ Prefer `scenario_runner` over manual API/DB replay when a valid scenario file ex
 
 Use the project/workspace venv interpreter for runner execution. Verify that the venv exists and satisfies Python 3.14+ before running the CLI.
 
-- Auto run: `python -m tools.scenario_runner.cli --scenario <scenario.md>`
-- Guided run: `python -m tools.scenario_runner.cli --scenario <scenario.md> --mode guided`
-- Inspect pause: `python -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
-- Resume: `python -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
+- Auto run: `<venv-python> -m tools.scenario_runner.cli --scenario <scenario.md>`
+- Guided run: `<venv-python> -m tools.scenario_runner.cli --scenario <scenario.md> --mode guided`
+- Inspect pause: `<venv-python> -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
+- Resume: `<venv-python> -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
 
 Do not silently fall back to system `python` or `py`. If the project venv is missing, too old, or lacks dependencies, report the run as environment/tooling `BLOCKED` unless the user explicitly authorizes a non-venv fallback.
+
+# Execution Policy
+
+Use the runner as the first source of execution truth for runnable scenarios.
+
+- Auto mode: use for explicitly non-interactive or compatibility-focused runs.
+- Guided mode: use as the default for scenario runs when the user did not request auto/non-interactive mode.
+- Manual/resume mode: use only when inspecting an existing pause-state or continuing with an explicit operator action.
+
+Guided/manual mode does not mean asking the operator before every scenario step. Ask the operator only when runner output contains a real pause/decision artifact, such as `operator_state.resumable=true`, `pause_state_path`, and an active decision point with available actions.
+
+If the run finishes terminally without a pause-state or active decision point, report the terminal result. Do not simulate an interactive session or ask for an action that the runner did not expose.
+
+Do not perform broad code scanning or code-analysis before the first runner execution by default. Code-analysis is allowed before the first run only when the user explicitly asks for it, the scenario path/content is ambiguous enough to prevent runner startup, or a narrowly scoped check is required to identify the target project/env file.
+
+Do not edit generated runner artifacts such as `report.md`, `summary.json`, `journal.jsonl`, `pause-state.json`, manifests, or step raw results unless the user explicitly asks to repair or rewrite artifacts. Treat them as evidence produced by the runner.
 
 # Default Guided Request
 
@@ -46,12 +62,14 @@ Also apply this mandatory environment rule: use the project/workspace venv for t
 1. Read `AGENTS.md` and the target scenario.
 2. Identify the target project under `code/` and the declared env file.
 3. Resolve the project/workspace venv interpreter and verify Python 3.14+.
-4. Use auto mode unless the user asks for guided/manual flow or pause/resume handling.
-5. Execute the runner CLI and parse its JSON output.
-6. Inspect at least `.codex-qa/runs/<run-id>/summary.json` and `artifacts/agent/<scenario-slug>-<run-id>/report.md`.
-7. If guided output has `operator_state.resumable=true`, report the active decision and available actions instead of inventing a choice.
-8. Resume only when the user selected or explicitly authorized an action.
-9. Return final status, continuation/termination state, key blockers/failures, artifact paths, and interpreter used.
+4. Execute the runner CLI first; use guided mode unless the user explicitly requested auto/non-interactive mode.
+5. Parse runner JSON output.
+6. Read runner artifacts after execution: at minimum `.codex-qa/runs/<run-id>/summary.json` and `artifacts/agent/<scenario-slug>-<run-id>/report.md` when they exist.
+7. If guided output has a real pause/decision point, report `operator_state`, `available_actions`, and `pause_state_path` instead of inventing a choice.
+8. If the run is terminal without a pause-state, report the terminal status and continuation/termination semantics without asking for an operator action.
+9. Resume only when the user selected or explicitly authorized an action.
+10. Use code-analysis/debugging only after the runner result when artifacts show `FAIL`, `BLOCKED`, `ERROR`, contradictions, incomplete evidence, or the user explicitly asks for investigation.
+11. Return final status, continuation/termination state, key blockers/failures, artifact paths, and interpreter used.
 
 # Guided/Manual Handling
 
@@ -71,6 +89,8 @@ In guided/manual mode, treat `operator_state` as the operator-facing read model.
 - `run_termination`
 
 If resumable, present `available_actions[].action_id` and wait for the selected action unless the user already gave one. Use `--resume ... --action <action_id>`; do not edit pause-state JSON manually.
+
+If not resumable, do not ask the user to choose an action. Explain that the run reached a terminal state and provide the status, termination reason, and artifact paths.
 
 # Status Interpretation
 
@@ -95,6 +115,8 @@ Read these references only when needed:
 
 - Never expose secrets or raw credentials.
 - Never write source code into `artifacts/`.
+- Never mutate runner-generated artifacts unless explicitly requested.
 - Never execute destructive or mutating SQL for verification.
 - Do not bypass the runner unless it cannot start or the user explicitly asks for manual debugging.
+- Do not run broad pre-run code analysis for runnable scenarios.
 - Do not treat environment/network restrictions as product failures.

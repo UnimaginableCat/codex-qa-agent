@@ -2,10 +2,10 @@
 
 ## CLI Commands
 
-- Auto run: `python -m tools.scenario_runner.cli --scenario <scenario.md>`
-- Guided run: `python -m tools.scenario_runner.cli --scenario <scenario.md> --mode guided`
-- Inspect pause: `python -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
-- Resume: `python -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
+- Auto run: `<venv-python> -m tools.scenario_runner.cli --scenario <scenario.md>`
+- Guided run: `<venv-python> -m tools.scenario_runner.cli --scenario <scenario.md> --mode guided`
+- Inspect pause: `<venv-python> -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
+- Resume: `<venv-python> -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
 
 Run these commands through the project/workspace venv interpreter. Do not use system `python` or `py` unless the user explicitly authorizes a non-venv fallback.
 
@@ -57,6 +57,10 @@ When relevant:
 - `artifacts/agent/<scenario-slug>-<run-id>/manifest.json`
 - `artifacts/agent/<scenario-slug>-<run-id>/steps/<step-id>/input.json`
 - `artifacts/agent/<scenario-slug>-<run-id>/steps/<step-id>/raw-result.json`
+
+Inspect these files as generated evidence. Do not edit `summary.json`, `report.md`, `journal.jsonl`, `pause-state.json`, manifests, or raw step artifacts unless the user explicitly asks to repair artifacts.
+
+Guided/manual interaction is valid only when output/artifacts expose a real `operator_state`, `pause_state_path`, and active decision point. If the run is terminal without pause-state, report the terminal status and do not ask for an action.
 
 ## Final Response Checklist
 

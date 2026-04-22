@@ -25,16 +25,17 @@ Use this skill when:
 # Resolution workflow
 
 1. Read the scenario and locate the declared environment file.
-2. Determine whether that file exists.
-3. Identify required configuration for the current step.
-4. Resolve values from the env file or prior step outputs.
-5. Identify missing required values.
-6. Classify the outcome:
+2. For runnable scenarios, prefer the runner preflight as the first readiness check unless the user explicitly asked for manual env analysis or the runner cannot start without env path clarification.
+3. Determine whether the env file exists.
+4. Identify required configuration for the current step.
+5. Resolve values from the env file or prior step outputs.
+6. Identify missing required values.
+7. Classify the outcome:
    - ready to execute
    - blocked by missing config
    - blocked by missing credentials
    - blocked by missing DB access
-7. Provide a short normalized configuration summary without exposing secrets.
+8. Provide a short normalized configuration summary without exposing secrets.
 
 # Common configuration fields
 
@@ -77,6 +78,7 @@ Use ready-to-execute when:
 - `api-workflow` should use this skill before sending requests if env is unclear.
 - `db-verification` should use this skill before opening DB connections.
 - `runner-execution` relies on the runner preflight for scenario readiness; use this skill for manual clarification when env/config blockers need explanation.
+- Do not turn guided/manual execution into pre-run env investigation unless runner startup is blocked or the user requested env analysis.
 
 # Guardrails
 
@@ -84,6 +86,7 @@ Use ready-to-execute when:
 - Never pretend missing config is a product failure.
 - Never silently ignore missing required variables.
 - If multiple env files are plausible, say which one was selected and why.
+- Do not edit runner-generated artifacts while resolving environment issues.
 
 # Completion criteria
 
