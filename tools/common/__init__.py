@@ -1,6 +1,7 @@
 """Common models and helpers shared across tooling packages."""
 
 from .errors import EnvFileLoadError, JsonFileLoadError, ToolingError, ValidationError
+from .json_safe import to_json_safe
 from .result import ExecutionResult
 from .statuses import StepStatus
 
@@ -13,6 +14,7 @@ __all__ = [
     "ToolingError",
     "ValidationError",
     "read_json_file",
+    "to_json_safe",
     "write_text_file",
 ]
 

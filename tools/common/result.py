@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, is_dataclass
-from enum import Enum
+from dataclasses import dataclass, field
 from typing import Any
 
+from .json_safe import to_json_safe
 from .statuses import StepStatus
 
 
@@ -25,20 +25,6 @@ class ExecutionResult:
 
         for key, value in self.details.items():
             if value is not None:
-                payload[key] = _serialize_value(value)
+                payload[key] = to_json_safe(value)
 
         return payload
-
-
-def _serialize_value(value: Any) -> Any:
-    if is_dataclass(value):
-        return asdict(value)
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {key: _serialize_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_serialize_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_serialize_value(item) for item in value)
-    return value

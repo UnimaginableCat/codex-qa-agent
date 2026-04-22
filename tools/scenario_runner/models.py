@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, is_dataclass
-from enum import Enum, StrEnum
+from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 
 
@@ -82,7 +83,7 @@ class ScenarioDefinition:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return _serialize_value(asdict(self))
+        return to_json_safe(asdict(self))
 
 
 @dataclass(slots=True)
@@ -103,7 +104,7 @@ class RunContext:
     step_results: list[StepExecutionResult] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return _serialize_value(asdict(self))
+        return to_json_safe(asdict(self))
 
 
 @dataclass(slots=True)
@@ -145,7 +146,7 @@ class ScenarioExecutionSummary:
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        payload = _serialize_value(asdict(self))
+        payload = to_json_safe(asdict(self))
         payload["status"] = payload["final_status"]
         payload["final_status"] = payload["final_status"]
         payload["executive_summary"] = self.message
@@ -195,19 +196,3 @@ class ScenarioExecutionSummary:
         if self.report_path is not None:
             artifacts.append(str(self.report_path))
         return artifacts
-
-
-def _serialize_value(value: Any) -> Any:
-    if is_dataclass(value):
-        return _serialize_value(asdict(value))
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {key: _serialize_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_serialize_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_serialize_value(item) for item in value]
-    return value
