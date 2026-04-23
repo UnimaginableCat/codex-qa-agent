@@ -205,8 +205,21 @@ def run_init_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
     diagnostics = _init_agent_plan_adapter_diagnostics(args)
     if diagnostics:
         raise GenerationCliInputError(diagnostics)
-    output_path = Path(args.output)
     authoring_service = AgentPlanAuthoringService()
+    requested_output_path = Path(args.output)
+    try:
+        output_path = authoring_service.resolve_template_output_path(requested_output_path)
+    except FileExistsError:
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_init_agent_plan_output_exists",
+                    message="Agent plan scaffold output already exists. Choose a new file path.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(requested_output_path),
+                )
+            ]
+        ) from None
     template = authoring_service.write_template(
         output_path,
         source_id=args.source_id or "",
@@ -214,13 +227,31 @@ def run_init_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
         title=args.name or "",
         goal=args.goal or "",
     )
+    payload_diagnostics: list[dict[str, Any]] = []
+    message = "Agent-authored plan template scaffolded."
+    if output_path != requested_output_path:
+        payload_diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_scaffold_output_redirected",
+                message="Requested scaffold output already existed, so a managed isolated output directory was used.",
+                severity=DiagnosticSeverity.WARNING,
+                source_ref=str(output_path),
+                details={
+                    "requested_output_path": str(requested_output_path),
+                    "resolved_output_path": str(output_path),
+                },
+            ).to_dict()
+        )
+        message = "Agent-authored plan template scaffolded in an isolated output directory."
     return to_json_safe(
         {
             "status": StepStatus.PASS.value,
-            "message": "Agent-authored plan template scaffolded.",
+            "message": message,
             "output_path": output_path,
+            "requested_output_path": requested_output_path,
             "template_version": template.metadata.get("template_version", ""),
             "input_mode": GenerationInputMode.AGENT_PLAN.value,
+            "diagnostics": payload_diagnostics,
             "template": template.to_dict(),
         }
     )
@@ -688,15 +719,6 @@ def _init_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[Gener
                 code="adapter_init_agent_plan_requires_output",
                 message="--init-agent-plan requires --output.",
                 severity=DiagnosticSeverity.ERROR,
-            )
-        )
-    elif Path(args.output).exists():
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="adapter_init_agent_plan_output_exists",
-                message="Agent plan scaffold output already exists. Choose a new file path.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=args.output,
             )
         )
     return diagnostics

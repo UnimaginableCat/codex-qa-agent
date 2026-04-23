@@ -47,6 +47,78 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertEqual(written_payload["title"], "Users API")
         self.assertIn("planned_test_cases", written_payload)
 
+    def test_init_agent_plan_redirects_existing_managed_output_into_separate_folder(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_path = root / "artifacts" / "agent" / "input" / "users-api-plan.json"
+            output_path.parent.mkdir(parents=True)
+            output_path.write_text("existing", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--init-agent-plan",
+                        "--output",
+                        str(output_path),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            redirected_path = Path(payload["output_path"])
+
+            self.assertTrue(redirected_path.exists())
+            self.assertEqual(redirected_path.parent.name, "users-api-plan-001")
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "existing")
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(Path(payload["requested_output_path"]), output_path)
+        self.assertNotEqual(redirected_path, output_path)
+        self.assertTrue(
+            any(
+                diagnostic["code"] == "agent_plan_scaffold_output_redirected"
+                for diagnostic in payload["diagnostics"]
+            )
+        )
+
+    def test_init_agent_plan_keeps_error_for_existing_custom_output_path(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_path = root / "custom-plan.json"
+            output_path.write_text("existing", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--init-agent-plan",
+                        "--output",
+                        str(output_path),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(payload["status"], "ERROR")
+        self.assertTrue(
+            any(
+                diagnostic["code"] == "adapter_init_agent_plan_output_exists"
+                for diagnostic in payload["diagnostics"]
+            )
+        )
+
     def test_validate_agent_plan_returns_pass_for_valid_file(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

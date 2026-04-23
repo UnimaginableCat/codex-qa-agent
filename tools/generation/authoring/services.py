@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from tools.generation.evidence.models import TargetStack
 from .models import AgentPlanLoadResult, AgentPlanValidationResult
 
 AGENT_PLAN_TEMPLATE_VERSION = "agent-plan-template-v1"
+MANAGED_AGENT_INPUT_ROOT = ("artifacts", "agent", "input")
 AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_missing",
     "agent_plan_missing_source_id",
@@ -36,6 +38,13 @@ AGENT_PLAN_BLOCKING_CODES = {
 @dataclass(slots=True)
 class AgentPlanAuthoringService:
     """Create, load, and validate structured agent-authored test plans."""
+
+    def resolve_template_output_path(self, output_path: Path) -> Path:
+        if not output_path.exists():
+            return output_path
+        if not _is_managed_agent_input_path(output_path):
+            raise FileExistsError(str(output_path))
+        return _next_managed_template_output_path(output_path)
 
     def build_template(
         self,
@@ -98,6 +107,7 @@ class AgentPlanAuthoringService:
         title: str = "",
         goal: str = "",
     ) -> AgentTestPlanInput:
+        output_path = self.resolve_template_output_path(output_path)
         template = self.build_template(
             source_id=source_id,
             project=project,
@@ -484,3 +494,26 @@ def _build_validation_message(
         return "Agent-authored plan input is structurally present but blocked by missing required fields."
     error_count = sum(1 for diagnostic in diagnostics if diagnostic.severity == DiagnosticSeverity.ERROR)
     return f"Agent-authored plan input validation failed with {error_count} error(s)."
+
+
+def _is_managed_agent_input_path(output_path: Path) -> bool:
+    parts = tuple(part.lower() for part in output_path.parent.parts)
+    width = len(MANAGED_AGENT_INPUT_ROOT)
+    return any(parts[index:index + width] == MANAGED_AGENT_INPUT_ROOT for index in range(len(parts) - width + 1))
+
+
+def _next_managed_template_output_path(output_path: Path) -> Path:
+    parent = output_path.parent
+    filename = output_path.name
+    stem = _slugify(output_path.stem)
+    counter = 1
+    while True:
+        candidate = parent / f"{stem}-{counter:03d}" / filename
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-._")
+    return slug.lower() or "agent-plan"

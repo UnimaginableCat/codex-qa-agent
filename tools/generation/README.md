@@ -94,6 +94,11 @@ The scaffolded template is deterministic and section-complete for Phase 1 author
 deterministic and checks required top-level fields, case presence, required case fields, malformed
 JSON, and unsupported payload shape before full generation runs.
 
+When scaffold output is requested under the managed `artifacts/agent/input/` tree and the exact
+file already exists, the CLI writes the new scaffold into a separate sibling directory such as
+`artifacts/agent/input/users-api-plan-001/users-api-plan.json` instead of failing on the collision.
+Custom output paths outside the managed input tree remain strict and are never overwritten.
+
 Code facts are a separate opt-in evidence layer. Canonical evidence contracts live in
 `tools.generation.evidence.models`; the extractor interface is `CodeFactsExtractor`, and the
 stack-aware orchestration boundary is `CodeFactsExtractionService`. Extractor selection is
