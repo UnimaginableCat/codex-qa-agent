@@ -15,6 +15,7 @@ from .models import (
 )
 from tools.generation.enrichment.models import EnrichedTestPlanResult
 from tools.generation.evidence.models import GenerationEvidenceBundle
+from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 
 
 class GenerationArtifactStore(Protocol):
@@ -86,6 +87,22 @@ class GenerationArtifactStore(Protocol):
         enrichment_result: EnrichedTestPlanResult,
     ) -> Path:
         """Persist enrichment result and applied/unapplied evidence projections."""
+        ...
+
+    def write_scenario_drafts(
+        self,
+        run_context: GenerationRunContext,
+        draft_set: ScenarioDraftSet,
+    ) -> list[Path]:
+        """Persist generated scenario draft markdown files."""
+        ...
+
+    def write_scenario_render_result(
+        self,
+        run_context: GenerationRunContext,
+        render_result: ScenarioRenderResult,
+    ) -> Path:
+        """Persist scenario render result, parser validation, and deferred items."""
         ...
 
     def write_summary(self, run_context: GenerationRunContext, summary: dict[str, object]) -> Path:

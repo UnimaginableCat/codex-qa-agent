@@ -24,6 +24,7 @@ class GenerateTestPlanOptions:
     allow_empty_plan: bool = False
     enrichment_enabled: bool = False
     collect_code_facts: bool = False
+    render_scenario_drafts: bool = False
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

@@ -28,6 +28,12 @@ artifacts/agent/generation/<source_slug>-<run_id>/
   enrichment-result.json
   applied-evidence.json
   unapplied-evidence.json
+  scenario-drafts/
+    <draft>.md
+  scenario-render-result.json
+  scenario-parse-results.json
+  unsupported-checks.json
+  deferred-items.json
   summary.json
 ```
 
@@ -64,3 +70,22 @@ py -3.14 -m tools.generation.cli `
 
 The adapter only gathers arguments, builds typed request objects, calls `GenerateTestPlanUseCase`,
 and prints a JSON summary. It does not scan outside explicit evidence scope paths.
+
+Draft scenario rendering preview:
+
+```powershell
+py -3.14 -m tools.generation.cli `
+  --source-id users-api `
+  --project code/demo `
+  --prose "Verify create user" `
+  --workspace-root . `
+  --project-path code/demo `
+  --collect-code-facts `
+  --enrich `
+  --render-drafts `
+  --evidence-scope-path app/api/users.py
+```
+
+Rendering is conservative: it emits parser-validated markdown previews only for cases with endpoint
+path and HTTP method evidence hints. Unsupported cases are written to deferred/unsupported artifacts.
+No scenario execution, compile, preflight, API workflow, or DB workflow is triggered.

@@ -198,6 +198,81 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertEqual(payload["evidence_fact_count"], 1)
         self.assertEqual(payload["applied_evidence_count"], 1)
 
+    def test_plan_with_evidence_can_render_parser_valid_draft_preview(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "code" / "demo"
+            project.mkdir(parents=True)
+            (project / "api.py").write_text(
+                "\n".join(
+                    [
+                        "from fastapi import APIRouter",
+                        "router = APIRouter()",
+                        "@router.post('/users')",
+                        "def create_user(payload: dict) -> dict:",
+                        "    return payload",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--source-id",
+                        "users",
+                        "--project",
+                        "code/demo",
+                        "--prose",
+                        "Verify create user",
+                        "--workspace-root",
+                        str(root),
+                        "--project-path",
+                        str(project),
+                        "--collect-code-facts",
+                        "--enrich",
+                        "--render-drafts",
+                        "--evidence-scope-path",
+                        "api.py",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["scenario_rendering"], "rendered")
+        self.assertEqual(payload["scenario_draft_count"], 1)
+        self.assertEqual(payload["scenario_parse_valid_count"], 1)
+        self.assertIn("scenario_render_result", payload["artifact_paths"])
+
+    def test_render_drafts_requires_persistence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--source-id",
+                        "users",
+                        "--project",
+                        "code/demo",
+                        "--prose",
+                        "Verify create user",
+                        "--workspace-root",
+                        tmp,
+                        "--render-drafts",
+                        "--no-persist",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(
+            any(
+                diagnostic["code"] == "adapter_render_drafts_requires_persistence"
+                for diagnostic in payload["diagnostics"]
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

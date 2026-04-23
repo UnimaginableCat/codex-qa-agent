@@ -20,6 +20,7 @@ from tools.generation.orchestration.context import initialize_generation_run_con
 from tools.generation.persistence.artifacts import FileGenerationArtifactStore
 from tools.generation.planning.assembly import NormalizedTestPlanAssembler
 from tools.generation.read_models.results import GenerationRunResult
+from tools.generation.rendering import ScenarioDraftPreviewService
 
 from .models import GenerateTestPlanRequest, GenerationOutputMode
 from .validation import build_generation_message, derive_generation_status
@@ -35,6 +36,7 @@ class GenerateTestPlanUseCase:
     artifact_store: GenerationArtifactStore = field(default_factory=FileGenerationArtifactStore)
     code_facts_extractor: CodeFactsExtractor = field(default_factory=ApiSurfaceFactsExtractor)
     test_plan_enricher: TestPlanEnricher = field(default_factory=EvidenceToPlanEnricher)
+    scenario_draft_preview: ScenarioDraftPreviewService = field(default_factory=ScenarioDraftPreviewService)
 
     def execute(self, request: GenerateTestPlanRequest) -> GenerationRunResult:
         run_context = initialize_generation_run_context(
@@ -67,6 +69,15 @@ class GenerateTestPlanUseCase:
             normalized_plan = enrichment_result.enriched_plan
             traceability_map.links.extend(enrichment_result.traceability_links)
             diagnostics.extend(enrichment_result.diagnostics)
+        scenario_render_result = None
+        scenario_render_paths = {}
+        if request.options.render_scenario_drafts and request.options.persist_artifacts:
+            scenario_render_result, scenario_render_paths = self.scenario_draft_preview.render_and_persist(
+                normalized_plan,
+                run_context,
+                self.artifact_store,
+            )
+            diagnostics.extend(scenario_render_result.diagnostics)
 
         final_status = derive_generation_status(
             diagnostics,
@@ -84,6 +95,7 @@ class GenerateTestPlanUseCase:
             normalized_source=normalization_result.normalized_source,
             evidence_bundle=evidence_bundle,
             enrichment_result=enrichment_result,
+            scenario_render_result=scenario_render_result,
             diagnostics=diagnostics,
             artifact_paths=artifact_paths,
             details={
@@ -93,6 +105,7 @@ class GenerateTestPlanUseCase:
                 "scenario_synthesis": "out_of_scope",
                 "enrichment": _enrichment_state(request, enrichment_result),
                 "code_facts": "collected" if evidence_bundle is not None else "not_requested",
+                "scenario_rendering": _scenario_rendering_state(request, scenario_render_result),
             },
         )
 
@@ -137,6 +150,7 @@ class GenerateTestPlanUseCase:
                     run_context,
                     traceability_map,
                 )
+            artifact_paths.update(scenario_render_paths)
             artifact_paths["summary"] = self.artifact_store.write_summary(run_context, result.to_dict())
 
         return result
@@ -170,6 +184,15 @@ class GenerateTestPlanUseCase:
                     source_ref=request.source_input.source_id,
                 )
             )
+        if request.options.render_scenario_drafts and not request.options.persist_artifacts:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="scenario_rendering_requires_persistence",
+                    message="Scenario draft rendering preview requires artifact persistence.",
+                    severity=DiagnosticSeverity.WARNING,
+                    source_ref=request.source_input.source_id,
+                )
+            )
         return diagnostics
 
     @staticmethod
@@ -189,4 +212,12 @@ def _enrichment_state(request: GenerateTestPlanRequest, enrichment_result: objec
         return "applied"
     if request.options.enrichment_enabled:
         return "skipped_no_evidence"
+    return "not_requested"
+
+
+def _scenario_rendering_state(request: GenerateTestPlanRequest, render_result: object | None) -> str:
+    if render_result is not None:
+        return "rendered"
+    if request.options.render_scenario_drafts:
+        return "skipped_no_persistence"
     return "not_requested"

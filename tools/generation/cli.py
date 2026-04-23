@@ -68,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Apply collected evidence to the NormalizedTestPlan.",
     )
+    parser.add_argument(
+        "--render-drafts",
+        action="store_true",
+        help="Render non-executed markdown scenario drafts and parser-validate them.",
+    )
     return parser
 
 
@@ -101,6 +106,7 @@ def build_request(args: argparse.Namespace) -> GenerateTestPlanRequest:
             persist_artifacts=not args.no_persist,
             collect_code_facts=args.collect_code_facts,
             enrichment_enabled=args.enrich,
+            render_scenario_drafts=args.render_drafts,
         ),
     )
 
@@ -114,6 +120,7 @@ def run_generation(args: argparse.Namespace) -> dict[str, Any]:
 def summarize_result(result: Any) -> dict[str, Any]:
     evidence_bundle = result.evidence_bundle
     enrichment_result = result.enrichment_result
+    scenario_render_result = result.scenario_render_result
     return to_json_safe(
         {
             "status": result.final_status.value,
@@ -130,6 +137,18 @@ def summarize_result(result: Any) -> dict[str, Any]:
             ),
             "unapplied_evidence_count": (
                 len(enrichment_result.unapplied_evidence) if enrichment_result else 0
+            ),
+            "scenario_rendering": result.details.get("scenario_rendering", "not_requested"),
+            "scenario_draft_count": (
+                len(scenario_render_result.draft_set.drafts) if scenario_render_result else 0
+            ),
+            "scenario_deferred_count": (
+                len(scenario_render_result.draft_set.deferred_items) if scenario_render_result else 0
+            ),
+            "scenario_parse_valid_count": (
+                sum(1 for item in scenario_render_result.validation_results if item.parse_valid)
+                if scenario_render_result
+                else 0
             ),
             "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
             "evidence_diagnostics": (
@@ -213,6 +232,15 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
             GenerationDiagnostic(
                 code="adapter_invalid_evidence_max_files",
                 message="--evidence-max-files must be at least 1.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.source_id,
+            )
+        )
+    if args.render_drafts and args.no_persist:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_render_drafts_requires_persistence",
+                message="--render-drafts requires artifact persistence; remove --no-persist.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=args.source_id,
             )

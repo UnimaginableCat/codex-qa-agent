@@ -9,7 +9,9 @@ Use this skill for prose-first generation in `codex-qa-agent`.
 
 ## Purpose
 
-Create a `tools.generation.domain.models.NormalizedTestPlan` from operator prose. Stop at planned test cases. Do not render runnable markdown scenarios and do not execute `scenario_runner`.
+Create a `tools.generation.domain.models.NormalizedTestPlan` from operator prose. Optionally render
+non-executed markdown draft previews from evidence-supported cases. Do not promote drafts into
+`scenarios/` and do not execute `scenario_runner`.
 
 ## Accepted Inputs
 
@@ -58,6 +60,27 @@ This mode invokes `GenerateTestPlanUseCase` with `collect_code_facts=True` and
 `enrichment_enabled=True`. Code facts are extracted only from `CodeFactsScope.paths`; there is no
 implicit repository-wide discovery.
 
+### Mode C - Draft Scenario Preview
+
+Use only after Mode B inputs are available and the operator wants markdown preview artifacts.
+
+```powershell
+py -3.14 -m tools.generation.cli `
+  --source-id users-api `
+  --project code/demo `
+  --prose "Verify create user" `
+  --workspace-root . `
+  --project-path code/demo `
+  --collect-code-facts `
+  --enrich `
+  --render-drafts `
+  --evidence-scope-path app/api/users.py
+```
+
+This mode renders non-executed scenario draft artifacts only for cases that have endpoint path and
+HTTP method evidence hints. Drafts are parser-validated with `MarkdownScenarioParser.parse_result()`.
+No compile, preflight, runtime execution, API workflow, or DB workflow is triggered.
+
 ## Workflow
 
 1. Choose Mode A or Mode B.
@@ -75,8 +98,10 @@ plan.
 
 Optional evidence enrichment is available through `GenerateTestPlanOptions(collect_code_facts=True,
 enrichment_enabled=True)`. It returns an `EnrichedTestPlanResult`, updates the returned
-`normalized_plan` with conservative evidence hints, and appends evidence traceability links. It still
-stops before markdown scenario rendering.
+`normalized_plan` with conservative evidence hints, and appends evidence traceability links.
+
+Optional draft rendering is available through `GenerateTestPlanOptions(render_scenario_drafts=True)`
+or CLI `--render-drafts`. It writes preview artifacts and validates them with the parser only.
 
 The CLI adapter is only an argument-gathering layer. It must not be treated as the source of
 generation semantics.
@@ -92,6 +117,7 @@ The flow returns:
 - `TraceabilityMap`
 - optional `GenerationEvidenceBundle`
 - optional `EnrichedTestPlanResult`
+- optional `ScenarioRenderResult`
 
 Each planned case may include title, objective, preconditions, prose-level steps, expected results, priority, assumptions, open questions, tags, and source refs.
 
@@ -118,6 +144,12 @@ artifacts/agent/generation/<source_slug>-<run_id>/
   enrichment-result.json
   applied-evidence.json
   unapplied-evidence.json
+  scenario-drafts/
+    <draft>.md
+  scenario-render-result.json
+  scenario-parse-results.json
+  unsupported-checks.json
+  deferred-items.json
   summary.json
 ```
 
@@ -136,7 +168,8 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 - Do not use code facts to mutate `NormalizedTestPlan` unless `enrichment_enabled=True`.
 - Do not treat evidence hints as runnable scenario steps.
 - Do not call LLMs or external APIs.
-- Do not render markdown scenarios.
+- Do not treat generated draft markdown as executable or reviewed scenarios.
+- Do not copy draft markdown into `scenarios/` unless a later explicit promotion workflow exists.
 - Do not run or modify `scenario_runner`.
 - Do not add pause/resume or guided/manual behavior for generation.
 - Do not store canonical planning fields only in `metadata`.

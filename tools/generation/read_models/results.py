@@ -17,6 +17,7 @@ from tools.generation.domain.models import (
 )
 from tools.generation.enrichment.models import EnrichedTestPlanResult
 from tools.generation.evidence.models import GenerationEvidenceBundle
+from tools.generation.rendering.models import ScenarioRenderResult
 
 
 @dataclass(slots=True)
@@ -31,6 +32,7 @@ class GenerationRunResult:
     normalized_source: NormalizedProseSource | None = None
     evidence_bundle: GenerationEvidenceBundle | None = None
     enrichment_result: EnrichedTestPlanResult | None = None
+    scenario_render_result: ScenarioRenderResult | None = None
     diagnostics: list[GenerationDiagnostic] = field(default_factory=list)
     artifact_paths: dict[str, Path] = field(default_factory=dict)
     details: dict[str, Any] = field(default_factory=dict)

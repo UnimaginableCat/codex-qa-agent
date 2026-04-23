@@ -20,6 +20,7 @@ from tools.generation.domain.models import (
 )
 from tools.generation.enrichment.models import EnrichedTestPlanResult
 from tools.generation.evidence.models import GenerationEvidenceBundle
+from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 
 GENERATION_RUNS_DIRNAME = Path(".codex-qa/generation/runs")
 GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
@@ -35,6 +36,11 @@ ENRICHED_PLAN_FILENAME = "enriched-plan.json"
 ENRICHMENT_RESULT_FILENAME = "enrichment-result.json"
 APPLIED_EVIDENCE_FILENAME = "applied-evidence.json"
 UNAPPLIED_EVIDENCE_FILENAME = "unapplied-evidence.json"
+SCENARIO_DRAFTS_DIRNAME = "scenario-drafts"
+SCENARIO_RENDER_RESULT_FILENAME = "scenario-render-result.json"
+SCENARIO_PARSE_RESULTS_FILENAME = "scenario-parse-results.json"
+UNSUPPORTED_CHECKS_FILENAME = "unsupported-checks.json"
+DEFERRED_ITEMS_FILENAME = "deferred-items.json"
 SUMMARY_FILENAME = "summary.json"
 MANIFEST_FILENAME = "manifest.json"
 FORBIDDEN_GENERATION_ARTIFACT_SUFFIXES = {
@@ -172,6 +178,45 @@ class FileGenerationArtifactStore:
         self.write_manifest(run_context)
         return target_path
 
+    def write_scenario_drafts(
+        self,
+        run_context: GenerationRunContext,
+        draft_set: ScenarioDraftSet,
+    ) -> list[Path]:
+        written_paths: list[Path] = []
+        for draft in draft_set.drafts:
+            target_path = _bundle_relative_path(run_context, draft.relative_path)
+            write_text_file(target_path, draft.markdown)
+            written_paths.append(target_path)
+        self.write_manifest(run_context)
+        return written_paths
+
+    def write_scenario_render_result(
+        self,
+        run_context: GenerationRunContext,
+        render_result: ScenarioRenderResult,
+    ) -> Path:
+        target_path = _bundle_file_path(run_context, SCENARIO_RENDER_RESULT_FILENAME)
+        _write_json_file(target_path, render_result.to_dict())
+        _write_json_file(
+            _bundle_file_path(run_context, SCENARIO_PARSE_RESULTS_FILENAME),
+            {
+                "validation_results": [
+                    validation.to_dict() for validation in render_result.validation_results
+                ]
+            },
+        )
+        _write_json_file(
+            _bundle_file_path(run_context, UNSUPPORTED_CHECKS_FILENAME),
+            {"unsupported_checks": [check.to_dict() for check in render_result.unsupported_checks]},
+        )
+        _write_json_file(
+            _bundle_file_path(run_context, DEFERRED_ITEMS_FILENAME),
+            {"deferred_items": [item.to_dict() for item in render_result.draft_set.deferred_items]},
+        )
+        self.write_manifest(run_context)
+        return target_path
+
     def write_summary(self, run_context: GenerationRunContext, summary: dict[str, object]) -> Path:
         target_path = run_context.run_state_dir / SUMMARY_FILENAME
         _write_json_file(target_path, summary)
@@ -238,6 +283,15 @@ def _bundle_file_path(run_context: GenerationRunContext, filename: str) -> Path:
     )
 
 
+def _bundle_relative_path(run_context: GenerationRunContext, relative_path: Path) -> Path:
+    if relative_path.is_absolute():
+        raise GenerationArtifactPolicyError("Generation artifact relative paths must not be absolute.")
+    return ensure_generation_artifact_output_path(
+        run_context.artifact_dir / relative_path,
+        run_context.artifacts_root_dir,
+    )
+
+
 def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
     write_text_file(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
@@ -265,6 +319,11 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
             "enrichment_result_path": str(run_context.artifact_dir / ENRICHMENT_RESULT_FILENAME),
             "applied_evidence_path": str(run_context.artifact_dir / APPLIED_EVIDENCE_FILENAME),
             "unapplied_evidence_path": str(run_context.artifact_dir / UNAPPLIED_EVIDENCE_FILENAME),
+            "scenario_drafts_dir": str(run_context.artifact_dir / SCENARIO_DRAFTS_DIRNAME),
+            "scenario_render_result_path": str(run_context.artifact_dir / SCENARIO_RENDER_RESULT_FILENAME),
+            "scenario_parse_results_path": str(run_context.artifact_dir / SCENARIO_PARSE_RESULTS_FILENAME),
+            "unsupported_checks_path": str(run_context.artifact_dir / UNSUPPORTED_CHECKS_FILENAME),
+            "deferred_items_path": str(run_context.artifact_dir / DEFERRED_ITEMS_FILENAME),
             "summary_path": str(run_context.artifact_dir / SUMMARY_FILENAME),
         },
         "run_state": {
