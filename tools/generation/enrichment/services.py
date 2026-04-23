@@ -10,7 +10,9 @@ from tools.generation.domain.models import (
     DiagnosticSeverity,
     GenerationDiagnostic,
     NormalizedTestPlan,
+    PlannedCaseSupport,
     PlannedTestCase,
+    RouteSupportHint,
     TraceabilityLink,
 )
 from tools.generation.evidence.models import (
@@ -350,21 +352,29 @@ def _apply_evidence_to_case(
     evidence_hints = list(test_case.metadata.get("evidence_hints", []))
     evidence_hints.append(link.to_dict())
     route_hints = list(test_case.metadata.get("route_hints", []))
-    route_hints.append(
-        {
-            "fact_id": link.fact_id,
-            "confidence": link.confidence.value,
-            "match_reasons": list(link.match_reasons),
-            **link.applied_fields,
-        }
+    route_hint = RouteSupportHint(
+        fact_id=link.fact_id,
+        endpoint_path=str(link.applied_fields.get("endpoint_path") or ""),
+        http_method=str(link.applied_fields.get("http_method") or ""),
+        confidence=link.confidence.value,
+        handler_name=str(link.applied_fields.get("handler_name") or ""),
+        controller_name=str(link.applied_fields.get("controller_name") or ""),
+        framework_hint=str(link.applied_fields.get("framework_hint") or ""),
+        match_reasons=list(link.match_reasons),
+        route_source="route_hints",
     )
+    route_hints.append(route_hint.to_dict())
     readiness = _readiness_from_fact(fact, resolved_questions, test_case.open_questions)
+    support = test_case.support or PlannedCaseSupport()
+    support.readiness = readiness.value
+    support.route_hints = [*support.route_hints, route_hint]
     test_case.metadata = {
         **test_case.metadata,
         "evidence_hints": evidence_hints,
         "route_hints": route_hints,
         "readiness": readiness.value,
     }
+    test_case.support = support
     readiness_tag = "route-resolved" if readiness == TestCaseReadiness.ROUTE_RESOLVED else "evidence-supported"
     if readiness_tag not in test_case.tags:
         test_case.tags.append(readiness_tag)
@@ -558,6 +568,8 @@ def _case_actions(test_case: PlannedTestCase) -> set[str]:
 
 
 def _case_readiness(test_case: PlannedTestCase) -> TestCaseReadiness:
+    if test_case.support is not None and test_case.support.readiness in {item.value for item in TestCaseReadiness}:
+        return TestCaseReadiness(test_case.support.readiness)
     readiness = str(test_case.metadata.get("readiness", ""))
     if readiness in {item.value for item in TestCaseReadiness}:
         return TestCaseReadiness(readiness)

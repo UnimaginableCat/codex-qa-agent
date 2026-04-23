@@ -195,7 +195,7 @@ class GenerateTestPlanUseCase:
         return result
 
     def _collect_evidence(self, request: GenerateTestPlanRequest) -> GenerationEvidenceBundle:
-        scope = request.evidence_scope or CodeFactsScope(scope_id=f"{request.source_input.source_id}-evidence")
+        scope = _resolved_evidence_scope(request)
         return self.code_facts_extraction_service.extract(
             self._resolve_project_path(request),
             scope,
@@ -282,6 +282,42 @@ def _generation_phase(request: GenerateTestPlanRequest) -> str:
     return "prose_plan_generation"
 
 
+def _resolved_evidence_scope(request: GenerateTestPlanRequest) -> CodeFactsScope:
+    if request.evidence_scope is not None:
+        return request.evidence_scope
+    if request.agent_plan is not None and request.agent_plan.evidence_scope:
+        payload = dict(request.agent_plan.evidence_scope)
+        scope_id = str(payload.get("scope_id") or f"{request.source_input.source_id}-evidence")
+        stack_hint = payload.get("stack_hint")
+        stack_hint_value = None
+        if stack_hint not in {None, ""}:
+            try:
+                stack_hint_value = CodeFactsScope.from_dict(
+                    {"scope_id": scope_id, "stack_hint": stack_hint}
+                ).stack_hint
+            except ValueError:
+                stack_hint_value = None
+        file_patterns = payload.get("file_patterns", ["*.py", "*.java"])
+        if not isinstance(file_patterns, list):
+            file_patterns = ["*.py", "*.java"]
+        paths = payload.get("paths", [])
+        if not isinstance(paths, list):
+            paths = []
+        max_files = payload.get("max_files", 20)
+        try:
+            max_files_value = int(max_files)
+        except (TypeError, ValueError):
+            max_files_value = 20
+        return CodeFactsScope(
+            scope_id=scope_id,
+            paths=[Path(str(item)) for item in paths],
+            file_patterns=[str(item) for item in file_patterns],
+            max_files=max_files_value,
+            stack_hint=stack_hint_value,
+        )
+    return CodeFactsScope(scope_id=f"{request.source_input.source_id}-evidence")
+
+
 def _source_input_from_agent_plan(
     original_source_input: GenerationSourceInput,
     agent_plan: AgentTestPlanInput,
@@ -348,4 +384,3 @@ def _empty_agent_plan(request: GenerateTestPlanRequest) -> NormalizedTestPlan:
             "scenario_synthesis": "out_of_scope",
         },
     )
-

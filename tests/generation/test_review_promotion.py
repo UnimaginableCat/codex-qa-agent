@@ -107,6 +107,17 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertGreater(review_set.items[0].checklist.partial_count, 0)
         self.assertGreater(review_set.items[0].edit_target_count, 0)
 
+    def test_review_service_reads_case_support_when_route_binding_projection_is_missing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _drop_route_binding_keep_case_support(Path(payload["artifact_paths"]["scenario_render_result"]))
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        self.assertEqual(review_set.items[0].route_status, "resolved_from_route_hints")
+        self.assertEqual(review_set.items[0].readiness_category.value, "parser_valid_strongly_supported")
+
     def test_review_service_marks_invalid_draft_as_invalid_review_item(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -469,12 +480,26 @@ def _mark_draft_invalid(render_result_path: Path) -> None:
 def _set_route_binding_readiness(render_result_path: Path, readiness: str) -> None:
     payload = json.loads(render_result_path.read_text(encoding="utf-8"))
     payload["draft_set"]["drafts"][0]["metadata"]["route_binding"]["readiness"] = readiness
+    case_support = payload["draft_set"]["drafts"][0]["metadata"].get("case_support")
+    if isinstance(case_support, dict):
+        case_support["readiness"] = readiness
     render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _set_route_binding_method(render_result_path: Path, method: str) -> None:
     payload = json.loads(render_result_path.read_text(encoding="utf-8"))
     payload["draft_set"]["drafts"][0]["metadata"]["route_binding"]["http_method"] = method
+    case_support = payload["draft_set"]["drafts"][0]["metadata"].get("case_support")
+    if isinstance(case_support, dict):
+        route_hints = case_support.get("route_hints")
+        if isinstance(route_hints, list) and route_hints:
+            route_hints[0]["http_method"] = method
+    render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _drop_route_binding_keep_case_support(render_result_path: Path) -> None:
+    payload = json.loads(render_result_path.read_text(encoding="utf-8"))
+    payload["draft_set"]["drafts"][0]["metadata"].pop("route_binding", None)
     render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 

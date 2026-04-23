@@ -44,6 +44,56 @@ class PlannedRouteIntent:
 
 
 @dataclass(slots=True)
+class RouteSupportHint:
+    """Typed route support projected from evidence or other deterministic sources."""
+
+    fact_id: str = ""
+    endpoint_path: str = ""
+    http_method: str = ""
+    confidence: str = ""
+    handler_name: str = ""
+    controller_name: str = ""
+    framework_hint: str = ""
+    match_reasons: list[str] = field(default_factory=list)
+    route_source: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RouteSupportHint":
+        return cls(
+            fact_id=str(payload.get("fact_id", "")),
+            endpoint_path=str(payload.get("endpoint_path", "")),
+            http_method=str(payload.get("http_method", "")),
+            confidence=str(payload.get("confidence", "")),
+            handler_name=str(payload.get("handler_name", "")),
+            controller_name=str(payload.get("controller_name", "")),
+            framework_hint=str(payload.get("framework_hint", "")),
+            match_reasons=[str(item) for item in payload.get("match_reasons", [])],
+            route_source=str(payload.get("route_source", "")),
+        )
+
+
+@dataclass(slots=True)
+class PlannedCaseSupport:
+    """Typed support state for a planned test case after deterministic enrichment."""
+
+    readiness: str = ""
+    route_hints: list[RouteSupportHint] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "PlannedCaseSupport":
+        return cls(
+            readiness=str(payload.get("readiness", "")),
+            route_hints=[RouteSupportHint.from_dict(item) for item in payload.get("route_hints", [])],
+        )
+
+
+@dataclass(slots=True)
 class AgentPlannedTestCaseInput:
     """Agent-authored semantic case before canonical plan assembly."""
 
@@ -170,6 +220,7 @@ class PlannedTestCase:
     open_questions: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     planned_route: PlannedRouteIntent | None = None
+    support: PlannedCaseSupport | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -193,6 +244,11 @@ class PlannedTestCase:
                 None
                 if payload.get("planned_route") is None
                 else PlannedRouteIntent.from_dict(dict(payload.get("planned_route") or {}))
+            ),
+            support=(
+                None
+                if payload.get("support") is None
+                else PlannedCaseSupport.from_dict(dict(payload.get("support") or {}))
             ),
             metadata=dict(payload.get("metadata") or {}),
         )

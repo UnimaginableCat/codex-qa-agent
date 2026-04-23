@@ -363,6 +363,103 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
             result.normalized_plan.test_cases[0].metadata["route_hints"][0]["endpoint_path"],
             "/users",
         )
+        self.assertEqual(result.normalized_plan.test_cases[0].support.route_hints[0].endpoint_path, "/users")
+
+    def test_use_case_uses_agent_plan_evidence_scope_when_request_scope_missing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "code" / "demo"
+            project.mkdir(parents=True)
+            (project / "api.py").write_text(
+                "\n".join(
+                    [
+                        "from fastapi import APIRouter",
+                        "router = APIRouter()",
+                        "@router.post('/users')",
+                        "def create_user(payload: dict) -> dict:",
+                        "    return payload",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            agent_plan = AgentTestPlanInput(
+                source_id="users-agent-plan",
+                project="code/demo",
+                title="Users API",
+                evidence_scope={"paths": ["api.py"], "stack_hint": "python"},
+                planned_test_cases=[
+                    AgentPlannedTestCaseInput(title="Create user", objective="Verify create user.")
+                ],
+            )
+
+            result = GenerateTestPlanUseCase().execute(
+                GenerateTestPlanRequest(
+                    source_input=GenerationSourceInput(
+                        source_id=agent_plan.source_id,
+                        project=agent_plan.project,
+                        input_format=SourceInputFormat.STRUCTURED,
+                        name=agent_plan.title,
+                    ),
+                    input_mode=GenerationInputMode.AGENT_PLAN,
+                    agent_plan=agent_plan,
+                    workspace_root=root,
+                    project_path=project,
+                    options=GenerateTestPlanOptions(collect_code_facts=True),
+                )
+            )
+
+        self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertIsNotNone(result.evidence_bundle)
+        self.assertEqual(result.evidence_bundle.facts[0].payload["endpoint_path"], "/users")
+
+    def test_request_evidence_scope_overrides_agent_plan_scope(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "code" / "demo"
+            project.mkdir(parents=True)
+            (project / "api.py").write_text(
+                "\n".join(
+                    [
+                        "from fastapi import APIRouter",
+                        "router = APIRouter()",
+                        "@router.post('/users')",
+                        "def create_user(payload: dict) -> dict:",
+                        "    return payload",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (project / "unused.py").write_text("x = 1\n", encoding="utf-8")
+            agent_plan = AgentTestPlanInput(
+                source_id="users-agent-plan",
+                project="code/demo",
+                title="Users API",
+                evidence_scope={"paths": ["unused.py"], "stack_hint": "python"},
+                planned_test_cases=[
+                    AgentPlannedTestCaseInput(title="Create user", objective="Verify create user.")
+                ],
+            )
+
+            result = GenerateTestPlanUseCase().execute(
+                GenerateTestPlanRequest(
+                    source_input=GenerationSourceInput(
+                        source_id=agent_plan.source_id,
+                        project=agent_plan.project,
+                        input_format=SourceInputFormat.STRUCTURED,
+                        name=agent_plan.title,
+                    ),
+                    input_mode=GenerationInputMode.AGENT_PLAN,
+                    agent_plan=agent_plan,
+                    workspace_root=root,
+                    project_path=project,
+                    evidence_scope=CodeFactsScope(scope_id="api", paths=[Path("api.py")]),
+                    options=GenerateTestPlanOptions(collect_code_facts=True),
+                )
+            )
+
+        self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertIsNotNone(result.evidence_bundle)
+        self.assertEqual(result.evidence_bundle.facts[0].payload["endpoint_path"], "/users")
 
     def test_agent_plan_with_explicit_route_can_render_drafts_without_evidence(self) -> None:
         with TemporaryDirectory() as tmp:

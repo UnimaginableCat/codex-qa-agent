@@ -11,8 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.generation.domain.models import (
     GenerationRunContext,
     NormalizedTestPlan,
+    PlannedCaseSupport,
     PlannedRouteIntent,
     PlannedTestCase,
+    RouteSupportHint,
 )
 from tools.generation.persistence.artifacts import (
     GENERATION_ARTIFACTS_DIRNAME,
@@ -101,6 +103,37 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertIn("Path: /api/sessions/revoke-all", draft.markdown)
         self.assertIn("Route source: planned_route.", draft.markdown)
         self.assertTrue(any(item.code == "rendering_based_on_planned_route" for item in render_result.diagnostics))
+
+    def test_renderer_uses_typed_support_route_hints_without_legacy_metadata(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-001",
+                    title="Create user",
+                    objective="Verify create user.",
+                    support=PlannedCaseSupport(
+                        readiness="evidence_supported",
+                        route_hints=[
+                            RouteSupportHint(
+                                fact_id="fact-create-user",
+                                endpoint_path="/users",
+                                http_method="POST",
+                                confidence="explicit",
+                                route_source="route_hints",
+                            )
+                        ],
+                    ),
+                )
+            ]
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
+        self.assertEqual(
+            render_result.draft_set.drafts[0].metadata["case_support"]["route_hints"][0]["endpoint_path"],
+            "/users",
+        )
 
     def test_renderer_renders_java_spring_list_case_from_route_hints(self) -> None:
         render_result = DraftScenarioRenderer().render(

@@ -748,7 +748,7 @@ def _build_review_item(
         diagnostics_summary.append("No parser validation result was found for this draft.")
     else:
         diagnostics_summary.extend(str(item.get("message", "")) for item in validation.diagnostics if item.get("message"))
-    route_binding = dict(draft.metadata.get("route_binding") or {})
+    route_binding = _route_binding_from_draft_metadata(draft)
     gap_summary = _draft_gap_summary(
         draft,
         validation,
@@ -1032,6 +1032,8 @@ def _route_status(route_binding: dict[str, object]) -> str:
     confidence = str(route_binding.get("confidence") or "")
     if confidence == "weak_inference":
         return "low_confidence"
+    if source == "planned_route":
+        return "resolved_from_planned_route"
     if source == "route_hints":
         return "resolved_from_route_hints"
     if source == "evidence_hints":
@@ -1557,6 +1559,23 @@ def _route_binding_from_scenario(scenario: ScenarioDefinition | None) -> dict[st
         "confidence": "explicit",
         "readiness": "manual_revalidated",
     }
+
+
+def _route_binding_from_draft_metadata(draft: ScenarioDraft) -> dict[str, object]:
+    case_support = dict(draft.metadata.get("case_support") or {})
+    route_hints = case_support.get("route_hints")
+    if isinstance(route_hints, list):
+        valid_hints = [
+            dict(hint)
+            for hint in route_hints
+            if isinstance(hint, dict) and hint.get("endpoint_path") and hint.get("http_method")
+        ]
+        if len(valid_hints) == 1:
+            return {
+                **valid_hints[0],
+                "readiness": str(case_support.get("readiness") or valid_hints[0].get("readiness") or ""),
+            }
+    return dict(draft.metadata.get("route_binding") or {})
 
 
 def _first_api_step(scenario: ScenarioDefinition | None):

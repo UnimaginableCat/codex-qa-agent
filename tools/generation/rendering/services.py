@@ -13,6 +13,7 @@ from tools.generation.domain.models import (
     GenerationRunContext,
     NormalizedTestPlan,
     PlannedTestCase,
+    RouteSupportHint,
 )
 from tools.scenario_runner.parser import MarkdownScenarioParser
 
@@ -86,9 +87,9 @@ class DraftScenarioRenderer:
                     reason_code=reason_code,
                     message=_unsupported_reason_message(reason_code),
                     details={
-                        "has_route_hints": bool(test_case.metadata.get("route_hints")),
+                        "has_route_hints": bool(_case_support_route_hints(test_case)),
                         "has_evidence_hints": bool(test_case.metadata.get("evidence_hints")),
-                        "readiness": str(test_case.metadata.get("readiness", "")),
+                        "readiness": _case_support_readiness(test_case),
                     },
                 )
                 unsupported_checks.append(check)
@@ -129,6 +130,7 @@ class DraftScenarioRenderer:
                         "renderer": "draft-scenario-renderer-v1",
                         "preview_only": True,
                         "route_binding": support,
+                        "case_support": _draft_case_support(test_case, support),
                     },
                 )
             )
@@ -262,13 +264,13 @@ def _supported_api_hint(test_case: PlannedTestCase) -> dict[str, Any] | None:
 
 
 def _route_hint_support(test_case: PlannedTestCase) -> dict[str, Any] | None:
-    readiness = str(test_case.metadata.get("readiness", ""))
+    readiness = _case_support_readiness(test_case)
     if readiness not in {"route_resolved", "evidence_supported"}:
         return None
     route_hints = [
         hint
-        for hint in test_case.metadata.get("route_hints", [])
-        if isinstance(hint, dict) and hint.get("endpoint_path") and hint.get("http_method")
+        for hint in _case_support_route_hints(test_case)
+        if hint.get("endpoint_path") and hint.get("http_method")
     ]
     if not route_hints:
         return None
@@ -356,11 +358,11 @@ def _render_diagnostics(test_case: PlannedTestCase, support: dict[str, Any]) -> 
 
 
 def _unsupported_reason_code(test_case: PlannedTestCase) -> str:
-    readiness = str(test_case.metadata.get("readiness", ""))
+    readiness = _case_support_readiness(test_case)
     route_hints = [
         hint
-        for hint in test_case.metadata.get("route_hints", [])
-        if isinstance(hint, dict) and hint.get("endpoint_path") and hint.get("http_method")
+        for hint in _case_support_route_hints(test_case)
+        if hint.get("endpoint_path") and hint.get("http_method")
     ]
     if route_hints:
         unique_pairs = {
@@ -394,6 +396,46 @@ def _unsupported_reason_message(reason_code: str) -> str:
 
 def _path_shape(path: str) -> str:
     return "item" if re.search(r"\{[^}]+\}", path) else "collection"
+
+
+def _case_support_readiness(test_case: PlannedTestCase) -> str:
+    if test_case.support is not None and test_case.support.readiness:
+        return test_case.support.readiness
+    return str(test_case.metadata.get("readiness", ""))
+
+
+def _case_support_route_hints(test_case: PlannedTestCase) -> list[dict[str, Any]]:
+    if test_case.support is not None and test_case.support.route_hints:
+        return [hint.to_dict() for hint in test_case.support.route_hints]
+    return [
+        dict(hint)
+        for hint in test_case.metadata.get("route_hints", [])
+        if isinstance(hint, dict)
+    ]
+
+
+def _draft_case_support(test_case: PlannedTestCase, support: dict[str, Any]) -> dict[str, Any]:
+    if test_case.support is not None:
+        return test_case.support.to_dict()
+    endpoint_path = str(support.get("endpoint_path") or "")
+    http_method = str(support.get("http_method") or "")
+    if not endpoint_path or not http_method:
+        return {}
+    route_hint = RouteSupportHint(
+        fact_id=str(support.get("fact_id") or ""),
+        endpoint_path=endpoint_path,
+        http_method=http_method,
+        confidence=str(support.get("confidence") or ""),
+        handler_name=str(support.get("handler_name") or ""),
+        controller_name=str(support.get("controller_name") or ""),
+        framework_hint=str(support.get("framework_hint") or ""),
+        match_reasons=[str(item) for item in support.get("match_reasons", [])],
+        route_source=str(support.get("route_source") or ""),
+    )
+    return {
+        "readiness": str(support.get("readiness") or ""),
+        "route_hints": [route_hint.to_dict()],
+    }
 
 
 def _slugify(value: str) -> str:

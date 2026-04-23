@@ -129,6 +129,38 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
         self.assertEqual(result.status, StepStatus.ERROR)
         self.assertTrue(any(diagnostic.code == "agent_plan_field_not_list" for diagnostic in result.diagnostics))
 
+    def test_validate_file_reports_invalid_evidence_scope_shape(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "broken.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users",
+                        "project": "code/demo",
+                        "title": "Users API",
+                        "planned_test_cases": [
+                            {
+                                "title": "Create user",
+                                "objective": "Verify user creation.",
+                            }
+                        ],
+                        "evidence_scope": {
+                            "paths": "api.py",
+                            "stack_hint": "unknown_stack",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertEqual(result.status, StepStatus.ERROR)
+        self.assertIn("agent_plan_evidence_scope_paths_not_list", codes)
+        self.assertIn("agent_plan_evidence_scope_invalid_stack_hint", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

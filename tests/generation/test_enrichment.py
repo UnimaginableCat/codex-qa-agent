@@ -40,6 +40,8 @@ class EvidenceToPlanEnricherTests(unittest.TestCase):
         self.assertEqual(result.case_enrichments[0].readiness_after, TestCaseReadiness.EVIDENCE_SUPPORTED)
         self.assertEqual(enriched_case.open_questions, [])
         self.assertEqual(enriched_case.metadata["readiness"], "evidence_supported")
+        self.assertEqual(enriched_case.support.readiness, "evidence_supported")
+        self.assertEqual(enriched_case.support.route_hints[0].endpoint_path, "/users")
         self.assertEqual(enriched_case.metadata["evidence_hints"][0]["applied_fields"]["endpoint_path"], "/users")
         self.assertEqual(enriched_case.metadata["route_hints"][0]["endpoint_path"], "/users")
         self.assertTrue(result.applied_evidence[0].match_reasons)
@@ -241,6 +243,10 @@ class EvidenceToPlanEnricherTests(unittest.TestCase):
         self.assertIn("action_overlap:authenticate", result.applied_evidence[0].match_reasons)
         self.assertEqual(
             result.enriched_plan.test_cases[0].metadata["route_hints"][0]["controller_name"],
+            "SessionController",
+        )
+        self.assertEqual(
+            result.enriched_plan.test_cases[0].support.route_hints[0].controller_name,
             "SessionController",
         )
 

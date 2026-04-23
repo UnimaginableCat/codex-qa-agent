@@ -15,6 +15,7 @@ from tools.generation.domain.models import (
     GenerationDiagnostic,
     PlannedRouteIntent,
 )
+from tools.generation.evidence.models import TargetStack
 
 from .models import AgentPlanLoadResult, AgentPlanValidationResult
 
@@ -386,6 +387,38 @@ def _validate_agent_plan_payload_shape(
                 source_ref=source_ref,
             )
         )
+    if isinstance(evidence_scope, dict):
+        paths = evidence_scope.get("paths")
+        if paths is not None and not isinstance(paths, list):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_evidence_scope_paths_not_list",
+                    message="evidence_scope.paths must be a JSON array when provided.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=source_ref,
+                )
+            )
+        file_patterns = evidence_scope.get("file_patterns")
+        if file_patterns is not None and not isinstance(file_patterns, list):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_evidence_scope_file_patterns_not_list",
+                    message="evidence_scope.file_patterns must be a JSON array when provided.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=source_ref,
+                )
+            )
+        stack_hint = evidence_scope.get("stack_hint")
+        if stack_hint not in {None, ""} and str(stack_hint) not in {item.value for item in TargetStack}:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_evidence_scope_invalid_stack_hint",
+                    message="evidence_scope.stack_hint must be one of the supported target stacks.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=source_ref,
+                    details={"stack_hint": str(stack_hint)},
+                )
+            )
     return diagnostics
 
 

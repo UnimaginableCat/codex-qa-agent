@@ -16,9 +16,11 @@ from tools.generation.domain.models import (
     GenerationSourceInput,
     NormalizedProseSource,
     NormalizedTestPlan,
+    PlannedCaseSupport,
     PlannedRouteIntent,
     PlannedTestCase,
     ProseTestCaseDraft,
+    RouteSupportHint,
     SourceInputFormat,
     TraceabilityLink,
     TraceabilityMap,
@@ -110,6 +112,18 @@ class GenerationContractTests(unittest.TestCase):
                         endpoint_path="/api/entities",
                         path_kind="collection",
                     ),
+                    support=PlannedCaseSupport(
+                        readiness="evidence_supported",
+                        route_hints=[
+                            RouteSupportHint(
+                                fact_id="fact-create-entity",
+                                endpoint_path="/api/entities",
+                                http_method="POST",
+                                confidence="explicit",
+                                route_source="route_hints",
+                            )
+                        ],
+                    ),
                 )
             ],
         )
@@ -122,6 +136,8 @@ class GenerationContractTests(unittest.TestCase):
         self.assertEqual(restored.test_cases[0].assumptions, ["API is available"])
         self.assertEqual(restored.test_cases[0].open_questions, ["Which auth mode is required?"])
         self.assertEqual(restored.test_cases[0].planned_route.http_method, "POST")
+        self.assertEqual(restored.test_cases[0].support.readiness, "evidence_supported")
+        self.assertEqual(restored.test_cases[0].support.route_hints[0].endpoint_path, "/api/entities")
 
     def test_normalized_prose_source_preserves_drafts(self) -> None:
         normalized = NormalizedProseSource(
