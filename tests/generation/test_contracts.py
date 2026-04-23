@@ -8,6 +8,8 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.generation.domain.models import (
+    AgentPlannedTestCaseInput,
+    AgentTestPlanInput,
     DiagnosticSeverity,
     GenerationDiagnostic,
     GenerationRunContext,
@@ -23,6 +25,40 @@ from tools.generation.domain.models import (
 
 
 class GenerationContractTests(unittest.TestCase):
+    def test_agent_test_plan_input_round_trips_through_json_payload(self) -> None:
+        agent_plan = AgentTestPlanInput(
+            source_id="sessions-agent-plan",
+            project="code/demo",
+            title="Internal sessions",
+            goal="Cover session lifecycle.",
+            planned_test_cases=[
+                AgentPlannedTestCaseInput(
+                    title="Authenticate session",
+                    objective="Verify session authentication.",
+                    kind="api",
+                    case_id="auth-session",
+                    preconditions=["Operator provides valid credentials."],
+                    actions=["Call authenticate endpoint."],
+                    expected_outcomes=["Session token is returned."],
+                    priority="high",
+                    tags=["session"],
+                    unresolved_items=["Auth fixture name is not selected."],
+                    assumptions=["Controller route evidence may resolve endpoint later."],
+                    metadata={"owner": "agent"},
+                )
+            ],
+            assumptions=["Agent decomposition is operator-reviewed."],
+            open_questions=["Which environment should be used?"],
+            evidence_scope={"paths": ["src/main/java/demo/UserController.java"]},
+        )
+
+        restored = AgentTestPlanInput.from_dict(json.loads(json.dumps(agent_plan.to_dict())))
+
+        self.assertEqual(restored.source_id, "sessions-agent-plan")
+        self.assertEqual(restored.planned_test_cases[0].case_id, "auth-session")
+        self.assertEqual(restored.planned_test_cases[0].actions, ["Call authenticate endpoint."])
+        self.assertEqual(restored.evidence_scope["paths"], ["src/main/java/demo/UserController.java"])
+
     def test_source_input_round_trips_through_json_payload(self) -> None:
         source = GenerationSourceInput(
             source_id="price-list-plan",

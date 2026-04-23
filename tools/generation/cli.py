@@ -14,9 +14,15 @@ if __package__ in {None, ""}:
 
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
-from tools.generation.application import GenerateTestPlanOptions, GenerateTestPlanRequest
+from tools.generation.application import GenerateTestPlanOptions, GenerateTestPlanRequest, GenerationInputMode
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
-from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic, GenerationSourceInput
+from tools.generation.domain.models import (
+    AgentTestPlanInput,
+    DiagnosticSeverity,
+    GenerationDiagnostic,
+    GenerationSourceInput,
+    SourceInputFormat,
+)
 from tools.generation.evidence.models import CodeFactsScope, TargetStack
 from tools.generation.review import (
     DraftEditTargetType,
@@ -42,8 +48,14 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument("--validate-scenario", action="store_true", help="Validate one scenario file without execution.")
 
     source = parser.add_mutually_exclusive_group()
+    source.add_argument("--agent-plan-file", help="Path to a structured agent-authored plan JSON file.")
     source.add_argument("--prose", help="Inline prose source for test-plan generation.")
     source.add_argument("--source-file", help="Path to a prose source file.")
+    parser.add_argument(
+        "--input-mode",
+        choices=[mode.value for mode in GenerationInputMode],
+        help="Generation input mode. Defaults to agent_plan for --agent-plan-file, otherwise prose.",
+    )
     parser.add_argument("--source-id", help="Stable source id for this generation run.")
     parser.add_argument("--project", help="Project identifier stored in generation contracts.")
     parser.add_argument("--name", default="", help="Optional human-readable source name.")
@@ -128,13 +140,28 @@ def build_request(args: argparse.Namespace) -> GenerateTestPlanRequest:
     if diagnostics:
         raise GenerationCliInputError(diagnostics)
 
-    source_input = GenerationSourceInput(
-        source_id=args.source_id,
-        project=args.project,
-        name=args.name,
-        content=args.prose or "",
-        source_path=Path(args.source_file) if args.source_file else None,
-    )
+    input_mode = _resolve_input_mode(args)
+    agent_plan = _load_agent_plan_file(Path(args.agent_plan_file)) if args.agent_plan_file else None
+    if agent_plan is not None:
+        source_input = GenerationSourceInput(
+            source_id=agent_plan.source_id,
+            project=agent_plan.project,
+            input_format=SourceInputFormat.STRUCTURED,
+            name=agent_plan.title,
+            content=json.dumps(agent_plan.to_dict(), ensure_ascii=False),
+            source_path=Path(args.agent_plan_file),
+            metadata={"input_mode": GenerationInputMode.AGENT_PLAN.value},
+        )
+    else:
+        source_input = GenerationSourceInput(
+            source_id=args.source_id,
+            project=args.project,
+            name=args.name,
+            input_format=SourceInputFormat.PROSE,
+            content=args.prose or "",
+            source_path=Path(args.source_file) if args.source_file else None,
+            metadata={"input_mode": GenerationInputMode.PROSE.value},
+        )
     evidence_scope = None
     if args.collect_code_facts:
         evidence_scope = CodeFactsScope(
@@ -147,6 +174,8 @@ def build_request(args: argparse.Namespace) -> GenerateTestPlanRequest:
 
     return GenerateTestPlanRequest(
         source_input=source_input,
+        input_mode=input_mode,
+        agent_plan=agent_plan,
         workspace_root=Path(args.workspace_root),
         project_path=Path(args.project_path) if args.project_path else None,
         evidence_scope=evidence_scope,
@@ -176,6 +205,7 @@ def summarize_result(result: Any) -> dict[str, Any]:
             "run_id": result.run_context.run_id,
             "source_id": result.run_context.source_id,
             "project": result.run_context.project,
+            "input_mode": result.details.get("input_mode", "prose"),
             "test_case_count": len(result.normalized_plan.test_cases),
             "code_facts": result.details.get("code_facts", "not_requested"),
             "evidence_fact_count": len(evidence_bundle.facts) if evidence_bundle else 0,
@@ -418,30 +448,106 @@ class GenerationCliInputError(ValueError):
         self.diagnostics = diagnostics
 
 
+def _resolve_input_mode(args: argparse.Namespace) -> GenerationInputMode:
+    if args.input_mode:
+        return GenerationInputMode(args.input_mode)
+    if args.agent_plan_file:
+        return GenerationInputMode.AGENT_PLAN
+    return GenerationInputMode.PROSE
+
+
+def _load_agent_plan_file(path: Path) -> AgentTestPlanInput:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_agent_plan_file_invalid_json",
+                    message="Agent-authored plan file must contain valid JSON.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"error": str(exc)},
+                )
+            ]
+        ) from exc
+    except OSError as exc:
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_agent_plan_file_unreadable",
+                    message="Agent-authored plan file could not be read.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"error": str(exc)},
+                )
+            ]
+        ) from exc
+    if not isinstance(payload, dict):
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_agent_plan_file_not_object",
+                    message="Agent-authored plan file must contain a JSON object.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                )
+            ]
+        )
+    return AgentTestPlanInput.from_dict(payload)
+
+
 def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
-    if not args.prose and not args.source_file:
+    if not args.agent_plan_file and not args.prose and not args.source_file:
         diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_generation_requires_source",
-                message="Generation requires exactly one of --prose or --source-file.",
+                message="Generation requires exactly one of --agent-plan-file, --prose, or --source-file.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=args.source_id,
             )
         )
-    if not args.source_id:
+    if args.input_mode == GenerationInputMode.AGENT_PLAN.value and not args.agent_plan_file:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_agent_plan_mode_requires_file",
+                message="input_mode=agent_plan requires --agent-plan-file.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.source_id,
+            )
+        )
+    if args.input_mode == GenerationInputMode.PROSE.value and args.agent_plan_file:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_prose_mode_rejects_agent_plan_file",
+                message="input_mode=prose requires --prose or --source-file, not --agent-plan-file.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.source_id,
+            )
+        )
+    if args.agent_plan_file and not Path(args.agent_plan_file).exists():
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_agent_plan_file_missing",
+                message="Agent-authored plan file does not exist.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.agent_plan_file,
+            )
+        )
+    if not args.agent_plan_file and not args.source_id:
         diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_generation_requires_source_id",
-                message="Generation requires --source-id.",
+                message="Prose generation requires --source-id.",
                 severity=DiagnosticSeverity.ERROR,
             )
         )
-    if not args.project:
+    if not args.agent_plan_file and not args.project:
         diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_generation_requires_project",
-                message="Generation requires --project.",
+                message="Prose generation requires --project.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=args.source_id,
             )

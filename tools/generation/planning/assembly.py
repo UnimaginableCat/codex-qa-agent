@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from tools.generation.domain.models import (
+    AgentPlannedTestCaseInput,
+    AgentTestPlanInput,
     GenerationSourceInput,
     NormalizedProseSource,
     NormalizedTestPlan,
@@ -38,6 +40,29 @@ class NormalizedTestPlanAssembler:
             },
         )
 
+    def assemble_from_agent_plan(self, agent_plan: AgentTestPlanInput) -> NormalizedTestPlan:
+        """Build a canonical plan from an agent-authored structured plan draft."""
+
+        return NormalizedTestPlan(
+            plan_id=f"plan-{agent_plan.source_id}",
+            source_id=agent_plan.source_id,
+            project=agent_plan.project,
+            title=agent_plan.title,
+            test_cases=[
+                self._planned_case_from_agent_case(agent_plan, case_input, index)
+                for index, case_input in enumerate(agent_plan.planned_test_cases, start=1)
+            ],
+            assumptions=list(agent_plan.assumptions),
+            metadata={
+                "generation_phase": "agent_plan_generation",
+                "input_mode": "agent_plan",
+                "normalizer": "agent-plan-adapter-v1",
+                "scenario_synthesis": "out_of_scope",
+                "goal": agent_plan.goal,
+                "open_questions": list(agent_plan.open_questions),
+            },
+        )
+
     def build_traceability_map(
         self,
         source_input: GenerationSourceInput,
@@ -61,6 +86,34 @@ class NormalizedTestPlanAssembler:
         )
         return TraceabilityMap(source_id=source_input.source_id, links=links)
 
+    def build_agent_plan_traceability_map(
+        self,
+        agent_plan: AgentTestPlanInput,
+        normalized_plan: NormalizedTestPlan,
+    ) -> TraceabilityMap:
+        links = [
+            TraceabilityLink(
+                source_ref=agent_plan.source_id,
+                target_ref=normalized_plan.plan_id,
+                relation="agent_plan_to_plan",
+            )
+        ]
+        links.extend(
+            TraceabilityLink(
+                source_ref=source_ref,
+                target_ref=test_case.case_id,
+                relation="agent_plan_case_to_test_case",
+                metadata={"input_mode": "agent_plan"},
+            )
+            for test_case in normalized_plan.test_cases
+            for source_ref in test_case.source_refs
+        )
+        return TraceabilityMap(
+            source_id=agent_plan.source_id,
+            links=links,
+            metadata={"input_mode": "agent_plan"},
+        )
+
     @staticmethod
     def _planned_case_from_draft(draft: ProseTestCaseDraft) -> PlannedTestCase:
         return PlannedTestCase(
@@ -76,5 +129,34 @@ class NormalizedTestPlanAssembler:
             open_questions=list(draft.open_questions),
             tags=list(draft.tags),
             metadata={"source": "prose-normalizer-v1"},
+        )
+
+    @staticmethod
+    def _planned_case_from_agent_case(
+        agent_plan: AgentTestPlanInput,
+        case_input: AgentPlannedTestCaseInput,
+        index: int,
+    ) -> PlannedTestCase:
+        case_id = case_input.case_id.strip() or f"tc-{index:03d}"
+        source_ref = f"{agent_plan.source_id}#case-{index:03d}"
+        metadata = {
+            "source": "agent-plan-v1",
+            "input_mode": "agent_plan",
+            "kind": case_input.kind,
+            **dict(case_input.metadata),
+        }
+        return PlannedTestCase(
+            case_id=case_id,
+            title=case_input.title,
+            objective=case_input.objective,
+            source_refs=[source_ref],
+            preconditions=list(case_input.preconditions),
+            steps=list(case_input.actions),
+            expected_results=list(case_input.expected_outcomes),
+            priority=case_input.priority,
+            assumptions=list(case_input.assumptions),
+            open_questions=list(case_input.unresolved_items),
+            tags=list(case_input.tags),
+            metadata=metadata,
         )
 

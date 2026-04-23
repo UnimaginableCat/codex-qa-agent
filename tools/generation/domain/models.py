@@ -22,6 +22,83 @@ class SourceInputFormat(StrEnum):
 
 
 @dataclass(slots=True)
+class AgentPlannedTestCaseInput:
+    """Agent-authored semantic case before canonical plan assembly."""
+
+    title: str
+    objective: str
+    kind: str = "functional"
+    case_id: str = ""
+    preconditions: list[str] = field(default_factory=list)
+    actions: list[str] = field(default_factory=list)
+    expected_outcomes: list[str] = field(default_factory=list)
+    priority: str = "normal"
+    tags: list[str] = field(default_factory=list)
+    unresolved_items: list[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "AgentPlannedTestCaseInput":
+        return cls(
+            title=str(payload.get("title", "")),
+            objective=str(payload.get("objective", "")),
+            kind=str(payload.get("kind", "functional")),
+            case_id=str(payload.get("case_id", "")),
+            preconditions=[str(item) for item in payload.get("preconditions", [])],
+            actions=[str(item) for item in payload.get("actions", [])],
+            expected_outcomes=[str(item) for item in payload.get("expected_outcomes", [])],
+            priority=str(payload.get("priority", "normal")),
+            tags=[str(item) for item in payload.get("tags", [])],
+            unresolved_items=[str(item) for item in payload.get("unresolved_items", [])],
+            assumptions=[str(item) for item in payload.get("assumptions", [])],
+            metadata=dict(payload.get("metadata") or {}),
+        )
+
+
+@dataclass(slots=True)
+class AgentTestPlanInput:
+    """Agent-authored plan draft accepted as the preferred generation input path."""
+
+    source_id: str
+    project: str
+    title: str
+    goal: str = ""
+    planned_test_cases: list[AgentPlannedTestCaseInput] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+    evidence_scope: dict[str, Any] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "AgentTestPlanInput":
+        return cls(
+            source_id=str(payload.get("source_id", "")),
+            project=str(payload.get("project", "")),
+            title=str(payload.get("title", "")),
+            goal=str(payload.get("goal", "")),
+            planned_test_cases=[
+                AgentPlannedTestCaseInput.from_dict(item)
+                for item in payload.get("planned_test_cases", [])
+            ],
+            assumptions=[str(item) for item in payload.get("assumptions", [])],
+            open_questions=[str(item) for item in payload.get("open_questions", [])],
+            evidence_scope=(
+                None
+                if payload.get("evidence_scope") is None
+                else dict(payload.get("evidence_scope") or {})
+            ),
+            metadata=dict(payload.get("metadata") or {}),
+        )
+
+
+@dataclass(slots=True)
 class GenerationSourceInput:
     """Source material accepted by the generation pipeline."""
 

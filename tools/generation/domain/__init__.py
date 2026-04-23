@@ -2,6 +2,8 @@
 
 from .contracts import GenerationArtifactStore
 from .models import (
+    AgentPlannedTestCaseInput,
+    AgentTestPlanInput,
     DiagnosticSeverity,
     GenerationDiagnostic,
     GenerationRunContext,
@@ -16,6 +18,8 @@ from .models import (
 )
 
 __all__ = [
+    "AgentPlannedTestCaseInput",
+    "AgentTestPlanInput",
     "DiagnosticSeverity",
     "GenerationArtifactStore",
     "GenerationDiagnostic",

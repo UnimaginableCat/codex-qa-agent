@@ -40,8 +40,25 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 
 Canonical Phase 1 contracts live in `tools.generation.domain.models`.
 The canonical application entrypoint is `GenerateTestPlanUseCase` with `GenerateTestPlanRequest`.
-It builds a prose-first `NormalizedTestPlan` and intentionally stops before scenario synthesis,
-pause/resume, plan enrichment, and LLM/API integration.
+It builds a canonical `NormalizedTestPlan` and intentionally stops before runner execution,
+pause/resume, and LLM/API integration.
+
+Primary input path:
+
+```text
+agent-authored plan input -> GenerateTestPlanUseCase -> NormalizedTestPlan
+```
+
+The typed primary input contracts are `AgentTestPlanInput` and `AgentPlannedTestCaseInput`.
+This path should be used when the agent can decompose a broad operator request into explicit
+planned cases. The older prose path remains as a fallback/bootstrap mode:
+
+```text
+prose -> prose normalizer -> NormalizedTestPlan
+```
+
+Both paths use the same downstream evidence, enrichment, rendering, review, promotion, and
+validation services.
 
 Code facts are a separate opt-in evidence layer. Canonical evidence contracts live in
 `tools.generation.evidence.models`; the extractor interface is `CodeFactsExtractor`, and the
@@ -67,9 +84,7 @@ Agent-facing adapter:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --source-id users-api `
-  --project code/demo `
-  --prose "Verify create user" `
+  --agent-plan-file artifacts/agent/input/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -81,9 +96,7 @@ Java/Spring controller scope uses the same flow, optionally with an explicit sta
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --source-id users-api `
-  --project code/demo `
-  --prose "Verify get user by id" `
+  --agent-plan-file artifacts/agent/input/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -96,6 +109,16 @@ The adapter only gathers arguments, builds typed request objects, calls `Generat
 and prints a JSON summary. It does not scan outside explicit evidence scope paths or perform
 repository-wide stack discovery.
 
+Fallback prose adapter:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --source-id users-api `
+  --project code/demo `
+  --prose "Verify create user" `
+  --workspace-root .
+```
+
 When invoking generation locally, prefer the target project's resolved venv/interpreter first.
 Use `py -3.14` only as fallback when no project-specific interpreter is available.
 
@@ -103,9 +126,7 @@ Draft scenario rendering preview:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --source-id users-api `
-  --project code/demo `
-  --prose "Verify create user" `
+  --agent-plan-file artifacts/agent/input/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `

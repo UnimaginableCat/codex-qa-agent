@@ -14,6 +14,56 @@ from tools.generation import cli
 
 
 class GenerationCliAdapterTests(unittest.TestCase):
+    def test_agent_plan_file_generates_plan_without_prose_scanning(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agent_plan_path = root / "agent-plan.json"
+            agent_plan_path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "sessions-agent-plan",
+                        "project": "code/demo",
+                        "title": "Internal user sessions",
+                        "goal": "Cover session lifecycle behavior.",
+                        "planned_test_cases": [
+                            {
+                                "title": "Authenticate session",
+                                "objective": "Verify session authentication.",
+                                "actions": ["Call the authenticate session API."],
+                                "expected_outcomes": ["Session token is returned."],
+                                "priority": "high",
+                            },
+                            {
+                                "title": "List sessions",
+                                "objective": "Verify sessions can be listed.",
+                                "actions": ["Call the list sessions API."],
+                                "expected_outcomes": ["Existing sessions are returned."],
+                            },
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--agent-plan-file",
+                        str(agent_plan_path),
+                        "--workspace-root",
+                        str(root),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["input_mode"], "agent_plan")
+        self.assertEqual(payload["source_id"], "sessions-agent-plan")
+        self.assertEqual(payload["test_case_count"], 2)
+
     def test_plan_only_mode_generates_plan_and_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
             stdout = io.StringIO()
@@ -34,6 +84,7 @@ class GenerationCliAdapterTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["input_mode"], "prose")
         self.assertEqual(payload["code_facts"], "not_requested")
         self.assertEqual(payload["enrichment"], "not_requested")
         self.assertGreaterEqual(payload["test_case_count"], 2)
@@ -89,6 +140,69 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertIn("evidence", payload["artifact_paths"])
         self.assertIn("enriched_plan", payload["artifact_paths"])
         self.assertIn("enrichment_result", payload["artifact_paths"])
+
+    def test_agent_plan_file_can_use_evidence_enrichment(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "code" / "demo"
+            project.mkdir(parents=True)
+            (project / "api.py").write_text(
+                "\n".join(
+                    [
+                        "from fastapi import APIRouter",
+                        "router = APIRouter()",
+                        "@router.post('/users')",
+                        "def create_user(payload: dict) -> dict:",
+                        "    return payload",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            agent_plan_path = root / "agent-plan.json"
+            agent_plan_path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users-agent-plan",
+                        "project": "code/demo",
+                        "title": "Users API",
+                        "planned_test_cases": [
+                            {
+                                "title": "Create user",
+                                "objective": "Verify user creation.",
+                                "actions": ["Call the create user API."],
+                                "expected_outcomes": ["User is created."],
+                                "unresolved_items": ["API endpoint executable detail is not resolved."],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--agent-plan-file",
+                        str(agent_plan_path),
+                        "--workspace-root",
+                        str(root),
+                        "--project-path",
+                        str(project),
+                        "--collect-code-facts",
+                        "--enrich",
+                        "--evidence-scope-path",
+                        "api.py",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["input_mode"], "agent_plan")
+        self.assertEqual(payload["code_facts"], "collected")
+        self.assertEqual(payload["enrichment"], "applied")
+        self.assertEqual(payload["applied_evidence_count"], 1)
 
     def test_enrichment_requires_collect_code_facts(self) -> None:
         with TemporaryDirectory() as tmp:

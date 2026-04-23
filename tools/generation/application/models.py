@@ -8,12 +8,19 @@ from pathlib import Path
 from typing import Any
 
 from tools.common.json_safe import to_json_safe
-from tools.generation.domain.models import GenerationSourceInput
+from tools.generation.domain.models import AgentTestPlanInput, GenerationSourceInput
 from tools.generation.evidence.models import CodeFactsScope
 
 
 class GenerationOutputMode(StrEnum):
     TEST_PLAN = "test_plan"
+
+
+class GenerationInputMode(StrEnum):
+    """Supported first-stage input paths for test-plan generation."""
+
+    AGENT_PLAN = "agent_plan"
+    PROSE = "prose"
 
 
 @dataclass(slots=True)
@@ -36,6 +43,8 @@ class GenerateTestPlanRequest:
     """Stable application input for Phase 1 test-plan generation."""
 
     source_input: GenerationSourceInput
+    input_mode: GenerationInputMode = GenerationInputMode.PROSE
+    agent_plan: AgentTestPlanInput | None = None
     workspace_root: Path | None = None
     project_path: Path | None = None
     evidence_scope: CodeFactsScope | None = None
