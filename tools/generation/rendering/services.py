@@ -131,6 +131,7 @@ class DraftScenarioRenderer:
                         "preview_only": True,
                         "route_binding": support,
                         "case_support": _draft_case_support(test_case, support),
+                        "case_gaps": [gap.to_dict() for gap in test_case.gaps],
                     },
                 )
             )

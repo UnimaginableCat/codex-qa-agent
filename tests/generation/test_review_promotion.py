@@ -118,6 +118,30 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertEqual(review_set.items[0].route_status, "resolved_from_route_hints")
         self.assertEqual(review_set.items[0].readiness_category.value, "parser_valid_strongly_supported")
 
+    def test_review_service_surfaces_typed_case_gaps_as_gap_codes_and_edit_targets(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _set_case_gaps(
+                Path(payload["artifact_paths"]["scenario_render_result"]),
+                [
+                    {"category": "environment", "message": "Use staging env before execution."},
+                    {"category": "data_setup", "message": "Create an active user fixture before execution."},
+                ],
+            )
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        self.assertIn("environment_unresolved", review_set.items[0].gap_summary.gap_codes)
+        self.assertIn("data_setup_unresolved", review_set.items[0].gap_summary.gap_codes)
+        self.assertIn("Use staging env before execution.", review_set.items[0].gap_summary.gap_messages)
+        self.assertTrue(
+            any(
+                target.target_type.value == "clarify_notes_only" and target.section_name == "Preconditions"
+                for target in review_set.items[0].edit_targets.targets
+            )
+        )
+
     def test_review_service_marks_invalid_draft_as_invalid_review_item(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -500,6 +524,12 @@ def _set_route_binding_method(render_result_path: Path, method: str) -> None:
 def _drop_route_binding_keep_case_support(render_result_path: Path) -> None:
     payload = json.loads(render_result_path.read_text(encoding="utf-8"))
     payload["draft_set"]["drafts"][0]["metadata"].pop("route_binding", None)
+    render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _set_case_gaps(render_result_path: Path, case_gaps: list[dict[str, object]]) -> None:
+    payload = json.loads(render_result_path.read_text(encoding="utf-8"))
+    payload["draft_set"]["drafts"][0]["metadata"]["case_gaps"] = case_gaps
     render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 

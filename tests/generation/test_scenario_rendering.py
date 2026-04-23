@@ -9,9 +9,11 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.generation.domain.models import (
+    GapCategory,
     GenerationRunContext,
     NormalizedTestPlan,
     PlannedCaseSupport,
+    PlannedCaseGap,
     PlannedRouteIntent,
     PlannedTestCase,
     RouteSupportHint,
@@ -133,6 +135,31 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertEqual(
             render_result.draft_set.drafts[0].metadata["case_support"]["route_hints"][0]["endpoint_path"],
             "/users",
+        )
+
+    def test_renderer_projects_case_gaps_into_draft_metadata(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-001",
+                    title="Create user",
+                    objective="Verify create user.",
+                    planned_route=PlannedRouteIntent(http_method="POST", endpoint_path="/users"),
+                    gaps=[
+                        PlannedCaseGap(
+                            category=GapCategory.AUTH_STRATEGY,
+                            message="Auth strategy is not selected.",
+                        )
+                    ],
+                )
+            ]
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        self.assertEqual(
+            render_result.draft_set.drafts[0].metadata["case_gaps"][0]["category"],
+            "auth_strategy",
         )
 
     def test_renderer_renders_java_spring_list_case_from_route_hints(self) -> None:

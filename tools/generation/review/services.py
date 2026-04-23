@@ -8,7 +8,13 @@ from pathlib import Path
 
 from tools.common.io import read_json_file
 from tools.common.statuses import StepStatus
-from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic, GenerationRunContext
+from tools.generation.domain.models import (
+    DiagnosticSeverity,
+    GapCategory,
+    GenerationDiagnostic,
+    GenerationRunContext,
+    PlannedCaseGap,
+)
 from tools.generation.persistence.artifacts import (
     GENERATION_RUNS_DIRNAME,
     FileGenerationArtifactStore,
@@ -902,6 +908,13 @@ def _draft_gap_summary(
         gap_codes.append("non_route_requirements_remaining")
         gap_messages.append("Route is resolved, but non-route execution details still remain.")
 
+    for gap in _case_gaps_from_draft_metadata(draft):
+        code, message = _gap_projection(gap)
+        if code:
+            gap_codes.append(code)
+        if message:
+            gap_messages.append(message)
+
     for diagnostic in render_diagnostics:
         if diagnostic.code == "rendered_with_partial_information":
             continue
@@ -1475,6 +1488,91 @@ def _build_edit_targets(
             )
         )
 
+    if "environment_unresolved" in gap_codes and not _has_edit_target(
+        targets,
+        DraftEditTargetType.CLARIFY_NOTES_ONLY,
+        "Preconditions",
+    ):
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.CLARIFY_NOTES_ONLY,
+                section_name="Preconditions",
+                reason="Environment requirements remain unresolved in the canonical test-plan gap model.",
+                related_requirements=[],
+                priority="high",
+                suggested_minimum_patch="State which environment, env file, or workspace dependency must be selected before execution.",
+            )
+        )
+
+    if "data_setup_unresolved" in gap_codes and not _has_edit_target(
+        targets,
+        DraftEditTargetType.CLARIFY_NOTES_ONLY,
+        "Preconditions",
+    ):
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.CLARIFY_NOTES_ONLY,
+                section_name="Preconditions",
+                reason="Data setup requirements remain unresolved in the canonical test-plan gap model.",
+                related_requirements=[],
+                priority="normal",
+                suggested_minimum_patch="Describe the minimum fixture, seed data, or pre-existing entity state required before execution.",
+            )
+        )
+
+    if "auth_strategy_unresolved" in gap_codes and not _has_edit_target(
+        targets,
+        DraftEditTargetType.ADD_AUTH_HEADERS,
+        "Preconditions",
+    ):
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.ADD_AUTH_HEADERS,
+                section_name="Preconditions",
+                reason="Auth strategy remains unresolved in the canonical test-plan gap model.",
+                related_requirements=["auth_strategy"],
+                priority="normal",
+                suggested_minimum_patch="State the required auth strategy or headers before trying to execute the API step.",
+            )
+        )
+
+    if "assertion_detail_unresolved" in gap_codes and not _has_edit_target(
+        targets,
+        DraftEditTargetType.ADD_EXPECTED_ASSERTION,
+        "Final expectations",
+    ):
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.ADD_EXPECTED_ASSERTION,
+                section_name="Final expectations",
+                reason="Assertion detail remains unresolved in the canonical test-plan gap model.",
+                related_requirements=["assertions"],
+                priority="high",
+                suggested_minimum_patch="Add at least one deterministic assertion that closes the unresolved expected-behavior gap.",
+            )
+        )
+
+    if gap_codes & {"endpoint_detail_unresolved", "executable_detail_unresolved"} and not route_binding and not _has_edit_target(
+        targets,
+        DraftEditTargetType.CLARIFY_NOTES_ONLY,
+        "Notes",
+    ):
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.CLARIFY_NOTES_ONLY,
+                section_name="Notes",
+                reason="Executable endpoint detail is unresolved in the canonical test-plan gap model.",
+                related_requirements=["endpoint_path", "http_method"],
+                priority="high",
+                suggested_minimum_patch="Clarify the exact route and execution detail in Notes or upstream plan data before trying to render or execute the scenario.",
+            )
+        )
+
     if not targets and str(route_binding.get("readiness") or "") == "route_resolved":
         targets.append(
             _edit_target(
@@ -1545,6 +1643,14 @@ def _edit_target(
     )
 
 
+def _has_edit_target(
+    targets: list[DraftEditTarget],
+    target_type: DraftEditTargetType,
+    section_name: str,
+) -> bool:
+    return any(target.target_type == target_type and target.section_name == section_name for target in targets)
+
+
 def _route_binding_from_scenario(scenario: ScenarioDefinition | None) -> dict[str, object]:
     api_step = _first_api_step(scenario)
     if api_step is None or api_step.api is None:
@@ -1576,6 +1682,31 @@ def _route_binding_from_draft_metadata(draft: ScenarioDraft) -> dict[str, object
                 "readiness": str(case_support.get("readiness") or valid_hints[0].get("readiness") or ""),
             }
     return dict(draft.metadata.get("route_binding") or {})
+
+
+def _case_gaps_from_draft_metadata(draft: ScenarioDraft) -> list[PlannedCaseGap]:
+    raw_gaps = draft.metadata.get("case_gaps", [])
+    if not isinstance(raw_gaps, list):
+        return []
+    gaps: list[PlannedCaseGap] = []
+    for item in raw_gaps:
+        if not isinstance(item, dict):
+            continue
+        gaps.append(PlannedCaseGap.from_dict(item))
+    return gaps
+
+
+def _gap_projection(gap: PlannedCaseGap) -> tuple[str, str]:
+    mapping = {
+        GapCategory.ENDPOINT_DETAIL: "endpoint_detail_unresolved",
+        GapCategory.EXECUTABLE_DETAIL: "executable_detail_unresolved",
+        GapCategory.AUTH_STRATEGY: "auth_strategy_unresolved",
+        GapCategory.ENVIRONMENT: "environment_unresolved",
+        GapCategory.ASSERTION_DETAIL: "assertion_detail_unresolved",
+        GapCategory.DATA_SETUP: "data_setup_unresolved",
+    }
+    code = mapping.get(gap.category, "")
+    return code, gap.message
 
 
 def _first_api_step(scenario: ScenarioDefinition | None):
