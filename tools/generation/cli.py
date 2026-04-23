@@ -92,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-dir",
         default="scenarios/generated",
-        help="Promotion target directory under scenarios/.",
+        help="Promotion target directory under scenarios/. The default generated/ root uses a run-scoped subdirectory.",
     )
 
     parser.add_argument("--project-path", help="Explicit target project path for code facts extraction.")

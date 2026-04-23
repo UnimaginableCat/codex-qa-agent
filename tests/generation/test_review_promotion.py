@@ -202,6 +202,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             self.assertEqual(result.status.value, "PASS")
             self.assertTrue(result.target_path.exists())
             self.assertTrue(result.promotion_result_path.exists())
+            self.assertEqual(result.target_path.parent.name, f"users-{payload['run_id'].lower()}")
             self.assertIn("generated_by: codex-qa-agent", promoted)
             self.assertIn(f"generation_run_id: {payload['run_id']}", promoted)
             self.assertTrue(promoted.endswith(original))
@@ -250,6 +251,33 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertTrue(any(diagnostic.code == "scenario_promotion_invalid_draft" for diagnostic in rejected.diagnostics))
         self.assertEqual(allowed.status.value, "PASS")
         self.assertTrue(any(diagnostic.code == "scenario_promotion_invalid_override" for diagnostic in allowed.diagnostics))
+
+    def test_promotion_uses_run_scoped_default_directory_for_different_runs(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first_payload = _generate_draft_run(root)
+            second_payload = _generate_draft_run(root)
+
+            first = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(
+                    run_id=first_payload["run_id"],
+                    draft_id="draft-tc-001",
+                    workspace_root=root,
+                )
+            )
+            second = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(
+                    run_id=second_payload["run_id"],
+                    draft_id="draft-tc-001",
+                    workspace_root=root,
+                )
+            )
+
+        self.assertEqual(first.status.value, "PASS")
+        self.assertEqual(second.status.value, "PASS")
+        self.assertNotEqual(first.target_path, second.target_path)
+        self.assertEqual(first.target_path.parent.name, f"users-{first_payload['run_id'].lower()}")
+        self.assertEqual(second.target_path.parent.name, f"users-{second_payload['run_id'].lower()}")
 
     def test_cli_review_and_promote_commands(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -305,6 +333,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             self.assertEqual(promote_code, 0)
             self.assertTrue(Path(promote_payload["target_path"]).exists())
             self.assertTrue(str(promote_payload["target_path"]).endswith("users-draft-tc-001.md"))
+            self.assertIn("scenarios\\promoted\\users-draft-tc-001.md", str(promote_payload["target_path"]))
 
     def test_cli_review_output_surfaces_partial_draft_gaps(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -452,7 +481,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
 
 def _generate_draft_run(root: Path) -> dict[str, object]:
     project = root / "code" / "demo"
-    project.mkdir(parents=True)
+    project.mkdir(parents=True, exist_ok=True)
     (project / "api.py").write_text(
         "\n".join(
             [

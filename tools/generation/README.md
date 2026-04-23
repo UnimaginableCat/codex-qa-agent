@@ -190,4 +190,7 @@ Review and promotion:
 ```
 
 Promotion is explicit, never overwrites existing files, and writes `promotion-result.json` under the
-generation artifact bundle. Promoted drafts receive a metadata header and are not executed.
+generation artifact bundle. When using the default `scenarios/generated` root, promoted drafts are
+written under a run-scoped subdirectory such as `scenarios/generated/<source>-<run_id>/` so
+separate generation runs do not collide. Promoted drafts receive a metadata header and are not
+executed.

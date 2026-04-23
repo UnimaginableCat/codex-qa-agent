@@ -209,6 +209,7 @@ class ScenarioDraftPromotionService:
                 diagnostics,
                 source_path=source_path,
             )
+        target_dir = _promotion_target_dir(target_dir, run_context)
         target_path = target_dir / f"{_slugify(run_context.source_id)}-{_slugify(request.draft_id)}.md"
         if target_path.exists():
             diagnostics.append(
@@ -1741,6 +1742,13 @@ def _resolve_target_dir(workspace_root: Path, target_dir: Path) -> Path:
     if resolved != scenarios_root and scenarios_root not in resolved.parents:
         raise ValueError("Promotion target directory must be under scenarios/.")
     return target
+
+
+def _promotion_target_dir(base_target_dir: Path, run_context: GenerationRunContext) -> Path:
+    normalized_parts = tuple(_slugify(part) for part in base_target_dir.parts)
+    if normalized_parts[-2:] != ("scenarios", "generated"):
+        return base_target_dir
+    return base_target_dir / f"{_slugify(run_context.source_id)}-{_slugify(run_context.run_id)}"
 
 
 def _promotion_header(run_id: str, draft_id: str) -> str:
