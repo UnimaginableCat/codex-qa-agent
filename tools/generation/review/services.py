@@ -28,7 +28,10 @@ from .models import (
     DraftRequirementCheck,
     DraftReadinessCategory,
     DraftReviewDiagnosticsSummary,
+    ExecutionEnvironmentReadinessCategory,
     ExecutionReadinessCategory,
+    PreflightIssue,
+    PreflightIssueType,
     ScenarioRequirement,
     ScenarioRequirementStatus,
     ScenarioCompileStatus,
@@ -38,12 +41,15 @@ from .models import (
     ScenarioDraftReviewSet,
     ScenarioPromotionRequest,
     ScenarioPromotionResult,
+    ScenarioPreflightStatus,
+    ScenarioPreflightValidationResult,
     ScenarioRevalidationRequest,
     ScenarioRevalidationResult,
 )
 from .templates import PatchTemplateCatalogService
 from tools.scenario_runner.domain.models import ScenarioDefinition, ScenarioStepType
-from tools.scenario_runner.orchestration.compiler import ScenarioCompiler
+from tools.scenario_runner.orchestration.compiler import CompiledScenario, ScenarioCompiler
+from tools.scenario_runner.orchestration.preflight import ScenarioPreflightChecker
 from tools.scenario_runner.parser import MarkdownScenarioParser
 
 
@@ -258,6 +264,7 @@ class ScenarioRevalidationService:
 
     parser: MarkdownScenarioParser = field(default_factory=MarkdownScenarioParser)
     compile_validator: "ScenarioCompileValidationService" = field(default_factory=lambda: ScenarioCompileValidationService())
+    preflight_validator: "ScenarioPreflightValidationService" = field(default_factory=lambda: ScenarioPreflightValidationService())
 
     def validate(self, request: ScenarioRevalidationRequest) -> ScenarioRevalidationResult:
         file_path = Path(request.file_path)
@@ -315,7 +322,9 @@ class ScenarioRevalidationService:
         )
         compile_validation = None
         execution_readiness = _parser_only_readiness(parse_status, checklist)
-        if request.validation_mode == "compile":
+        preflight_validation = None
+        environment_readiness = None
+        if request.validation_mode in {"compile", "preflight"}:
             compile_validation = self.compile_validator.validate(
                 file_path=file_path,
                 parse_status=parse_status,
@@ -324,6 +333,22 @@ class ScenarioRevalidationService:
             )
             execution_readiness = compile_validation.readiness_category
             gap_summary = _merge_compile_gaps(gap_summary, compile_validation)
+            edit_targets = _build_edit_targets(
+                draft,
+                checklist=checklist,
+                gap_summary=gap_summary,
+                parse_status=parse_status,
+                route_binding=route_binding,
+            )
+        if request.validation_mode == "preflight":
+            preflight_validation = self.preflight_validator.validate(
+                file_path=file_path,
+                workspace_root=Path(request.workspace_root),
+                parse_status=parse_status,
+                scenario=parse_result.scenario,
+            )
+            environment_readiness = preflight_validation.readiness_category
+            gap_summary = _merge_preflight_gaps(gap_summary, preflight_validation)
             edit_targets = _build_edit_targets(
                 draft,
                 checklist=checklist,
@@ -346,7 +371,9 @@ class ScenarioRevalidationService:
             draft_id=draft_id,
             validation_mode=request.validation_mode,
             compile_validation=compile_validation,
+            preflight_validation=preflight_validation,
             execution_readiness_category=execution_readiness,
+            environment_readiness_category=environment_readiness,
         )
 
 
@@ -409,6 +436,99 @@ class ScenarioCompileValidationService:
             summary=_compile_summary(compile_status, readiness, issues, warnings),
             checks=[check.to_dict() for check in compile_result.checks],
             required_external_inputs=[item.to_dict() for item in compile_result.required_external_inputs],
+        )
+
+
+@dataclass(slots=True)
+class ScenarioPreflightValidationService:
+    """Run scenario_runner preflight checks without executing scenario steps."""
+
+    compiler: ScenarioCompiler = field(default_factory=ScenarioCompiler)
+    preflight_checker: ScenarioPreflightChecker = field(default_factory=ScenarioPreflightChecker)
+
+    def validate(
+        self,
+        *,
+        file_path: Path,
+        workspace_root: Path,
+        parse_status: ScenarioDraftParseStatus,
+        scenario: ScenarioDefinition | None,
+    ) -> ScenarioPreflightValidationResult:
+        if parse_status == ScenarioDraftParseStatus.INVALID or scenario is None:
+            issue = PreflightIssue(
+                issue_type=PreflightIssueType.PARSE_ERROR,
+                message="Preflight validation was skipped because parser validation failed.",
+                severity="error",
+                source="parser",
+            )
+            return ScenarioPreflightValidationResult(
+                file_path=file_path,
+                parse_status=parse_status,
+                compile_status=ScenarioCompileStatus.SKIPPED,
+                preflight_status=ScenarioPreflightStatus.SKIPPED,
+                readiness_category=ExecutionEnvironmentReadinessCategory.SKIPPED_DUE_TO_PARSER_ERROR,
+                issues=[issue],
+                summary="Parser invalid; preflight validation was skipped.",
+            )
+
+        compiled = self.compiler.compile(scenario)
+        if not compiled.compile_result.passed:
+            issues = [
+                PreflightIssue(
+                    issue_type=PreflightIssueType.COMPILE_ERROR,
+                    message=issue.message,
+                    severity=str((issue.outcome or StepStatus.BLOCKED).value).lower(),
+                    source="scenario_compiler",
+                    details=issue.to_dict(),
+                )
+                for issue in compiled.compile_result.issues
+            ]
+            if not issues:
+                issues.append(
+                    PreflightIssue(
+                        issue_type=PreflightIssueType.COMPILE_ERROR,
+                        message="Preflight validation was skipped because compile validation failed.",
+                        severity="blocked",
+                        source="scenario_compiler",
+                    )
+                )
+            return ScenarioPreflightValidationResult(
+                file_path=file_path,
+                parse_status=parse_status,
+                compile_status=ScenarioCompileStatus.FAILED,
+                preflight_status=ScenarioPreflightStatus.SKIPPED,
+                readiness_category=ExecutionEnvironmentReadinessCategory.SKIPPED_DUE_TO_COMPILE_ERROR,
+                issues=issues,
+                summary="Compile blocked; preflight validation was skipped.",
+            )
+
+        preflight_result = self.preflight_checker.run(
+            CompiledScenario(
+                scenario_definition=scenario,
+                compile_result=compiled.compile_result,
+            ),
+            workspace_root,
+        )
+        issues = [
+            _preflight_issue_from_check(check)
+            for check in preflight_result.failed_checks()
+        ]
+        preflight_status = (
+            ScenarioPreflightStatus.SUCCESS
+            if preflight_result.passed
+            else ScenarioPreflightStatus.FAILED
+        )
+        readiness = _preflight_readiness(preflight_status, issues, warnings=[])
+        return ScenarioPreflightValidationResult(
+            file_path=file_path,
+            parse_status=parse_status,
+            compile_status=ScenarioCompileStatus.SUCCESS,
+            preflight_status=preflight_status,
+            readiness_category=readiness,
+            issues=issues,
+            warnings=[],
+            checks=[check.to_dict() for check in preflight_result.checks],
+            summary=_preflight_summary(readiness, issues, warnings=[]),
         )
 
 
@@ -510,6 +630,87 @@ def _merge_compile_gaps(
         gap_codes.append("external_inputs_required")
         gap_messages.append("One or more external variables must be resolved before execution.")
     for warning in compile_validation.warnings:
+        gap_codes.append(warning.issue_type.value)
+        gap_messages.append(warning.message)
+    return DraftGapSummary(
+        gap_codes=_dedupe_preserve_order([str(item) for item in gap_codes]),
+        gap_messages=_dedupe_preserve_order([str(item) for item in gap_messages]),
+    )
+
+
+def _preflight_issue_from_check(check: object) -> PreflightIssue:
+    payload = check.to_dict()
+    name = str(payload.get("name", "preflight_check"))
+    return PreflightIssue(
+        issue_type=_preflight_issue_type(name),
+        message=str(payload.get("message", "")),
+        severity=str(payload.get("status", "blocked")).lower(),
+        source="scenario_preflight_checker",
+        details=payload,
+    )
+
+
+def _preflight_issue_type(check_name: str) -> PreflightIssueType:
+    if check_name == "environment_file_exists":
+        return PreflightIssueType.MISSING_ENVIRONMENT
+    if check_name == "target_project_path_exists":
+        return PreflightIssueType.MISSING_PROJECT
+    if check_name.startswith("dependency_"):
+        return PreflightIssueType.MISSING_DEPENDENCY
+    if check_name == "external_inputs_resolvable":
+        return PreflightIssueType.EXTERNAL_VARIABLE
+    if check_name.startswith("output_directory_available"):
+        return PreflightIssueType.WORKSPACE_OUTPUT
+    if check_name in {
+        "scenario_file_exists",
+        "scenario_name_present",
+        "project_path_present",
+        "environment_path_present",
+        "variables_section_valid",
+        "steps_present",
+        "step_numbers_unique",
+    }:
+        return PreflightIssueType.SCENARIO_SHAPE
+    return PreflightIssueType.UNKNOWN
+
+
+def _preflight_readiness(
+    preflight_status: ScenarioPreflightStatus,
+    issues: list[PreflightIssue],
+    warnings: list[PreflightIssue],
+) -> ExecutionEnvironmentReadinessCategory:
+    if preflight_status != ScenarioPreflightStatus.SUCCESS or issues:
+        return ExecutionEnvironmentReadinessCategory.PREFLIGHT_BLOCKED
+    if warnings:
+        return ExecutionEnvironmentReadinessCategory.PREFLIGHT_READY_WITH_WARNINGS
+    return ExecutionEnvironmentReadinessCategory.PREFLIGHT_READY
+
+
+def _preflight_summary(
+    readiness: ExecutionEnvironmentReadinessCategory,
+    issues: list[PreflightIssue],
+    warnings: list[PreflightIssue],
+) -> str:
+    if readiness == ExecutionEnvironmentReadinessCategory.PREFLIGHT_BLOCKED:
+        return f"Preflight validation failed with {len(issues)} issue(s)."
+    if readiness == ExecutionEnvironmentReadinessCategory.PREFLIGHT_READY_WITH_WARNINGS:
+        return f"Preflight validation passed with {len(warnings)} warning(s)."
+    return "Preflight validation passed; workspace is ready for runner execution."
+
+
+def _merge_preflight_gaps(
+    gap_summary: DraftGapSummary,
+    preflight_validation: ScenarioPreflightValidationResult,
+) -> DraftGapSummary:
+    gap_codes = list(gap_summary.gap_codes)
+    gap_messages = list(gap_summary.gap_messages)
+    if preflight_validation.readiness_category == ExecutionEnvironmentReadinessCategory.PREFLIGHT_BLOCKED:
+        gap_codes.append("preflight_blocked")
+        gap_messages.append("Preflight validation failed in the current workspace.")
+    for issue in preflight_validation.issues:
+        gap_codes.append(issue.issue_type.value)
+        gap_messages.append(issue.message)
+    for warning in preflight_validation.warnings:
         gap_codes.append(warning.issue_type.value)
         gap_messages.append(warning.message)
     return DraftGapSummary(
@@ -1173,6 +1374,32 @@ def _build_edit_targets(
                 related_requirements=[],
                 priority="normal",
                 suggested_minimum_patch="Declare the variable source in Variables or ensure the environment provides it before runner execution.",
+            )
+        )
+
+    if gap_codes & {"missing_environment", "missing_project", "missing_dependency", "workspace_output"}:
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.CLARIFY_NOTES_ONLY,
+                section_name="Preconditions",
+                reason="Preflight validation found workspace or environment readiness issues.",
+                related_requirements=[],
+                priority="high",
+                suggested_minimum_patch="Resolve the referenced environment file, target project path, dependency, or writable output directory before execution.",
+            )
+        )
+
+    if "external_variable" in gap_codes:
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.CLARIFY_NOTES_ONLY,
+                section_name="Variables",
+                reason="Preflight validation found unresolved external variables.",
+                related_requirements=[],
+                priority="high",
+                suggested_minimum_patch="Provide the required variable through the Variables section or selected environment before execution.",
             )
         )
 

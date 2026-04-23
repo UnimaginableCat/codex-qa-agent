@@ -75,6 +75,32 @@ class ExecutionReadinessCategory(StrEnum):
     COMPILE_VALID_RUNNER_READY = "compile_valid_runner_ready"
 
 
+class ScenarioPreflightStatus(StrEnum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class PreflightIssueType(StrEnum):
+    PARSE_ERROR = "parse_error"
+    COMPILE_ERROR = "compile_error"
+    MISSING_ENVIRONMENT = "missing_environment"
+    MISSING_PROJECT = "missing_project"
+    MISSING_DEPENDENCY = "missing_dependency"
+    EXTERNAL_VARIABLE = "external_variable"
+    WORKSPACE_OUTPUT = "workspace_output"
+    SCENARIO_SHAPE = "scenario_shape"
+    UNKNOWN = "unknown"
+
+
+class ExecutionEnvironmentReadinessCategory(StrEnum):
+    PREFLIGHT_BLOCKED = "preflight_blocked"
+    PREFLIGHT_READY_WITH_WARNINGS = "preflight_ready_with_warnings"
+    PREFLIGHT_READY = "preflight_ready"
+    SKIPPED_DUE_TO_PARSER_ERROR = "skipped_due_to_parser_error"
+    SKIPPED_DUE_TO_COMPILE_ERROR = "skipped_due_to_compile_error"
+
+
 @dataclass(slots=True)
 class ScenarioRequirement:
     requirement_id: str
@@ -422,6 +448,7 @@ class ScenarioPromotionRequest:
 class ScenarioRevalidationRequest:
     file_path: Path
     validation_mode: str = "parser"
+    workspace_root: Path = Path(".")
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -486,6 +513,69 @@ class ScenarioCompileValidationResult:
 
 
 @dataclass(slots=True)
+class PreflightIssue:
+    issue_type: PreflightIssueType
+    message: str
+    severity: str = "blocked"
+    source: str = "preflight"
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "PreflightIssue":
+        return cls(
+            issue_type=PreflightIssueType(str(payload["issue_type"])),
+            message=str(payload["message"]),
+            severity=str(payload.get("severity", "blocked")),
+            source=str(payload.get("source", "preflight")),
+            details=dict(payload.get("details") or {}),
+        )
+
+
+@dataclass(slots=True)
+class ScenarioPreflightValidationResult:
+    file_path: Path
+    parse_status: ScenarioDraftParseStatus
+    compile_status: ScenarioCompileStatus
+    preflight_status: ScenarioPreflightStatus = ScenarioPreflightStatus.SKIPPED
+    readiness_category: ExecutionEnvironmentReadinessCategory = (
+        ExecutionEnvironmentReadinessCategory.SKIPPED_DUE_TO_PARSER_ERROR
+    )
+    issues: list[PreflightIssue] = field(default_factory=list)
+    warnings: list[PreflightIssue] = field(default_factory=list)
+    checks: list[dict[str, Any]] = field(default_factory=list)
+    summary: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ScenarioPreflightValidationResult":
+        return cls(
+            file_path=Path(str(payload["file_path"])),
+            parse_status=ScenarioDraftParseStatus(str(payload["parse_status"])),
+            compile_status=ScenarioCompileStatus(str(payload["compile_status"])),
+            preflight_status=ScenarioPreflightStatus(
+                str(payload.get("preflight_status", ScenarioPreflightStatus.SKIPPED.value))
+            ),
+            readiness_category=ExecutionEnvironmentReadinessCategory(
+                str(
+                    payload.get(
+                        "readiness_category",
+                        ExecutionEnvironmentReadinessCategory.SKIPPED_DUE_TO_PARSER_ERROR.value,
+                    )
+                )
+            ),
+            issues=[PreflightIssue.from_dict(item) for item in payload.get("issues", [])],
+            warnings=[PreflightIssue.from_dict(item) for item in payload.get("warnings", [])],
+            checks=[dict(item) for item in payload.get("checks", [])],
+            summary=str(payload.get("summary", "")),
+        )
+
+
+@dataclass(slots=True)
 class ScenarioRevalidationResult:
     file_path: Path
     parse_status: ScenarioDraftParseStatus
@@ -500,7 +590,9 @@ class ScenarioRevalidationResult:
     draft_id: str = ""
     validation_mode: str = "parser"
     compile_validation: ScenarioCompileValidationResult | None = None
+    preflight_validation: ScenarioPreflightValidationResult | None = None
     execution_readiness_category: ExecutionReadinessCategory = ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE
+    environment_readiness_category: ExecutionEnvironmentReadinessCategory | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -529,6 +621,11 @@ class ScenarioRevalidationResult:
                 if not payload.get("compile_validation")
                 else ScenarioCompileValidationResult.from_dict(dict(payload["compile_validation"]))
             ),
+            preflight_validation=(
+                None
+                if not payload.get("preflight_validation")
+                else ScenarioPreflightValidationResult.from_dict(dict(payload["preflight_validation"]))
+            ),
             execution_readiness_category=ExecutionReadinessCategory(
                 str(
                     payload.get(
@@ -536,6 +633,11 @@ class ScenarioRevalidationResult:
                         ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE.value,
                     )
                 )
+            ),
+            environment_readiness_category=(
+                None
+                if not payload.get("environment_readiness_category")
+                else ExecutionEnvironmentReadinessCategory(str(payload["environment_readiness_category"]))
             ),
         )
 

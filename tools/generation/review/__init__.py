@@ -1,9 +1,9 @@
 """Review and promotion workflow for generated scenario drafts."""
 
 from .models import (
-    DeferredDraftReviewItem,
     CompileIssue,
     CompileIssueType,
+    DeferredDraftReviewItem,
     DraftChecklistResult,
     DraftEditTarget,
     DraftEditTargetList,
@@ -14,10 +14,13 @@ from .models import (
     DraftRequirementCheck,
     DraftReadinessCategory,
     DraftReviewDiagnosticsSummary,
+    ExecutionEnvironmentReadinessCategory,
     ExecutionReadinessCategory,
     PatchTemplate,
     PatchTemplateCatalog,
     PatchTemplateType,
+    PreflightIssue,
+    PreflightIssueType,
     ScenarioRequirement,
     ScenarioRequirementStatus,
     ScenarioDraftParseStatus,
@@ -29,19 +32,22 @@ from .models import (
     ScenarioCompileValidationResult,
     ScenarioRevalidationRequest,
     ScenarioRevalidationResult,
+    ScenarioPreflightStatus,
+    ScenarioPreflightValidationResult,
 )
 from .services import (
     ScenarioCompileValidationService,
     ScenarioDraftPromotionService,
     ScenarioDraftReviewService,
+    ScenarioPreflightValidationService,
     ScenarioRevalidationService,
 )
 from .templates import PatchTemplateCatalogService
 
 __all__ = [
-    "DeferredDraftReviewItem",
     "CompileIssue",
     "CompileIssueType",
+    "DeferredDraftReviewItem",
     "DraftChecklistResult",
     "DraftEditTarget",
     "DraftEditTargetList",
@@ -52,11 +58,14 @@ __all__ = [
     "DraftRequirementCheck",
     "DraftReadinessCategory",
     "DraftReviewDiagnosticsSummary",
+    "ExecutionEnvironmentReadinessCategory",
     "ExecutionReadinessCategory",
     "PatchTemplate",
     "PatchTemplateCatalog",
     "PatchTemplateCatalogService",
     "PatchTemplateType",
+    "PreflightIssue",
+    "PreflightIssueType",
     "ScenarioRequirement",
     "ScenarioRequirementStatus",
     "ScenarioDraftParseStatus",
@@ -69,6 +78,9 @@ __all__ = [
     "ScenarioCompileStatus",
     "ScenarioCompileValidationResult",
     "ScenarioCompileValidationService",
+    "ScenarioPreflightStatus",
+    "ScenarioPreflightValidationResult",
+    "ScenarioPreflightValidationService",
     "ScenarioRevalidationRequest",
     "ScenarioRevalidationResult",
     "ScenarioRevalidationService",

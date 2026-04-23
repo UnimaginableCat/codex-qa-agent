@@ -31,7 +31,7 @@ or use-case invocation without asking for the long operational prompt again.
 Use skill: test-plan-generation
 
 mode: <plan-only | plan-with-evidence | draft-preview | review-drafts | promote-draft | validate-scenario>
-validation_mode: <parser | compile>
+validation_mode: <parser | compile | preflight>
 project: code/<project-name>
 source_id: <optional for review/promote>
 prose: <required for generation modes>
@@ -83,6 +83,7 @@ path: <required for validate-scenario>
   - optional for `validate-scenario`, defaults to `parser`
   - `parser` runs markdown parser checks only
   - `compile` runs parser checks plus scenario compiler contract checks, still without execution
+  - `preflight` runs parser, compile, then existing scenario_runner preflight checks, still without execution
 
 ### Default Agent Interpretation
 
@@ -231,6 +232,22 @@ Compile mode additionally calls the existing `ScenarioCompiler` to check variabl
 capture contracts, step references, and supported expectation DSL. It must not run preflight,
 API tools, DB tools, or `ScenarioRunnerService`.
 
+Preflight-only workspace readiness:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --validate-scenario `
+  --path scenarios/generated/users-draft-tc-001.md `
+  --mode preflight `
+  --workspace-root . `
+  --output-format text
+```
+
+Preflight mode additionally calls the existing `ScenarioPreflightChecker` after parser and compile
+validation pass. It checks workspace/environment readiness such as project path, env file, external
+inputs, local dependencies, tool entrypoints, and output directories. It must not execute scenario
+steps or call API/DB workflows.
+
 ## Canonical Short Examples
 
 Plan only:
@@ -347,7 +364,9 @@ or CLI `--render-drafts`. It writes preview artifacts and validates them with th
 
 Draft review and promotion are available through CLI `--review-drafts` and `--promote-draft`.
 Manual patch revalidation is available through CLI `--validate-scenario --path <scenario.md>`.
-Use `--mode compile` only when the operator asks whether the scenario is structurally runner-ready.
+Use `--mode compile` when the operator asks whether the scenario is structurally runner-ready.
+Use `--mode preflight` when the operator asks whether the current workspace/environment is ready
+to execute the parser/compile-valid scenario.
 
 The CLI adapter is only an argument-gathering layer. It must not be treated as the source of
 generation semantics.
@@ -424,6 +443,7 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 - Do not run or modify `scenario_runner`.
 - Do not execute scenarios during `validate-scenario`; parser-only or compile-only validation is the limit.
 - Do not treat compile-only readiness as runtime correctness; it only checks pre-execution contracts.
+- Do not treat preflight readiness as runtime correctness; it checks environment/workspace readiness before execution.
 - Do not add pause/resume or guided/manual behavior for generation.
 - Do not store canonical planning fields only in `metadata`.
 

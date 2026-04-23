@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument("--promote-draft", action="store_true", help="Promote one selected draft into scenarios/.")
     workflow.add_argument("--list-patch-templates", action="store_true", help="List deterministic draft edit templates.")
     workflow.add_argument("--show-patch-template", action="store_true", help="Show one draft edit template by target type.")
-    workflow.add_argument("--validate-scenario", action="store_true", help="Parser-only revalidate one scenario file.")
+    workflow.add_argument("--validate-scenario", action="store_true", help="Validate one scenario file without execution.")
 
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--prose", help="Inline prose source for test-plan generation.")
@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--path", help="Scenario markdown path for --validate-scenario.")
     parser.add_argument(
         "--mode",
-        choices=["parser", "compile"],
+        choices=["parser", "compile", "preflight"],
         default="parser",
         help="Validation mode for --validate-scenario. Defaults to parser.",
     )
@@ -368,9 +368,19 @@ def run_validate_scenario(args: argparse.Namespace) -> dict[str, Any]:
     if diagnostics:
         raise GenerationCliInputError(diagnostics)
     result = ScenarioRevalidationService().validate(
-        ScenarioRevalidationRequest(file_path=Path(args.path), validation_mode=args.mode)
+        ScenarioRevalidationRequest(
+            file_path=Path(args.path),
+            validation_mode=args.mode,
+            workspace_root=Path(args.workspace_root),
+        )
     )
     compile_validation = result.compile_validation
+    preflight_validation = result.preflight_validation
+    readiness_category = (
+        result.environment_readiness_category.value
+        if result.environment_readiness_category is not None
+        else result.execution_readiness_category.value
+    )
     return to_json_safe(
         {
             "status": StepStatus.PASS.value,
@@ -385,8 +395,16 @@ def run_validate_scenario(args: argparse.Namespace) -> dict[str, Any]:
             "promotion_advisory": result.promotion_advisory.value,
             "completeness_ratio": result.completeness_ratio,
             "compile_status": None if compile_validation is None else compile_validation.compile_status.value,
+            "preflight_status": None if preflight_validation is None else preflight_validation.preflight_status.value,
             "execution_readiness_category": result.execution_readiness_category.value,
+            "environment_readiness_category": (
+                None
+                if result.environment_readiness_category is None
+                else result.environment_readiness_category.value
+            ),
+            "readiness_category": readiness_category,
             "compile_validation": None if compile_validation is None else compile_validation.to_dict(),
+            "preflight_validation": None if preflight_validation is None else preflight_validation.to_dict(),
             "based_on_generated_draft": result.based_on_generated_draft,
             "generation_run_id": result.generation_run_id,
             "draft_id": result.draft_id,
@@ -655,13 +673,15 @@ def _render_template_text(payload: dict[str, Any]) -> str:
 
 
 def _render_revalidation_text(payload: dict[str, Any]) -> str:
+    display_status = payload.get("readiness_category") or payload["status"]
     lines = [
-        f"Status: {payload['status']}",
+        f"Status: {display_status}",
         f"File: {payload['file_path']}",
         f"Parse: {payload['parse_status']}",
         f"Validation mode: {payload.get('validation_mode', 'parser')}",
         f"Compile: {payload.get('compile_status') or 'not_requested'}",
-        f"Readiness: {payload.get('execution_readiness_category', '')}",
+        f"Preflight: {payload.get('preflight_status') or 'not_requested'}",
+        f"Readiness: {payload.get('readiness_category', payload.get('execution_readiness_category', ''))}",
         f"Promotion advisory: {payload.get('promotion_advisory', '')}",
         f"Completeness: {payload.get('completeness_ratio', 0.0)}",
     ]
@@ -693,6 +713,15 @@ def _render_revalidation_text(payload: dict[str, Any]) -> str:
         for issue in compile_issues:
             lines.append(f"  - {issue.get('issue_type', '')}: {issue.get('message', '')}")
         for warning in compile_warnings:
+            lines.append(f"  - warning/{warning.get('issue_type', '')}: {warning.get('message', '')}")
+    preflight_validation = payload.get("preflight_validation") or {}
+    preflight_issues = preflight_validation.get("issues") or []
+    preflight_warnings = preflight_validation.get("warnings") or []
+    if preflight_issues or preflight_warnings:
+        lines.append("Preflight issues:")
+        for issue in preflight_issues:
+            lines.append(f"  - {issue.get('issue_type', '')}: {issue.get('message', '')}")
+        for warning in preflight_warnings:
             lines.append(f"  - warning/{warning.get('issue_type', '')}: {warning.get('message', '')}")
     lines.append("Edit targets:")
     edit_targets = (payload.get("edit_targets") or {}).get("targets", [])

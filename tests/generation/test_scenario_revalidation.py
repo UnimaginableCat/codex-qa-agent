@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -255,11 +256,188 @@ class ScenarioRevalidationTests(unittest.TestCase):
         self.assertIn("Readiness: compile_blocked", text_output)
         self.assertIn("Compile issues:", text_output)
 
+    def test_preflight_mode_skips_preflight_when_parser_invalid(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scenario_path = _write_scenario(root, _invalid_json_body_scenario())
+
+            result = ScenarioRevalidationService().validate(
+                ScenarioRevalidationRequest(
+                    file_path=scenario_path,
+                    validation_mode="preflight",
+                    workspace_root=root,
+                )
+            )
+
+        self.assertEqual(result.parse_status.value, "invalid")
+        self.assertEqual(result.preflight_validation.preflight_status.value, "skipped")
+        self.assertEqual(result.environment_readiness_category.value, "skipped_due_to_parser_error")
+
+    def test_preflight_mode_skips_preflight_when_compile_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scenario_path = _write_scenario(root, _unsupported_expectation_scenario())
+
+            result = ScenarioRevalidationService().validate(
+                ScenarioRevalidationRequest(
+                    file_path=scenario_path,
+                    validation_mode="preflight",
+                    workspace_root=root,
+                )
+            )
+
+        self.assertEqual(result.compile_validation.compile_status.value, "failed")
+        self.assertEqual(result.preflight_validation.preflight_status.value, "skipped")
+        self.assertEqual(result.environment_readiness_category.value, "skipped_due_to_compile_error")
+
+    def test_preflight_mode_surfaces_missing_env_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _prepare_workspace(root, env_file=False, project=True)
+            scenario_path = _write_scenario(root, _runner_ready_post_scenario())
+
+            with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
+                result = ScenarioRevalidationService().validate(
+                    ScenarioRevalidationRequest(
+                        file_path=scenario_path,
+                        validation_mode="preflight",
+                        workspace_root=root,
+                    )
+                )
+
+        self.assertEqual(result.preflight_validation.preflight_status.value, "failed")
+        self.assertEqual(result.environment_readiness_category.value, "preflight_blocked")
+        self.assertTrue(
+            any(issue.issue_type.value == "missing_environment" for issue in result.preflight_validation.issues)
+        )
+
+    def test_preflight_mode_surfaces_missing_dependency(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _prepare_workspace(root, env_file=True, project=True)
+            scenario_path = _write_scenario(root, _runner_ready_post_scenario())
+
+            with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=None):
+                result = ScenarioRevalidationService().validate(
+                    ScenarioRevalidationRequest(
+                        file_path=scenario_path,
+                        validation_mode="preflight",
+                        workspace_root=root,
+                    )
+                )
+
+        self.assertEqual(result.preflight_validation.preflight_status.value, "failed")
+        self.assertEqual(result.environment_readiness_category.value, "preflight_blocked")
+        self.assertTrue(
+            any(issue.issue_type.value == "missing_dependency" for issue in result.preflight_validation.issues)
+        )
+
+    def test_preflight_mode_surfaces_missing_external_vars_as_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _prepare_workspace(root, env_file=True, project=True)
+            scenario_path = _write_scenario(root, _external_variable_scenario())
+
+            with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
+                result = ScenarioRevalidationService().validate(
+                    ScenarioRevalidationRequest(
+                        file_path=scenario_path,
+                        validation_mode="preflight",
+                        workspace_root=root,
+                    )
+                )
+
+        self.assertEqual(result.compile_validation.compile_status.value, "success")
+        self.assertEqual(result.preflight_validation.preflight_status.value, "failed")
+        self.assertEqual(result.environment_readiness_category.value, "preflight_blocked")
+        self.assertTrue(
+            any(issue.issue_type.value == "external_variable" for issue in result.preflight_validation.issues)
+        )
+
+    def test_preflight_mode_marks_valid_workspace_ready(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _prepare_workspace(root, env_file=True, project=True)
+            scenario_path = _write_scenario(root, _runner_ready_post_scenario())
+
+            with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
+                result = ScenarioRevalidationService().validate(
+                    ScenarioRevalidationRequest(
+                        file_path=scenario_path,
+                        validation_mode="preflight",
+                        workspace_root=root,
+                    )
+                )
+
+        self.assertEqual(result.preflight_validation.preflight_status.value, "success")
+        self.assertEqual(result.environment_readiness_category.value, "preflight_ready")
+        self.assertEqual(result.preflight_validation.issues, [])
+
+    def test_cli_preflight_mode_outputs_environment_readiness(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _prepare_workspace(root, env_file=False, project=True)
+            scenario_path = _write_scenario(root, _runner_ready_post_scenario())
+
+            with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
+                json_stdout = io.StringIO()
+                with redirect_stdout(json_stdout):
+                    json_code = cli.main(
+                        [
+                            "--validate-scenario",
+                            "--path",
+                            str(scenario_path),
+                            "--mode",
+                            "preflight",
+                            "--workspace-root",
+                            str(root),
+                        ]
+                    )
+                json_payload = json.loads(json_stdout.getvalue())
+
+                text_stdout = io.StringIO()
+                with redirect_stdout(text_stdout):
+                    text_code = cli.main(
+                        [
+                            "--validate-scenario",
+                            "--path",
+                            str(scenario_path),
+                            "--mode",
+                            "preflight",
+                            "--workspace-root",
+                            str(root),
+                            "--output-format",
+                            "text",
+                        ]
+                    )
+                text_output = text_stdout.getvalue()
+
+        self.assertEqual(json_code, 0)
+        self.assertEqual(json_payload["preflight_status"], "failed")
+        self.assertEqual(json_payload["readiness_category"], "preflight_blocked")
+        self.assertTrue(json_payload["preflight_validation"]["issues"])
+        self.assertEqual(text_code, 0)
+        self.assertIn("Status: preflight_blocked", text_output)
+        self.assertIn("Preflight: failed", text_output)
+        self.assertIn("Preflight issues:", text_output)
+
 
 def _write_scenario(root: Path, content: str) -> Path:
     path = root / "scenario.md"
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def _prepare_workspace(root: Path, *, env_file: bool, project: bool) -> None:
+    if project:
+        (root / "code" / "demo").mkdir(parents=True)
+    if env_file:
+        env_dir = root / "env"
+        env_dir.mkdir(parents=True)
+        (env_dir / "demo.env").write_text("", encoding="utf-8")
+    api_tool_dir = root / "tools" / "api"
+    api_tool_dir.mkdir(parents=True)
+    (api_tool_dir / "run_request.py").write_text("# test tool entrypoint\n", encoding="utf-8")
 
 
 def _partial_post_scenario() -> str:
