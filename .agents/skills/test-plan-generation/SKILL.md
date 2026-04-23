@@ -3,335 +3,98 @@ name: test-plan-generation
 description: Generate a typed NormalizedTestPlan in the local codex-qa-agent workspace. Prefer agent-authored structured plan input when the agent can decompose the request; use prose input only as fallback/bootstrap. Use when the desired output is PlannedTestCase items plus diagnostics/artifacts rather than scenario_runner execution.
 ---
 
-# Test Plan Generation
+# Purpose
 
-Use this skill for deterministic test-plan generation in `codex-qa-agent`.
+Use this skill as the default path for test-plan generation in this workspace.
 
-## Purpose
+Prefer the structured `agent_plan` path over prose normalization when the agent can decompose a
+feature, controller, or API request into explicit planned cases. Prose mode exists only as
+fallback/bootstrap when no meaningful decomposition is available yet.
 
-Create a `tools.generation.domain.models.NormalizedTestPlan`. The preferred first input is an
-agent-authored structured draft (`AgentTestPlanInput`) because broad operator prose often needs
-semantic decomposition before it becomes useful. Prose input remains available as fallback/bootstrap.
+The canonical output remains `NormalizedTestPlan`. Optional downstream stages such as evidence
+collection, enrichment, draft rendering, review, and validation stay separate from the initial
+authoring step.
 
-Optional downstream stages can collect scoped code facts, enrich the plan, render non-executed
-markdown draft previews, review/promote drafts, and validate edited scenarios. Do not execute
-`scenario_runner` from this skill.
+# Architecture Boundaries
 
-## Accepted Inputs
+- Authoring: `AgentTestPlanInput` and `AgentPlannedTestCaseInput`.
+- Generation: `GenerateTestPlanUseCase` produces `NormalizedTestPlan`.
+- Evidence: explicit scoped code facts only; never broad repository discovery.
+- Enrichment: optional evidence-to-plan updates; do not treat them as runnable scenarios.
+- Rendering/review/validation: downstream phases after plan generation.
+- CLI: thin adapter over service contracts. Do not invent generation semantics in the agent.
 
-- Preferred: `--agent-plan-file <path>` containing `AgentTestPlanInput` JSON.
-- Authoring helper: `--init-agent-plan --output <path>` scaffolds a canonical starter JSON.
-- Validation helper: `--validate-agent-plan --agent-plan-file <path>` validates structured input before generation.
-- Use-case API: `GenerateTestPlanRequest(input_mode=agent_plan, agent_plan=AgentTestPlanInput(...))`.
-- Fallback: inline prose via `--prose` or file-backed prose via `--source-file`.
-- For `agent_plan`, required fields are `source_id`, `project`, `title`, and `planned_test_cases[]`.
-- For prose fallback, required fields are `source_id`, `project`, and either inline content or source file.
+# Core Commands
 
-`NormalizedTestPlan` remains the canonical internal plan contract for every input mode.
+Use the target project/workspace venv interpreter first. If no suitable venv exists, use `py -3.14`
+only as fallback.
 
-## Agent Plan Contract
+- Scaffold structured plan: `<venv-python> -m tools.generation.cli --init-agent-plan --output <plan.json> --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
+- Validate structured plan: `<venv-python> -m tools.generation.cli --validate-agent-plan --agent-plan-file <plan.json> --output-format text`
+- Generate from structured plan: `<venv-python> -m tools.generation.cli --agent-plan-file <plan.json> --workspace-root .`
+- Generate with evidence/enrichment: `<venv-python> -m tools.generation.cli --agent-plan-file <plan.json> --workspace-root . --project-path code/<project> --collect-code-facts --enrich --evidence-scope-path <path>`
 
-Minimum JSON shape:
+Use prose only when the user explicitly wants bootstrap from prose or the agent cannot yet author a
+useful structured plan:
 
-```json
-{
-  "source_id": "internal-user-sessions",
-  "project": "code/demo",
-  "title": "Internal user sessions",
-  "goal": "Cover session lifecycle behavior.",
-  "assumptions": [],
-  "open_questions": [],
-  "planned_test_cases": [
-    {
-      "title": "Authenticate session",
-      "objective": "Verify session authentication.",
-      "kind": "api",
-      "preconditions": [],
-      "actions": ["Call the authenticate session API."],
-      "expected_outcomes": ["A session token is returned."],
-      "priority": "high",
-      "tags": ["session"],
-      "unresolved_items": ["Auth fixture is not selected yet."]
-    }
-  ]
-}
-```
+- Prose fallback: `<venv-python> -m tools.generation.cli --source-id <id> --project code/<project> --prose "<text>" --workspace-root .`
 
-Do not use loose dict-only glue as the canonical contract. The local service reads this through
-`AgentTestPlanInput` and `AgentPlannedTestCaseInput`.
+# Primary Workflow
 
-## Compact Request Format
+1. Identify the target project and the requested feature/controller scope.
+2. Decompose the request into a structured `AgentTestPlanInput`.
+3. Scaffold a starter JSON when needed.
+4. Fill planned test cases, assumptions, and open questions.
+5. Validate the structured plan before generation.
+6. Run generation from `--agent-plan-file`.
+7. Add explicit evidence scope only when the next phase needs code facts.
+8. Continue to enrichment/rendering/review only if the user asked for those phases.
 
-Use this operator-facing format when the user wants a short prompt:
+# Decomposition Rule
 
-```text
-Use skill: test-plan-generation
+Decompose first, generate second.
 
-mode: <plan-only | plan-with-evidence | draft-preview | review-drafts | promote-draft | validate-scenario>
-input_mode: <agent_plan | prose>
-validation_mode: <parser | compile | preflight>
-agent_plan_file: <path to AgentTestPlanInput JSON>
-output: <required for init-agent-plan>
-project: code/<project-name>
-source_id: <source id for prose fallback>
-prose: <fallback source text>
-project_path: <required for evidence modes>
-scope:
-- <explicit file or directory path>
-stack_hint: <optional python | java_spring>
-run_id: <required for review/promote>
-draft_id: <required for promote-draft>
-target_dir: scenarios/<optional-subdir>
-allow_invalid: true|false
-path: <required for validate-scenario>
-```
+For controller/feature requests, the agent should identify the concrete operations, coverage
+buckets, and unresolved areas before calling generation. A good structured plan names the real
+cases the operator likely expects. It should not rely on the prose normalizer to discover them from
+broad intent alone.
 
-Default interpretation:
+Use prose mode only when:
 
-- Prefer `input_mode=agent_plan` when the agent can decompose the operator request into cases.
-- Start with `--init-agent-plan` when a fresh structured skeleton is needed.
-- Run `--validate-agent-plan` after editing JSON and before generation.
-- Use prose only when the operator explicitly wants bootstrap from prose or no decomposition is available.
-- If `agent_plan_file` is supplied, CLI defaults to `input_mode=agent_plan`.
-- If `--prose` or `--source-file` is supplied, CLI defaults to `input_mode=prose`.
-- Evidence modes require explicit `project_path` and `scope`; never infer repository-wide scope.
-- If a required field is missing, ask only for that field.
+- the request is too small or too vague to justify decomposition yet
+- the operator explicitly wants a bootstrap plan from prose
+- structured authoring would add unnecessary overhead for the task
 
-## Interpreter Rule
-
-Before running any generation CLI command, resolve the target project venv/interpreter and prefer it.
-
-Priority:
-
-1. target project venv/interpreter
-2. workspace-level Python known to satisfy repo requirements
-3. fallback `py -3.14` only when no better project-specific interpreter is available
-
-## Modes
-
-### Mode 0 - Author Agent Plan
-
-Scaffold a starter template:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --init-agent-plan `
-  --output artifacts/agent/input/internal-user-sessions-plan.json `
-  --source-id internal-user-sessions `
-  --project code/demo `
-  --name "Internal user sessions" `
-  --goal "Cover session lifecycle behavior."
-```
-
-Validate before generation:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --validate-agent-plan `
-  --agent-plan-file artifacts/agent/input/internal-user-sessions-plan.json `
-  --output-format text
-```
-
-This is the standard structured authoring workflow:
-
-1. scaffold template
-2. fill the JSON
-3. validate it
-4. run generation
-5. optionally continue with evidence/enrichment/rendering/review
-
-### Mode A - Plan Only
-
-Preferred structured input:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/internal-user-sessions-plan.json `
-  --workspace-root .
-```
-
-Fallback prose:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --source-id users-api `
-  --project code/demo `
-  --prose "Verify create user and get user by id" `
-  --workspace-root .
-```
-
-### Mode B - Plan With Evidence
-
-Use only with explicit project path and explicit scoped files/directories:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
-  --workspace-root . `
-  --project-path code/demo `
-  --collect-code-facts `
-  --enrich `
-  --evidence-scope-path app/api/users.py
-```
-
-Code facts are extracted only from `CodeFactsScope.paths`. Stack selection is deterministic:
-
-- explicit `stack_hint`, when it matches the explicit scope files
-- `.py` scope -> Python extractor
-- `.java` scope with Spring mapping annotations -> Java/Spring extractor
-
-Unsupported, mixed, or ambiguous scopes produce diagnostics instead of broad scanning.
-
-### Mode C - Draft Scenario Preview
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
-  --workspace-root . `
-  --project-path code/demo `
-  --collect-code-facts `
-  --enrich `
-  --render-drafts `
-  --evidence-scope-path app/api/users.py
-```
-
-Drafts are non-executed preview artifacts. They are parser-validated only.
-
-### Mode D - Review And Promote Drafts
-
-Review:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --review-drafts `
-  --run-id <generation-run-id> `
-  --workspace-root .
-```
-
-Promote one explicit draft:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --promote-draft `
-  --run-id <generation-run-id> `
-  --draft-id draft-tc-001 `
-  --workspace-root . `
-  --target-dir scenarios/generated
-```
-
-Promotion never overwrites existing files and never executes scenarios.
-
-### Mode E - Manual Patch Revalidation
-
-Parser:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --validate-scenario `
-  --path scenarios/generated/users-draft-tc-001.md `
-  --output-format text
-```
-
-Compile-only:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --validate-scenario `
-  --path scenarios/generated/users-draft-tc-001.md `
-  --mode compile `
-  --output-format text
-```
-
-Preflight-only:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --validate-scenario `
-  --path scenarios/generated/users-draft-tc-001.md `
-  --mode preflight `
-  --workspace-root . `
-  --output-format text
-```
-
-All validation modes are non-executing.
-
-## Workflow
-
-1. Resolve the target project venv/interpreter first.
-2. If the agent can decompose the request, start with `--init-agent-plan`.
-3. Fill the structured JSON.
-4. Run `--validate-agent-plan`.
-5. Run generation with `--agent-plan-file`.
-6. Use prose fallback only when structured decomposition is not available yet.
-7. Add evidence only with explicit `project_path` and `scope`.
-8. Read the adapter JSON summary.
-9. Treat `normalized-plan.json` as the canonical generated plan artifact.
-10. Promote only operator-selected drafts.
-11. Revalidate manually edited drafts/scenarios before considering execution.
-
-`GenerateTestPlanUseCase` is the canonical application entrypoint. The CLI only gathers arguments
-and constructs typed request objects.
-
-## Outputs
-
-- `GenerationRunResult`
-- `NormalizedTestPlan`
-- `PlannedTestCase[]`
-- `GenerationDiagnostic[]`
-- `TraceabilityMap`
-- optional `GenerationEvidenceBundle`
-- optional `EnrichedTestPlanResult`
-- optional `ScenarioRenderResult`
-
-## Artifacts
+# Artifact Expectations
 
 Generation artifacts remain isolated from runner artifacts:
 
 ```text
 .codex-qa/generation/runs/<run_id>/
-  context.json
-  evidence.json
-  summary.json
-
 artifacts/agent/generation/<source_slug>-<run_id>/
-  manifest.json
-  source-input.json
-  normalized-source.json
-  normalized-plan.json
-  traceability-map.json
-  diagnostics.json
-  evidence-bundle.json
-  enriched-plan.json
-  scenario-drafts/
-  scenario-render-result.json
-  promotion-result.json
-  summary.json
 ```
 
-## Diagnostics
+Treat `normalized-plan.json` as the canonical generated plan artifact. Do not treat draft markdown,
+review output, or validation output as the canonical plan.
 
-Treat missing/empty prose source, missing source file, unreadable source file, unsupported source
-format, invalid agent plan fields, and no detected/declared test cases as blocking. Preserve
-ambiguity in unresolved items, open questions, or diagnostics instead of inventing endpoints,
-payloads, DB tables, auth flows, or exact runtime steps.
+# When More Detail Is Needed
 
-## Must Not Do
+Read these references only when needed:
 
-- Do not run or modify `scenario_runner`.
-- Do not force broad operator requests through prose scanning when the agent can author a structured plan.
-- Do not skip validation after manually editing `AgentTestPlanInput` JSON.
+- `references/input-modes.md`: primary `agent_plan` path, prose fallback, and mode selection.
+- `references/agent-plan-authoring.md`: scaffold/validate workflow and canonical template shape.
+- `references/decomposition-workflow.md`: deterministic decomposition method, patterns, and worked example.
+- `references/downstream-modes.md`: evidence, enrichment, draft rendering, review, promotion, and validation.
+
+# Guardrails
+
+- Do not run or modify `scenario_runner` from this skill.
+- Do not force broad requests through prose scanning when the agent can author a structured plan.
+- Do not skip `--validate-agent-plan` after manually editing structured input.
 - Do not collect code facts without explicit scoped paths.
 - Do not infer `project_path`, `CodeFactsScope`, or `stack_hint` from vague prose alone.
 - Do not perform repository-wide discovery.
 - Do not call LLMs or external APIs from local generation services.
 - Do not treat generated draft markdown as executable or reviewed scenarios.
 - Do not auto-promote drafts or overwrite existing scenario files.
-- Do not execute scenarios during validation.
-- Do not add pause/resume or guided/manual behavior for generation.
 - Do not store canonical planning fields only in `metadata`.
-
-## Reporting
-
-Report target project, input mode, source input origin, final status, planned case count,
-diagnostics/assumptions/open questions, and artifact paths. State clearly whether the result came
-from agent-authored structured input or fallback prose normalization.
