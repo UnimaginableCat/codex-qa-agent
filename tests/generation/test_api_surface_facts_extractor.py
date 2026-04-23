@@ -8,11 +8,11 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.generation.domain.models import DiagnosticSeverity
-from tools.generation.evidence.api_surface import ApiSurfaceFactsExtractor
+from tools.generation.evidence.api_surface import PythonApiSurfaceFactsExtractor
 from tools.generation.evidence.models import CodeFactsScope, EvidenceConfidence
 
 
-class ApiSurfaceFactsExtractorTests(unittest.TestCase):
+class PythonApiSurfaceFactsExtractorTests(unittest.TestCase):
     def test_extracts_explicit_route_facts_with_provenance(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -36,7 +36,7 @@ class ApiSurfaceFactsExtractorTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            bundle = ApiSurfaceFactsExtractor().extract(
+            bundle = PythonApiSurfaceFactsExtractor().extract(
                 root,
                 CodeFactsScope(scope_id="api", paths=[Path("app")]),
             )
@@ -68,7 +68,7 @@ class ApiSurfaceFactsExtractorTests(unittest.TestCase):
 
     def test_missing_scope_produces_typed_diagnostic_without_global_scan(self) -> None:
         with TemporaryDirectory() as tmp:
-            bundle = ApiSurfaceFactsExtractor().extract(
+            bundle = PythonApiSurfaceFactsExtractor().extract(
                 Path(tmp),
                 CodeFactsScope(scope_id="missing"),
             )
@@ -82,7 +82,7 @@ class ApiSurfaceFactsExtractorTests(unittest.TestCase):
             source = root / "broken.py"
             source.write_text("def broken(:\n", encoding="utf-8")
 
-            bundle = ApiSurfaceFactsExtractor().extract(
+            bundle = PythonApiSurfaceFactsExtractor().extract(
                 root,
                 CodeFactsScope(scope_id="api", paths=[Path("broken.py")]),
             )

@@ -14,6 +14,7 @@ from tools.generation.evidence.models import (
     EvidenceProvenance,
     GenerationEvidenceBundle,
     GenerationEvidenceFact,
+    TargetStack,
 )
 
 
@@ -68,16 +69,18 @@ class EvidenceContractTests(unittest.TestCase):
         scope = CodeFactsScope(
             scope_id="controllers",
             paths=[Path("src/controllers")],
-            file_patterns=["*.py"],
+            file_patterns=["*.py", "*.java"],
             max_files=3,
+            stack_hint=TargetStack.PYTHON,
         )
 
         restored = CodeFactsScope.from_dict(scope.to_dict())
 
         self.assertEqual(restored.scope_id, "controllers")
         self.assertEqual(restored.paths, [Path("src/controllers")])
-        self.assertEqual(restored.file_patterns, ["*.py"])
+        self.assertEqual(restored.file_patterns, ["*.py", "*.java"])
         self.assertEqual(restored.max_files, 3)
+        self.assertEqual(restored.stack_hint, TargetStack.PYTHON)
 
 
 if __name__ == "__main__":

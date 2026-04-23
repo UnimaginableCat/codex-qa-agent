@@ -11,6 +11,11 @@ from tools.common.json_safe import to_json_safe
 from tools.generation.domain.models import GenerationDiagnostic
 
 
+class TargetStack(StrEnum):
+    PYTHON = "python"
+    JAVA_SPRING = "java_spring"
+
+
 class EvidenceConfidence(StrEnum):
     EXPLICIT = "explicit"
     STRONG_INFERENCE = "strong_inference"
@@ -101,8 +106,9 @@ class GenerationEvidenceBundle:
 class CodeFactsScope:
     scope_id: str
     paths: list[Path] = field(default_factory=list)
-    file_patterns: list[str] = field(default_factory=lambda: ["*.py"])
+    file_patterns: list[str] = field(default_factory=lambda: ["*.py", "*.java"])
     max_files: int = 20
+    stack_hint: TargetStack | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -112,7 +118,12 @@ class CodeFactsScope:
         return cls(
             scope_id=str(payload["scope_id"]),
             paths=[Path(str(item)) for item in payload.get("paths", [])],
-            file_patterns=[str(item) for item in payload.get("file_patterns", ["*.py"])],
+            file_patterns=[str(item) for item in payload.get("file_patterns", ["*.py", "*.java"])],
             max_files=int(payload.get("max_files", 20)),
+            stack_hint=(
+                None
+                if payload.get("stack_hint") in {None, ""}
+                else TargetStack(str(payload["stack_hint"]))
+            ),
         )
 

@@ -37,6 +37,7 @@ prose: <required for generation modes>
 project_path: <required for evidence modes>
 scope:
 - <explicit file or directory path>
+stack_hint: <optional python | java_spring>
 run_id: <required for review/promote>
 draft_id: <required for promote-draft>
 target_dir: scenarios/<optional-subdir>
@@ -64,6 +65,9 @@ allow_invalid: true|false
   - each item maps to `--evidence-scope-path`
 - `run_id`
   - required for `review-drafts` and `promote-draft`
+- `stack_hint`
+  - optional for `plan-with-evidence` and `draft-preview`
+  - pass through only when the target stack is already known
 - `draft_id`
   - required for `promote-draft`
 - `target_dir`
@@ -75,6 +79,7 @@ allow_invalid: true|false
 
 - If the request uses this short format, do not ask the operator to restate it in longer prose.
 - If `mode=plan-with-evidence` or `mode=draft-preview`, require explicit `project_path` and `scope`.
+- If `stack_hint` is provided, pass it through as an explicit extractor selection hint.
 - Never infer repository-wide scope from `project` alone.
 - If a required field for the selected mode is missing, ask only for the missing field.
 
@@ -129,7 +134,14 @@ directories to inspect.
 
 This mode invokes `GenerateTestPlanUseCase` with `collect_code_facts=True` and
 `enrichment_enabled=True`. Code facts are extracted only from `CodeFactsScope.paths`; there is no
-implicit repository-wide discovery.
+implicit repository-wide discovery. Stack selection is deterministic:
+
+- explicit `stack_hint`, when it matches the explicit scope files
+- otherwise `.py` scope -> Python extractor
+- otherwise `.java` scope with Spring controller annotations -> Java/Spring extractor
+
+If scope is mixed, unsupported, or not applicable to a supported extractor, surface diagnostics
+instead of forcing extraction.
 
 ### Mode C - Draft Scenario Preview
 
@@ -207,6 +219,21 @@ scope:
 prose: Проверить создание пользователя и получение по id
 ```
 
+Java/Spring evidence:
+
+```text
+Use skill: test-plan-generation
+
+mode: plan-with-evidence
+project: code/demo
+source_id: users-java
+project_path: code/demo
+stack_hint: java_spring
+scope:
+- src/main/java/demo/UserController.java
+prose: Проверить получение пользователя по id
+```
+
 Draft preview:
 
 ```text
@@ -258,7 +285,8 @@ target_dir: scenarios/generated
 
 Optional code facts collection is available through `GenerateTestPlanOptions(collect_code_facts=True)`
 plus an explicit `project_path` and `CodeFactsScope`. It returns a `GenerationEvidenceBundle` beside the
-plan.
+plan. Extractor resolution is handled by `CodeFactsExtractionService`; the skill must not decide stack
+semantics itself beyond passing an explicit `stack_hint` when the operator already knows the target stack.
 
 Optional evidence enrichment is available through `GenerateTestPlanOptions(collect_code_facts=True,
 enrichment_enabled=True)`. It returns an `EnrichedTestPlanResult`, updates the returned
@@ -331,6 +359,7 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 - Do not perform dynamic code scanning as part of normalization.
 - Do not collect code facts without explicit scoped paths.
 - Do not infer `project_path` or `CodeFactsScope` from the whole repository.
+- Do not infer `stack_hint` from vague prose alone.
 - Do not run Mode B unless the operator supplied a targeted evidence scope.
 - Do not skip project venv/interpreter resolution when the target project has its own environment.
 - Do not use code facts to mutate `NormalizedTestPlan` unless `enrichment_enabled=True`.

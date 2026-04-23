@@ -17,7 +17,7 @@ from tools.common.statuses import StepStatus
 from tools.generation.application import GenerateTestPlanOptions, GenerateTestPlanRequest
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic, GenerationSourceInput
-from tools.generation.evidence.models import CodeFactsScope
+from tools.generation.evidence.models import CodeFactsScope, TargetStack
 from tools.generation.review import (
     ScenarioDraftPromotionService,
     ScenarioDraftReviewService,
@@ -67,13 +67,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--evidence-pattern",
         action="append",
         default=[],
-        help="File glob used inside scoped directories. Defaults to *.py.",
+        help="File glob used inside scoped directories. Defaults to *.py and *.java.",
     )
     parser.add_argument(
         "--evidence-max-files",
         type=int,
         default=20,
         help="Maximum files to inspect inside explicit evidence scope.",
+    )
+    parser.add_argument(
+        "--stack-hint",
+        choices=[stack.value for stack in TargetStack],
+        help="Optional explicit stack hint for code facts extraction.",
     )
     parser.add_argument(
         "--collect-code-facts",
@@ -110,8 +115,9 @@ def build_request(args: argparse.Namespace) -> GenerateTestPlanRequest:
         evidence_scope = CodeFactsScope(
             scope_id=args.evidence_scope_id,
             paths=[Path(item) for item in args.evidence_scope_path],
-            file_patterns=args.evidence_pattern or ["*.py"],
+            file_patterns=args.evidence_pattern or ["*.py", "*.java"],
             max_files=args.evidence_max_files,
+            stack_hint=None if not args.stack_hint else TargetStack(args.stack_hint),
         )
 
     return GenerateTestPlanRequest(

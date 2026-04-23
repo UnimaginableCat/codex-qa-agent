@@ -1,51 +1,34 @@
-"""Targeted API surface facts extractor for Python source files."""
+"""Targeted Python API surface facts extractor for Python source files."""
 
 from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
+from tools.generation.evidence.common import build_evidence_bundle, relative_to_project, resolve_scope_files
 
 from .models import (
     CodeFactsScope,
     EvidenceConfidence,
     EvidenceProvenance,
-    GenerationEvidenceBundle,
     GenerationEvidenceFact,
 )
 
 
 @dataclass(slots=True)
-class ApiSurfaceFactsExtractor:
+class PythonApiSurfaceFactsExtractor:
     """Extract explicit endpoint facts from targeted Python files only."""
 
-    def extract(self, project_path: Path, scope: CodeFactsScope) -> GenerationEvidenceBundle:
+    target_stack = "python"
+
+    def extract(self, project_path: Path, scope: CodeFactsScope):
         project_root = project_path.resolve()
         diagnostics: list[GenerationDiagnostic] = []
         facts: list[GenerationEvidenceFact] = []
-        if not project_root.exists():
-            diagnostics.append(
-                GenerationDiagnostic(
-                    code="target_project_missing",
-                    message="Target project path for code facts extraction does not exist.",
-                    severity=DiagnosticSeverity.ERROR,
-                    source_ref=scope.scope_id,
-                    details={"project_path": str(project_root)},
-                )
-            )
-            return GenerationEvidenceBundle(
-                bundle_id=f"evidence-{scope.scope_id}",
-                target_project=str(project_root),
-                scope=scope.scope_id,
-                facts=facts,
-                diagnostics=diagnostics,
-                created_at=datetime.now(UTC).isoformat(timespec="seconds"),
-            )
-        files = self._resolve_scope_files(project_root, scope, diagnostics)
+        files = resolve_scope_files(project_root, scope, diagnostics)
 
         for file_path in files:
             facts.extend(self._extract_from_file(project_root, file_path, diagnostics))
@@ -53,72 +36,19 @@ class ApiSurfaceFactsExtractor:
         if not facts and files:
             diagnostics.append(
                 GenerationDiagnostic(
-                    code="missing_expected_constructs",
-                    message="No explicit API route decorators or path registrations were found in scope.",
+                    code="no_supported_patterns_found",
+                    message="No explicit Python API route decorators or path registrations were found in scope.",
                     severity=DiagnosticSeverity.WARNING,
                     source_ref=scope.scope_id,
                 )
             )
 
-        return GenerationEvidenceBundle(
-            bundle_id=f"evidence-{scope.scope_id}",
-            target_project=str(project_root),
-            scope=scope.scope_id,
+        return build_evidence_bundle(
+            scope=scope,
+            project_root=project_root,
             facts=facts,
             diagnostics=diagnostics,
-            created_at=datetime.now(UTC).isoformat(timespec="seconds"),
         )
-
-    def _resolve_scope_files(
-        self,
-        project_root: Path,
-        scope: CodeFactsScope,
-        diagnostics: list[GenerationDiagnostic],
-    ) -> list[Path]:
-        if not scope.paths:
-            diagnostics.append(
-                GenerationDiagnostic(
-                    code="missing_evidence_scope",
-                    message="Code facts extraction requires explicit scoped paths; global scans are not supported.",
-                    severity=DiagnosticSeverity.ERROR,
-                    source_ref=scope.scope_id,
-                )
-            )
-            return []
-
-        files: list[Path] = []
-        for raw_path in scope.paths:
-            path = raw_path if raw_path.is_absolute() else project_root / raw_path
-            if not path.exists():
-                diagnostics.append(
-                    GenerationDiagnostic(
-                        code="scope_path_missing",
-                        message="Evidence scope path does not exist.",
-                        severity=DiagnosticSeverity.WARNING,
-                        source_ref=scope.scope_id,
-                        details={"path": str(path)},
-                    )
-                )
-                continue
-            if path.is_file():
-                files.append(path.resolve())
-                continue
-            if path.is_dir():
-                for pattern in scope.file_patterns:
-                    files.extend(sorted(item.resolve() for item in path.glob(pattern) if item.is_file()))
-
-        unique_files = _dedupe_paths(files)
-        if len(unique_files) > scope.max_files:
-            diagnostics.append(
-                GenerationDiagnostic(
-                    code="scope_file_limit_applied",
-                    message="Evidence scope matched more files than allowed; extraction was truncated.",
-                    severity=DiagnosticSeverity.WARNING,
-                    source_ref=scope.scope_id,
-                    details={"matched": len(unique_files), "max_files": scope.max_files},
-                )
-            )
-        return unique_files[: scope.max_files]
 
     def _extract_from_file(
         self,
@@ -243,7 +173,7 @@ class ApiSurfaceFactsExtractor:
         request_type_present: bool,
         response_type_present: bool,
     ) -> GenerationEvidenceFact:
-        relative_file = _relative_path(file_path, project_root)
+        relative_file = relative_to_project(file_path, project_root)
         method_label = method or "UNKNOWN"
         fact_id = _fact_id(relative_file, symbol, path, method_label)
         summary = f"{method_label} {path}"
@@ -353,25 +283,6 @@ def _callable_name(node: ast.AST) -> str | None:
     return None
 
 
-def _relative_path(path: Path, project_root: Path) -> Path:
-    try:
-        return path.resolve().relative_to(project_root.resolve())
-    except ValueError:
-        return path
-
-
 def _fact_id(file_path: Path, symbol: str | None, path: str, method: str) -> str:
     safe = f"{file_path}:{symbol or 'unknown'}:{method}:{path}"
     return "api-" + "".join(char.lower() if char.isalnum() else "-" for char in safe).strip("-")
-
-
-def _dedupe_paths(paths: list[Path]) -> list[Path]:
-    seen: set[Path] = set()
-    result: list[Path] = []
-    for path in paths:
-        resolved = path.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        result.append(resolved)
-    return result

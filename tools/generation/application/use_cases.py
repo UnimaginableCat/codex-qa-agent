@@ -9,8 +9,7 @@ from tools.generation.domain.contracts import GenerationArtifactStore
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
 from tools.generation.enrichment import EvidenceToPlanEnricher, TestPlanEnricher
 from tools.generation.evidence import (
-    ApiSurfaceFactsExtractor,
-    CodeFactsExtractor,
+    CodeFactsExtractionService,
     CodeFactsScope,
     GenerationEvidenceBundle,
 )
@@ -34,7 +33,7 @@ class GenerateTestPlanUseCase:
     prose_normalizer: ProseSourceNormalizer = field(default_factory=ProseSourceNormalizer)
     plan_assembler: NormalizedTestPlanAssembler = field(default_factory=NormalizedTestPlanAssembler)
     artifact_store: GenerationArtifactStore = field(default_factory=FileGenerationArtifactStore)
-    code_facts_extractor: CodeFactsExtractor = field(default_factory=ApiSurfaceFactsExtractor)
+    code_facts_extraction_service: CodeFactsExtractionService = field(default_factory=CodeFactsExtractionService)
     test_plan_enricher: TestPlanEnricher = field(default_factory=EvidenceToPlanEnricher)
     scenario_draft_preview: ScenarioDraftPreviewService = field(default_factory=ScenarioDraftPreviewService)
 
@@ -157,7 +156,7 @@ class GenerateTestPlanUseCase:
 
     def _collect_evidence(self, request: GenerateTestPlanRequest) -> GenerationEvidenceBundle:
         scope = request.evidence_scope or CodeFactsScope(scope_id=f"{request.source_input.source_id}-evidence")
-        return self.code_facts_extractor.extract(
+        return self.code_facts_extraction_service.extract(
             self._resolve_project_path(request),
             scope,
         )

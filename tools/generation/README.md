@@ -44,10 +44,18 @@ It builds a prose-first `NormalizedTestPlan` and intentionally stops before scen
 pause/resume, plan enrichment, and LLM/API integration.
 
 Code facts are a separate opt-in evidence layer. Canonical evidence contracts live in
-`tools.generation.evidence.models`; the extractor interface is `CodeFactsExtractor`.
-`ApiSurfaceFactsExtractor` currently supports targeted Python API-surface extraction only from
-explicit scoped paths and returns a `GenerationEvidenceBundle`. Evidence is returned beside the
-generation result and persisted as evidence artifacts.
+`tools.generation.evidence.models`; the extractor interface is `CodeFactsExtractor`, and the
+stack-aware orchestration boundary is `CodeFactsExtractionService`. Extractor selection is
+deterministic:
+
+- explicit `CodeFactsScope.stack_hint`, when compatible with the explicit scope paths
+- otherwise explicit scope file characteristics
+  - `.py` -> `PythonApiSurfaceFactsExtractor`
+  - `.java` with Spring controller/mapping annotations -> `JavaSpringApiSurfaceFactsExtractor`
+
+If the scope is mixed, unsupported, or not applicable to a supported extractor, the service returns
+diagnostics in the unified `GenerationEvidenceBundle` instead of silently applying the wrong parser.
+Evidence is returned beside the generation result and persisted as evidence artifacts.
 
 Evidence enrichment is a separate opt-in phase. Canonical enrichment contracts live in
 `tools.generation.enrichment.models`; the service boundary is `TestPlanEnricher`, with
@@ -69,8 +77,24 @@ Agent-facing adapter:
   --evidence-scope-path app/api/users.py
 ```
 
+Java/Spring controller scope uses the same flow, optionally with an explicit stack hint:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --source-id users-api `
+  --project code/demo `
+  --prose "Verify get user by id" `
+  --workspace-root . `
+  --project-path code/demo `
+  --collect-code-facts `
+  --enrich `
+  --stack-hint java_spring `
+  --evidence-scope-path src/main/java/demo/UserController.java
+```
+
 The adapter only gathers arguments, builds typed request objects, calls `GenerateTestPlanUseCase`,
-and prints a JSON summary. It does not scan outside explicit evidence scope paths.
+and prints a JSON summary. It does not scan outside explicit evidence scope paths or perform
+repository-wide stack discovery.
 
 When invoking generation locally, prefer the target project's resolved venv/interpreter first.
 Use `py -3.14` only as fallback when no project-specific interpreter is available.

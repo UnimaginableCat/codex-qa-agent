@@ -12,7 +12,7 @@ from tools.common.statuses import StepStatus
 from tools.generation.application.models import GenerateTestPlanOptions, GenerateTestPlanRequest
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.models import GenerationSourceInput, NormalizedTestPlan, SourceInputFormat
-from tools.generation.evidence.models import CodeFactsScope
+from tools.generation.evidence.models import CodeFactsScope, TargetStack
 
 
 class GenerateTestPlanUseCaseTests(unittest.TestCase):
@@ -200,6 +200,51 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
         self.assertEqual(result.final_status, StepStatus.PASS)
         self.assertIsNone(result.enrichment_result)
         self.assertTrue(any(diagnostic.code == "enrichment_requires_evidence" for diagnostic in result.diagnostics))
+
+    def test_use_case_collects_java_spring_evidence_for_controller_scope(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "code" / "demo"
+            controller = project / "src" / "main" / "java" / "demo" / "UserController.java"
+            controller.parent.mkdir(parents=True)
+            controller.write_text(
+                "\n".join(
+                    [
+                        "import org.springframework.web.bind.annotation.*;",
+                        "@RestController",
+                        '@RequestMapping("/api/users")',
+                        "public class UserController {",
+                        '  @GetMapping("/{id}")',
+                        "  public UserDto getUser() { return null; }",
+                        "}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = GenerateTestPlanUseCase().execute(
+                GenerateTestPlanRequest(
+                    source_input=GenerationSourceInput(
+                        source_id="users-java",
+                        project="code/demo",
+                        content="Verify get user by id",
+                    ),
+                    workspace_root=root,
+                    project_path=project,
+                    evidence_scope=CodeFactsScope(
+                        scope_id="api",
+                        paths=[Path("src/main/java/demo/UserController.java")],
+                        stack_hint=TargetStack.JAVA_SPRING,
+                    ),
+                    options=GenerateTestPlanOptions(collect_code_facts=True),
+                )
+            )
+
+        self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertIsNotNone(result.evidence_bundle)
+        self.assertEqual(result.evidence_bundle.facts[0].payload["endpoint_path"], "/api/users/{id}")
+        self.assertEqual(result.evidence_bundle.facts[0].payload["http_method"], "GET")
+        self.assertEqual(result.evidence_bundle.facts[0].payload["controller_name"], "UserController")
 
 
 if __name__ == "__main__":
