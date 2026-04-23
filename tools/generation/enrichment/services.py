@@ -109,8 +109,29 @@ class EvidenceToPlanEnricher:
             elif len(top_candidates) == 1:
                 candidate = top_candidates[0]
                 fact = candidate.fact
+                planned_route_conflict = _planned_route_conflict(test_case, fact)
                 conflict = _method_conflict(test_case, fact)
-                if conflict:
+                if planned_route_conflict is not None:
+                    diagnostic = GenerationDiagnostic(
+                        code="planned_route_conflicts_with_evidence",
+                        message="Agent-authored planned route conflicts with extracted route evidence.",
+                        severity=DiagnosticSeverity.WARNING,
+                        source_ref=test_case.case_id,
+                        details={"fact_id": fact.fact_id, **planned_route_conflict},
+                    )
+                    case_diagnostics.append(diagnostic)
+                    diagnostics.append(diagnostic)
+                    unapplied_evidence.append(
+                        UnappliedEvidenceReason(
+                            fact_id=fact.fact_id,
+                            reason_code="planned_route_conflict",
+                            message="Evidence route conflicts with the agent-authored planned route.",
+                            candidate_case_ids=[test_case.case_id],
+                            details=planned_route_conflict,
+                        )
+                    )
+                    unapplied_fact_ids.add(fact.fact_id)
+                elif conflict:
                     diagnostic = GenerationDiagnostic(
                         code="evidence_conflicts_with_case_action",
                         message="Evidence HTTP method conflicts with action implied by the planned case.",
@@ -357,6 +378,9 @@ def _apply_evidence_to_case(
 def _match_candidate(test_case: PlannedTestCase, fact: GenerationEvidenceFact) -> MatchCandidate:
     if fact.confidence == EvidenceConfidence.WEAK_INFERENCE:
         return MatchCandidate(fact=fact, score=0)
+    planned_route_candidate = _planned_route_candidate(test_case, fact)
+    if planned_route_candidate is not None and planned_route_candidate.score > 0:
+        return planned_route_candidate
     case_terms = _case_terms(test_case)
     fact_terms = _fact_terms(fact)
     entity_overlap = case_terms & fact_terms
@@ -415,12 +439,71 @@ def _match_candidate(test_case: PlannedTestCase, fact: GenerationEvidenceFact) -
     return MatchCandidate(fact=fact, score=max(score, 0), match_reasons=match_reasons)
 
 
+def _planned_route_candidate(
+    test_case: PlannedTestCase,
+    fact: GenerationEvidenceFact,
+) -> MatchCandidate | None:
+    planned_route = test_case.planned_route
+    if planned_route is None:
+        return None
+    planned_method = planned_route.http_method.strip().upper()
+    planned_path = planned_route.endpoint_path.strip()
+    if not planned_method or not planned_path:
+        return MatchCandidate(fact=fact, score=0)
+
+    fact_method = str(fact.payload.get("http_method") or "").upper()
+    fact_path = str(fact.payload.get("endpoint_path") or "")
+    if not fact_method or not fact_path:
+        return MatchCandidate(fact=fact, score=0)
+
+    exact_path = _normalize_route_path(planned_path) == _normalize_route_path(fact_path)
+    route_family_match = _same_route_family(planned_path, fact_path)
+    match_reasons: list[str] = []
+
+    if exact_path and fact_method == planned_method:
+        match_reasons.append("planned_route_exact")
+        return MatchCandidate(fact=fact, score=100, match_reasons=match_reasons)
+
+    if route_family_match and fact_method == planned_method:
+        match_reasons.append("planned_route_family_match")
+        return MatchCandidate(fact=fact, score=80, match_reasons=match_reasons)
+
+    if exact_path and fact_method != planned_method:
+        match_reasons.append("planned_route_method_conflict")
+        return MatchCandidate(fact=fact, score=15, match_reasons=match_reasons)
+
+    return MatchCandidate(fact=fact, score=0)
+
+
 def _method_conflict(test_case: PlannedTestCase, fact: GenerationEvidenceFact) -> set[str]:
     method = str(fact.payload.get("http_method") or "").upper()
     case_methods = _case_action_methods(test_case)
     if method and case_methods and method not in case_methods:
         return case_methods
     return set()
+
+
+def _planned_route_conflict(
+    test_case: PlannedTestCase,
+    fact: GenerationEvidenceFact,
+) -> dict[str, str] | None:
+    planned_route = test_case.planned_route
+    if planned_route is None:
+        return None
+    planned_method = planned_route.http_method.strip().upper()
+    planned_path = planned_route.endpoint_path.strip()
+    fact_method = str(fact.payload.get("http_method") or "").upper()
+    fact_path = str(fact.payload.get("endpoint_path") or "")
+    if not planned_method or not planned_path or not fact_method or not fact_path:
+        return None
+    if planned_method == fact_method and _same_route_family(planned_path, fact_path):
+        return None
+    return {
+        "planned_http_method": planned_method,
+        "planned_endpoint_path": planned_path,
+        "evidence_http_method": fact_method,
+        "evidence_endpoint_path": fact_path,
+    }
 
 
 def _case_action_methods(test_case: PlannedTestCase) -> set[str]:
@@ -617,6 +700,20 @@ def _fact_actions(fact: GenerationEvidenceFact) -> set[str]:
 
 def _path_has_identifier(path: str) -> bool:
     return bool(re.search(r"\{[^}]+\}", path))
+
+
+def _normalize_route_path(path: str) -> str:
+    return re.sub(r"\{[^}]+\}", "{}", path.strip())
+
+
+def _same_route_family(left: str, right: str) -> bool:
+    left_segments = [_normalize_route_segment(segment) for segment in left.strip("/").split("/") if segment]
+    right_segments = [_normalize_route_segment(segment) for segment in right.strip("/").split("/") if segment]
+    return left_segments == right_segments
+
+
+def _normalize_route_segment(segment: str) -> str:
+    return "{}" if re.fullmatch(r"\{[^}]+\}", segment) else segment
 
 
 def _fact_targets_all(fact: GenerationEvidenceFact) -> bool:

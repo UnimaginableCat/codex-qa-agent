@@ -22,6 +22,28 @@ class SourceInputFormat(StrEnum):
 
 
 @dataclass(slots=True)
+class PlannedRouteIntent:
+    """Typed route intent that can be authored directly in a planned case."""
+
+    http_method: str
+    endpoint_path: str
+    path_kind: str = ""
+    source: str = "agent_authored"
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "PlannedRouteIntent":
+        return cls(
+            http_method=str(payload.get("http_method", "")),
+            endpoint_path=str(payload.get("endpoint_path", "")),
+            path_kind=str(payload.get("path_kind", "")),
+            source=str(payload.get("source", "agent_authored")),
+        )
+
+
+@dataclass(slots=True)
 class AgentPlannedTestCaseInput:
     """Agent-authored semantic case before canonical plan assembly."""
 
@@ -36,6 +58,7 @@ class AgentPlannedTestCaseInput:
     tags: list[str] = field(default_factory=list)
     unresolved_items: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    route: PlannedRouteIntent | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +78,11 @@ class AgentPlannedTestCaseInput:
             tags=[str(item) for item in payload.get("tags", [])],
             unresolved_items=[str(item) for item in payload.get("unresolved_items", [])],
             assumptions=[str(item) for item in payload.get("assumptions", [])],
+            route=(
+                None
+                if payload.get("route") is None
+                else PlannedRouteIntent.from_dict(dict(payload.get("route") or {}))
+            ),
             metadata=dict(payload.get("metadata") or {}),
         )
 
@@ -141,6 +169,7 @@ class PlannedTestCase:
     assumptions: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    planned_route: PlannedRouteIntent | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -160,6 +189,11 @@ class PlannedTestCase:
             assumptions=[str(item) for item in payload.get("assumptions", [])],
             open_questions=[str(item) for item in payload.get("open_questions", [])],
             tags=[str(item) for item in payload.get("tags", [])],
+            planned_route=(
+                None
+                if payload.get("planned_route") is None
+                else PlannedRouteIntent.from_dict(dict(payload.get("planned_route") or {}))
+            ),
             metadata=dict(payload.get("metadata") or {}),
         )
 

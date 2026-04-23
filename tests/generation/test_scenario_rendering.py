@@ -8,7 +8,12 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.generation.domain.models import GenerationRunContext, NormalizedTestPlan, PlannedTestCase
+from tools.generation.domain.models import (
+    GenerationRunContext,
+    NormalizedTestPlan,
+    PlannedRouteIntent,
+    PlannedTestCase,
+)
 from tools.generation.persistence.artifacts import (
     GENERATION_ARTIFACTS_DIRNAME,
     GENERATION_RUNS_DIRNAME,
@@ -33,7 +38,7 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertIn("Type: api", draft.markdown)
         self.assertIn("Method: POST", draft.markdown)
         self.assertIn("Path: /users", draft.markdown)
-        self.assertIn("Route resolved from code facts.", draft.markdown)
+        self.assertIn("Route resolved for preview rendering.", draft.markdown)
         self.assertTrue(any(item.code == "route_used_for_rendering" for item in render_result.diagnostics))
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "draft.md"
@@ -71,6 +76,31 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertIn("Path: /api/sessions/authenticate", draft.markdown)
         self.assertIn("Route source: route_hints.", draft.markdown)
         self.assertTrue(any(item.code == "rendering_based_on_route_hints" for item in render_result.diagnostics))
+
+    def test_renderer_renders_case_from_explicit_planned_route_without_evidence(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-001",
+                    title="Revoke all sessions",
+                    objective="Verify revoke all sessions.",
+                    planned_route=PlannedRouteIntent(
+                        http_method="POST",
+                        endpoint_path="/api/sessions/revoke-all",
+                        path_kind="collection",
+                    ),
+                )
+            ]
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("Method: POST", draft.markdown)
+        self.assertIn("Path: /api/sessions/revoke-all", draft.markdown)
+        self.assertIn("Route source: planned_route.", draft.markdown)
+        self.assertTrue(any(item.code == "rendering_based_on_planned_route" for item in render_result.diagnostics))
 
     def test_renderer_renders_java_spring_list_case_from_route_hints(self) -> None:
         render_result = DraftScenarioRenderer().render(
@@ -143,6 +173,26 @@ class ScenarioRenderingTests(unittest.TestCase):
 
         self.assertEqual(render_result.draft_set.drafts, [])
         self.assertEqual(render_result.unsupported_checks[0].reason_code, "route_not_ready_for_rendering")
+
+    def test_renderer_allows_planned_route_even_when_readiness_is_not_set(self) -> None:
+        render_result = DraftScenarioRenderer().render(
+            _plan(
+                [
+                    PlannedTestCase(
+                        case_id="tc-001",
+                        title="Authenticate session",
+                        objective="Verify authenticate session.",
+                        planned_route=PlannedRouteIntent(
+                            http_method="POST",
+                            endpoint_path="/api/sessions/authenticate",
+                            path_kind="collection",
+                        ),
+                    )
+                ]
+            )
+        )
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
 
     def test_preview_service_persists_route_hint_based_drafts_and_parse_results(self) -> None:
         with TemporaryDirectory() as tmp:

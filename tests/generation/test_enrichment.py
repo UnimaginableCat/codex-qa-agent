@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.generation.domain.models import NormalizedTestPlan, PlannedTestCase
+from tools.generation.domain.models import NormalizedTestPlan, PlannedRouteIntent, PlannedTestCase
 from tools.generation.enrichment import EnrichedTestPlanResult, EvidenceToPlanEnricher, TestCaseReadiness
 from tools.generation.evidence.models import (
     EvidenceConfidence,
@@ -136,6 +136,61 @@ class EvidenceToPlanEnricherTests(unittest.TestCase):
         self.assertTrue(
             any(diagnostic.code == "evidence_conflicts_with_case_action" for diagnostic in result.diagnostics)
         )
+
+    def test_explicit_planned_route_wins_over_lexical_overlap(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-001",
+                    title="User sessions API",
+                    objective="Verify session revoke-all endpoint.",
+                    planned_route=PlannedRouteIntent(
+                        http_method="POST",
+                        endpoint_path="/api/sessions/revoke-all",
+                        path_kind="collection",
+                    ),
+                )
+            ]
+        )
+        bundle = _bundle(
+            [
+                _endpoint_fact("fact-list", "/api/sessions", "GET", "listSessions"),
+                _endpoint_fact("fact-revoke-all", "/api/sessions/revoke-all", "POST", "revokeAllSessions"),
+            ]
+        )
+
+        result = EvidenceToPlanEnricher().enrich(plan, bundle)
+
+        self.assertEqual(len(result.applied_evidence), 1)
+        self.assertEqual(result.applied_evidence[0].fact_id, "fact-revoke-all")
+        self.assertIn("planned_route_exact", result.applied_evidence[0].match_reasons)
+
+    def test_planned_route_conflict_produces_diagnostic_and_does_not_apply_fact(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-001",
+                    title="Revoke all sessions",
+                    objective="Verify revoke-all endpoint.",
+                    planned_route=PlannedRouteIntent(
+                        http_method="POST",
+                        endpoint_path="/api/sessions/revoke-all",
+                        path_kind="collection",
+                    ),
+                )
+            ]
+        )
+        bundle = _bundle(
+            [
+                _endpoint_fact("fact-revoke-one", "/api/sessions/{id}/revoke", "POST", "revokeSession"),
+            ]
+        )
+
+        result = EvidenceToPlanEnricher().enrich(plan, bundle)
+
+        self.assertEqual(result.applied_evidence, [])
+        self.assertTrue(any(d.code == "planned_route_conflicts_with_evidence" for d in result.diagnostics))
+        self.assertEqual(result.unapplied_evidence[0].reason_code, "planned_route_conflict")
 
     def test_enrichment_result_round_trips_through_dict(self) -> None:
         plan = _plan(

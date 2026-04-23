@@ -20,6 +20,7 @@ from tools.generation.domain.models import (
     AgentTestPlanInput,
     GenerationSourceInput,
     NormalizedTestPlan,
+    PlannedRouteIntent,
     SourceInputFormat,
 )
 from tools.generation.evidence.models import CodeFactsScope, TargetStack
@@ -64,6 +65,11 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
                         expected_outcomes=["A session is created and returned."],
                         priority="high",
                         tags=["api", "happy-path"],
+                        route=PlannedRouteIntent(
+                            http_method="POST",
+                            endpoint_path="/api/internal/v1/user-sessions/authenticate",
+                            path_kind="collection",
+                        ),
                     ),
                     AgentPlannedTestCaseInput(
                         title="Revoke all sessions",
@@ -103,6 +109,10 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
         self.assertEqual(len(result.normalized_plan.test_cases), 2)
         self.assertEqual(result.normalized_plan.test_cases[0].case_id, "tc-001")
         self.assertEqual(result.normalized_plan.test_cases[0].steps[0], "Call the authenticate endpoint with valid credentials.")
+        self.assertEqual(
+            result.normalized_plan.test_cases[0].planned_route.endpoint_path,
+            "/api/internal/v1/user-sessions/authenticate",
+        )
         self.assertEqual(result.normalized_plan.test_cases[1].open_questions, ["Exact auth strategy is not specified."])
         self.assertEqual(plan_payload["metadata"]["generation_phase"], "agent_plan_generation")
         self.assertEqual(source_input_payload["input_format"], "structured")
@@ -353,6 +363,48 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
             result.normalized_plan.test_cases[0].metadata["route_hints"][0]["endpoint_path"],
             "/users",
         )
+
+    def test_agent_plan_with_explicit_route_can_render_drafts_without_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agent_plan = AgentTestPlanInput(
+                source_id="users-agent-plan",
+                project="code/demo",
+                title="Users API",
+                planned_test_cases=[
+                    AgentPlannedTestCaseInput(
+                        title="Create user",
+                        objective="Verify user creation.",
+                        actions=["Call the create user API."],
+                        expected_outcomes=["User is created."],
+                        route=PlannedRouteIntent(
+                            http_method="POST",
+                            endpoint_path="/users",
+                            path_kind="collection",
+                        ),
+                    )
+                ],
+            )
+
+            result = GenerateTestPlanUseCase().execute(
+                GenerateTestPlanRequest(
+                    source_input=GenerationSourceInput(
+                        source_id=agent_plan.source_id,
+                        project=agent_plan.project,
+                        input_format=SourceInputFormat.STRUCTURED,
+                        name=agent_plan.title,
+                    ),
+                    input_mode=GenerationInputMode.AGENT_PLAN,
+                    agent_plan=agent_plan,
+                    workspace_root=root,
+                    options=GenerateTestPlanOptions(render_scenario_drafts=True),
+                )
+            )
+
+        self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertIsNotNone(result.scenario_render_result)
+        self.assertEqual(len(result.scenario_render_result.draft_set.drafts), 1)
+        self.assertEqual(result.scenario_render_result.validation_results[0].parse_valid, True)
 
     def test_use_case_skips_enrichment_without_evidence_collection(self) -> None:
         with TemporaryDirectory() as tmp:

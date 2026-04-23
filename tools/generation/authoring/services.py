@@ -13,6 +13,7 @@ from tools.generation.domain.models import (
     AgentTestPlanInput,
     DiagnosticSeverity,
     GenerationDiagnostic,
+    PlannedRouteIntent,
 )
 
 from .models import AgentPlanLoadResult, AgentPlanValidationResult
@@ -69,6 +70,11 @@ class AgentPlanAuthoringService:
                     tags=["replace-tag"],
                     unresolved_items=["Replace with unresolved case-specific detail."],
                     assumptions=["Replace with case-specific assumption if needed."],
+                    route=PlannedRouteIntent(
+                        http_method="GET",
+                        endpoint_path="/replace/path",
+                        path_kind="collection",
+                    ),
                     metadata={"notes": "Optional freeform case metadata."},
                 )
             ],
@@ -251,6 +257,27 @@ def validate_agent_plan_input(
                     details={"case_index": index},
                 )
             )
+        if case_input.route is not None:
+            if not case_input.route.http_method.strip():
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_case_route_missing_http_method",
+                        message="Case route must include http_method when route is provided.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=case_ref,
+                        details={"case_index": index},
+                    )
+                )
+            if not case_input.route.endpoint_path.strip():
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_case_route_missing_endpoint_path",
+                        message="Case route must include endpoint_path when route is provided.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=case_ref,
+                        details={"case_index": index},
+                    )
+                )
     return diagnostics
 
 
@@ -322,6 +349,17 @@ def _validate_agent_plan_payload_shape(
                     GenerationDiagnostic(
                         code="agent_plan_case_metadata_not_object",
                         message="Case metadata must be a JSON object.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=source_ref,
+                        details={"case_index": index},
+                    )
+                )
+            route = item.get("route")
+            if route is not None and not isinstance(route, dict):
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_case_route_not_object",
+                        message="Case route must be a JSON object when provided.",
                         severity=DiagnosticSeverity.ERROR,
                         source_ref=source_ref,
                         details={"case_index": index},

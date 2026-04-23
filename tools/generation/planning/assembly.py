@@ -157,6 +157,7 @@ class NormalizedTestPlanAssembler:
             assumptions=list(case_input.assumptions),
             open_questions=list(case_input.unresolved_items),
             tags=list(case_input.tags),
+            planned_route=None if case_input.route is None else case_input.route,
             metadata=metadata,
         )
 

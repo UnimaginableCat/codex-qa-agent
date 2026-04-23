@@ -16,6 +16,7 @@ from tools.generation.domain.models import (
     GenerationSourceInput,
     NormalizedProseSource,
     NormalizedTestPlan,
+    PlannedRouteIntent,
     PlannedTestCase,
     ProseTestCaseDraft,
     SourceInputFormat,
@@ -44,6 +45,11 @@ class GenerationContractTests(unittest.TestCase):
                     tags=["session"],
                     unresolved_items=["Auth fixture name is not selected."],
                     assumptions=["Controller route evidence may resolve endpoint later."],
+                    route=PlannedRouteIntent(
+                        http_method="POST",
+                        endpoint_path="/api/internal/v1/user-sessions/authenticate",
+                        path_kind="collection",
+                    ),
                     metadata={"owner": "agent"},
                 )
             ],
@@ -57,6 +63,11 @@ class GenerationContractTests(unittest.TestCase):
         self.assertEqual(restored.source_id, "sessions-agent-plan")
         self.assertEqual(restored.planned_test_cases[0].case_id, "auth-session")
         self.assertEqual(restored.planned_test_cases[0].actions, ["Call authenticate endpoint."])
+        self.assertEqual(restored.planned_test_cases[0].route.http_method, "POST")
+        self.assertEqual(
+            restored.planned_test_cases[0].route.endpoint_path,
+            "/api/internal/v1/user-sessions/authenticate",
+        )
         self.assertEqual(restored.evidence_scope["paths"], ["src/main/java/demo/UserController.java"])
 
     def test_source_input_round_trips_through_json_payload(self) -> None:
@@ -94,6 +105,11 @@ class GenerationContractTests(unittest.TestCase):
                     expected_results=["Entity exists"],
                     assumptions=["API is available"],
                     open_questions=["Which auth mode is required?"],
+                    planned_route=PlannedRouteIntent(
+                        http_method="POST",
+                        endpoint_path="/api/entities",
+                        path_kind="collection",
+                    ),
                 )
             ],
         )
@@ -105,6 +121,7 @@ class GenerationContractTests(unittest.TestCase):
         self.assertEqual(restored.test_cases[0].expected_results, ["Entity exists"])
         self.assertEqual(restored.test_cases[0].assumptions, ["API is available"])
         self.assertEqual(restored.test_cases[0].open_questions, ["Which auth mode is required?"])
+        self.assertEqual(restored.test_cases[0].planned_route.http_method, "POST")
 
     def test_normalized_prose_source_preserves_drafts(self) -> None:
         normalized = NormalizedProseSource(

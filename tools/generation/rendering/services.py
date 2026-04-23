@@ -160,7 +160,7 @@ class DraftScenarioRenderer:
         ]
         notes = [
             "Generated draft preview only. Do not execute without operator review.",
-            "Route resolved from code facts.",
+            "Route resolved for preview rendering.",
             f"Route source: {route_source}.",
             "Request body not inferred.",
             "Auth headers not inferred.",
@@ -231,13 +231,17 @@ class DraftScenarioRenderer:
 
 
 def _supported_api_hint(test_case: PlannedTestCase) -> dict[str, Any] | None:
-    readiness = str(test_case.metadata.get("readiness", ""))
-    if readiness not in {"route_resolved", "evidence_supported"}:
-        return None
-
     route_hint = _route_hint_support(test_case)
     if route_hint is not None:
         return route_hint
+
+    planned_route = _planned_route_support(test_case)
+    if planned_route is not None:
+        return planned_route
+
+    readiness = str(test_case.metadata.get("readiness", ""))
+    if readiness not in {"route_resolved", "evidence_supported"}:
+        return None
 
     for raw_hint in test_case.metadata.get("evidence_hints", []):
         if not isinstance(raw_hint, dict):
@@ -258,6 +262,9 @@ def _supported_api_hint(test_case: PlannedTestCase) -> dict[str, Any] | None:
 
 
 def _route_hint_support(test_case: PlannedTestCase) -> dict[str, Any] | None:
+    readiness = str(test_case.metadata.get("readiness", ""))
+    if readiness not in {"route_resolved", "evidence_supported"}:
+        return None
     route_hints = [
         hint
         for hint in test_case.metadata.get("route_hints", [])
@@ -282,8 +289,27 @@ def _route_hint_support(test_case: PlannedTestCase) -> dict[str, Any] | None:
         **hint,
         "http_method": str(hint["http_method"]).upper(),
         "route_source": "route_hints",
-        "readiness": str(test_case.metadata.get("readiness", "")),
+        "readiness": readiness,
         "path_shape": _path_shape(endpoint_path),
+    }
+
+
+def _planned_route_support(test_case: PlannedTestCase) -> dict[str, Any] | None:
+    planned_route = test_case.planned_route
+    if planned_route is None:
+        return None
+    endpoint_path = planned_route.endpoint_path.strip()
+    http_method = planned_route.http_method.strip().upper()
+    if not endpoint_path or not http_method:
+        return None
+    return {
+        "endpoint_path": endpoint_path,
+        "http_method": http_method,
+        "path_kind": planned_route.path_kind,
+        "route_source": "planned_route",
+        "readiness": str(test_case.metadata.get("readiness", "")) or "planned_route_defined",
+        "path_shape": planned_route.path_kind or _path_shape(endpoint_path),
+        "planned_route_source": planned_route.source,
     }
 
 
@@ -305,6 +331,15 @@ def _render_diagnostics(test_case: PlannedTestCase, support: dict[str, Any]) -> 
             GenerationDiagnostic(
                 code="rendering_based_on_route_hints",
                 message="Scenario draft rendering used route_hints as the primary route source.",
+                severity=DiagnosticSeverity.INFO,
+                source_ref=test_case.case_id,
+            )
+        )
+    if support.get("route_source") == "planned_route":
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="rendering_based_on_planned_route",
+                message="Scenario draft rendering used agent-authored planned_route as the primary route source.",
                 severity=DiagnosticSeverity.INFO,
                 source_ref=test_case.case_id,
             )
@@ -338,6 +373,11 @@ def _unsupported_reason_code(test_case: PlannedTestCase) -> str:
             return "route_not_ready_for_rendering"
         if any(str(hint.get("confidence", "")) == "weak_inference" for hint in route_hints):
             return "low_confidence_route_evidence"
+    if test_case.planned_route is not None:
+        planned_method = test_case.planned_route.http_method.strip()
+        planned_path = test_case.planned_route.endpoint_path.strip()
+        if not planned_method or not planned_path:
+            return "planned_route_incomplete"
     return "missing_endpoint_evidence"
 
 
@@ -346,6 +386,7 @@ def _unsupported_reason_message(reason_code: str) -> str:
         "ambiguous_route_mapping": "Scenario draft rendering requires one unambiguous route binding.",
         "route_not_ready_for_rendering": "Scenario draft rendering requires route_resolved or evidence_supported readiness.",
         "low_confidence_route_evidence": "Scenario draft rendering does not use low-confidence route evidence.",
+        "planned_route_incomplete": "Scenario draft rendering requires both endpoint path and HTTP method in planned_route.",
         "missing_endpoint_evidence": "Scenario draft rendering requires endpoint path and HTTP method evidence.",
     }
     return messages.get(reason_code, messages["missing_endpoint_evidence"])
