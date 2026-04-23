@@ -21,6 +21,7 @@ from tools.generation.domain.models import (
 from tools.generation.enrichment.models import EnrichedTestPlanResult
 from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
+from tools.generation.review.models import ScenarioPromotionResult
 
 GENERATION_RUNS_DIRNAME = Path(".codex-qa/generation/runs")
 GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
@@ -41,6 +42,7 @@ SCENARIO_RENDER_RESULT_FILENAME = "scenario-render-result.json"
 SCENARIO_PARSE_RESULTS_FILENAME = "scenario-parse-results.json"
 UNSUPPORTED_CHECKS_FILENAME = "unsupported-checks.json"
 DEFERRED_ITEMS_FILENAME = "deferred-items.json"
+PROMOTION_RESULT_FILENAME = "promotion-result.json"
 SUMMARY_FILENAME = "summary.json"
 MANIFEST_FILENAME = "manifest.json"
 FORBIDDEN_GENERATION_ARTIFACT_SUFFIXES = {
@@ -217,6 +219,16 @@ class FileGenerationArtifactStore:
         self.write_manifest(run_context)
         return target_path
 
+    def write_promotion_result(
+        self,
+        run_context: GenerationRunContext,
+        promotion_result: ScenarioPromotionResult,
+    ) -> Path:
+        target_path = _bundle_file_path(run_context, PROMOTION_RESULT_FILENAME)
+        _write_json_file(target_path, promotion_result.to_dict())
+        self.write_manifest(run_context)
+        return target_path
+
     def write_summary(self, run_context: GenerationRunContext, summary: dict[str, object]) -> Path:
         target_path = run_context.run_state_dir / SUMMARY_FILENAME
         _write_json_file(target_path, summary)
@@ -324,6 +336,7 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
             "scenario_parse_results_path": str(run_context.artifact_dir / SCENARIO_PARSE_RESULTS_FILENAME),
             "unsupported_checks_path": str(run_context.artifact_dir / UNSUPPORTED_CHECKS_FILENAME),
             "deferred_items_path": str(run_context.artifact_dir / DEFERRED_ITEMS_FILENAME),
+            "promotion_result_path": str(run_context.artifact_dir / PROMOTION_RESULT_FILENAME),
             "summary_path": str(run_context.artifact_dir / SUMMARY_FILENAME),
         },
         "run_state": {

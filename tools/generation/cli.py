@@ -18,6 +18,11 @@ from tools.generation.application import GenerateTestPlanOptions, GenerateTestPl
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic, GenerationSourceInput
 from tools.generation.evidence.models import CodeFactsScope
+from tools.generation.review import (
+    ScenarioDraftPromotionService,
+    ScenarioDraftReviewService,
+    ScenarioPromotionRequest,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,14 +30,26 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m tools.generation.cli",
         description="Generate a NormalizedTestPlan, optionally enriched by explicit scoped code facts.",
     )
-    source = parser.add_mutually_exclusive_group(required=True)
+    workflow = parser.add_mutually_exclusive_group()
+    workflow.add_argument("--review-drafts", action="store_true", help="Review generated drafts for a run id.")
+    workflow.add_argument("--promote-draft", action="store_true", help="Promote one selected draft into scenarios/.")
+
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--prose", help="Inline prose source for test-plan generation.")
     source.add_argument("--source-file", help="Path to a prose source file.")
-    parser.add_argument("--source-id", required=True, help="Stable source id for this generation run.")
-    parser.add_argument("--project", required=True, help="Project identifier stored in generation contracts.")
+    parser.add_argument("--source-id", help="Stable source id for this generation run.")
+    parser.add_argument("--project", help="Project identifier stored in generation contracts.")
     parser.add_argument("--name", default="", help="Optional human-readable source name.")
     parser.add_argument("--workspace-root", default=".", help="Workspace root for artifact persistence.")
     parser.add_argument("--no-persist", action="store_true", help="Do not persist generation artifacts.")
+    parser.add_argument("--run-id", help="Generation run id for review or promotion.")
+    parser.add_argument("--draft-id", help="Draft id selected for promotion.")
+    parser.add_argument("--allow-invalid", action="store_true", help="Allow promotion of parser-invalid drafts.")
+    parser.add_argument(
+        "--target-dir",
+        default="scenarios/generated",
+        help="Promotion target directory under scenarios/.",
+    )
 
     parser.add_argument("--project-path", help="Explicit target project path for code facts extraction.")
     parser.add_argument(
@@ -170,7 +187,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        payload = run_generation(args)
+        if args.review_drafts:
+            payload = run_review(args)
+        elif args.promote_draft:
+            payload = run_promotion(args)
+        else:
+            payload = run_generation(args)
     except GenerationCliInputError as exc:
         payload = _error_payload(exc.diagnostics)
         _print_payload(payload)
@@ -192,6 +214,55 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if payload["status"] == StepStatus.PASS.value else 1
 
 
+def run_review(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _review_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    review_set = ScenarioDraftReviewService().review(
+        str(args.run_id),
+        workspace_root=Path(args.workspace_root),
+    )
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "run_id": review_set.run_id,
+            "source_id": review_set.source_id,
+            "artifact_dir": review_set.artifact_dir,
+            "draft_count": len(review_set.items),
+            "valid_draft_count": sum(1 for item in review_set.items if item.parse_status.value == "valid"),
+            "invalid_draft_count": sum(1 for item in review_set.items if item.parse_status.value == "invalid"),
+            "review_set": review_set.to_dict(),
+            "diagnostics": [diagnostic.to_dict() for diagnostic in review_set.diagnostics],
+        }
+    )
+
+
+def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _promotion_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    result = ScenarioDraftPromotionService().promote(
+        ScenarioPromotionRequest(
+            run_id=str(args.run_id),
+            draft_id=str(args.draft_id),
+            workspace_root=Path(args.workspace_root),
+            target_dir=Path(args.target_dir),
+            allow_invalid=args.allow_invalid,
+        )
+    )
+    return to_json_safe(
+        {
+            "status": result.status.value,
+            "run_id": result.run_id,
+            "draft_id": result.draft_id,
+            "source_path": result.source_path,
+            "target_path": result.target_path,
+            "promotion_result_path": result.promotion_result_path,
+            "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
+        }
+    )
+
+
 class GenerationCliInputError(ValueError):
     def __init__(self, diagnostics: list[GenerationDiagnostic]) -> None:
         super().__init__("Invalid generation CLI input.")
@@ -200,6 +271,32 @@ class GenerationCliInputError(ValueError):
 
 def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
+    if not args.prose and not args.source_file:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_generation_requires_source",
+                message="Generation requires exactly one of --prose or --source-file.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.source_id,
+            )
+        )
+    if not args.source_id:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_generation_requires_source_id",
+                message="Generation requires --source-id.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        )
+    if not args.project:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_generation_requires_project",
+                message="Generation requires --project.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.source_id,
+            )
+        )
     if args.enrich and not args.collect_code_facts:
         diagnostics.append(
             GenerationDiagnostic(
@@ -243,6 +340,40 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
                 message="--render-drafts requires artifact persistence; remove --no-persist.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=args.source_id,
+            )
+        )
+    return diagnostics
+
+
+def _review_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if args.run_id:
+        return []
+    return [
+        GenerationDiagnostic(
+            code="adapter_review_requires_run_id",
+            message="--review-drafts requires --run-id.",
+            severity=DiagnosticSeverity.ERROR,
+        )
+    ]
+
+
+def _promotion_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    if not args.run_id:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_promotion_requires_run_id",
+                message="--promote-draft requires --run-id.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        )
+    if not args.draft_id:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_promotion_requires_draft_id",
+                message="--promote-draft requires --draft-id.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.run_id,
             )
         )
     return diagnostics

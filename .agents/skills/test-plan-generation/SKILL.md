@@ -10,8 +10,8 @@ Use this skill for prose-first generation in `codex-qa-agent`.
 ## Purpose
 
 Create a `tools.generation.domain.models.NormalizedTestPlan` from operator prose. Optionally render
-non-executed markdown draft previews from evidence-supported cases. Do not promote drafts into
-`scenarios/` and do not execute `scenario_runner`.
+non-executed markdown draft previews from evidence-supported cases. Promote drafts into `scenarios/`
+only when the operator explicitly selects a draft id. Do not execute `scenario_runner`.
 
 ## Accepted Inputs
 
@@ -21,6 +21,62 @@ non-executed markdown draft previews from evidence-supported cases. Do not promo
 - Default input format: `SourceInputFormat.PROSE`
 
 Structured input is reserved for future work. If `input_format=structured`, report it as unsupported for this phase.
+
+## Short Request Format
+
+Use this compact operator-facing format by default. The agent should expand it into the correct CLI
+or use-case invocation without asking for the long operational prompt again.
+
+```text
+Use skill: test-plan-generation
+
+mode: <plan-only | plan-with-evidence | draft-preview | review-drafts | promote-draft>
+project: code/<project-name>
+source_id: <optional for review/promote>
+prose: <required for generation modes>
+project_path: <required for evidence modes>
+scope:
+- <explicit file or directory path>
+run_id: <required for review/promote>
+draft_id: <required for promote-draft>
+target_dir: scenarios/<optional-subdir>
+allow_invalid: true|false
+```
+
+### Field Mapping
+
+- `mode`
+  - `plan-only` -> prose to `NormalizedTestPlan`
+  - `plan-with-evidence` -> prose + explicit scope + enrichment
+  - `draft-preview` -> enriched plan + parser-validated draft markdown preview
+  - `review-drafts` -> inspect already generated drafts by `run_id`
+  - `promote-draft` -> copy one selected draft into `scenarios/`
+- `project`
+  - required for generation modes
+- `source_id`
+  - required for generation modes
+- `prose`
+  - required for `plan-only`, `plan-with-evidence`, `draft-preview`
+- `project_path`
+  - required for `plan-with-evidence` and `draft-preview`
+- `scope`
+  - required for `plan-with-evidence` and `draft-preview`
+  - each item maps to `--evidence-scope-path`
+- `run_id`
+  - required for `review-drafts` and `promote-draft`
+- `draft_id`
+  - required for `promote-draft`
+- `target_dir`
+  - optional for `promote-draft`, defaults to `scenarios/generated`
+- `allow_invalid`
+  - optional for `promote-draft`, defaults to `false`
+
+### Default Agent Interpretation
+
+- If the request uses this short format, do not ask the operator to restate it in longer prose.
+- If `mode=plan-with-evidence` or `mode=draft-preview`, require explicit `project_path` and `scope`.
+- Never infer repository-wide scope from `project` alone.
+- If a required field for the selected mode is missing, ask only for the missing field.
 
 ## Modes
 
@@ -81,6 +137,95 @@ This mode renders non-executed scenario draft artifacts only for cases that have
 HTTP method evidence hints. Drafts are parser-validated with `MarkdownScenarioParser.parse_result()`.
 No compile, preflight, runtime execution, API workflow, or DB workflow is triggered.
 
+### Mode D - Review And Promote Drafts
+
+Use after Mode C has produced draft artifacts.
+
+Review:
+
+```powershell
+py -3.14 -m tools.generation.cli `
+  --review-drafts `
+  --run-id <generation-run-id> `
+  --workspace-root .
+```
+
+Promote one explicit draft:
+
+```powershell
+py -3.14 -m tools.generation.cli `
+  --promote-draft `
+  --run-id <generation-run-id> `
+  --draft-id draft-tc-001 `
+  --workspace-root . `
+  --target-dir scenarios/generated
+```
+
+Promotion copies the selected draft to `scenarios/` with a metadata header. It never overwrites
+existing files. Invalid drafts are rejected unless the operator explicitly passes `--allow-invalid`.
+Promotion still does not execute the scenario.
+
+## Canonical Short Examples
+
+Plan only:
+
+```text
+Use skill: test-plan-generation
+
+mode: plan-only
+project: code/demo
+source_id: users-api
+prose: Проверить создание пользователя и получение по id
+```
+
+Plan with evidence:
+
+```text
+Use skill: test-plan-generation
+
+mode: plan-with-evidence
+project: code/demo
+source_id: users-api
+project_path: code/demo
+scope:
+- app/api/users.py
+prose: Проверить создание пользователя и получение по id
+```
+
+Draft preview:
+
+```text
+Use skill: test-plan-generation
+
+mode: draft-preview
+project: code/demo
+source_id: users-api
+project_path: code/demo
+scope:
+- app/api/users.py
+prose: Проверить создание пользователя
+```
+
+Review drafts:
+
+```text
+Use skill: test-plan-generation
+
+mode: review-drafts
+run_id: <generation-run-id>
+```
+
+Promote draft:
+
+```text
+Use skill: test-plan-generation
+
+mode: promote-draft
+run_id: <generation-run-id>
+draft_id: draft-tc-001
+target_dir: scenarios/generated
+```
+
 ## Workflow
 
 1. Choose Mode A or Mode B.
@@ -89,6 +234,8 @@ No compile, preflight, runtime execution, API workflow, or DB workflow is trigge
 4. Inspect diagnostics before trusting the plan.
 5. Use `normalized_plan` artifacts as the canonical output.
 6. Reference artifact paths from `artifact_paths` when reporting.
+7. For draft review, surface parse status and diagnostics before promotion.
+8. Promote only the operator-selected `draft_id`.
 
 `GenerationPipelineService` exists only as a compatibility facade. Prefer the use-case boundary for new skill-facing work.
 
@@ -102,6 +249,8 @@ enrichment_enabled=True)`. It returns an `EnrichedTestPlanResult`, updates the r
 
 Optional draft rendering is available through `GenerateTestPlanOptions(render_scenario_drafts=True)`
 or CLI `--render-drafts`. It writes preview artifacts and validates them with the parser only.
+
+Draft review and promotion are available through CLI `--review-drafts` and `--promote-draft`.
 
 The CLI adapter is only an argument-gathering layer. It must not be treated as the source of
 generation semantics.
@@ -150,6 +299,7 @@ artifacts/agent/generation/<source_slug>-<run_id>/
   scenario-parse-results.json
   unsupported-checks.json
   deferred-items.json
+  promotion-result.json
   summary.json
 ```
 
@@ -169,7 +319,9 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 - Do not treat evidence hints as runnable scenario steps.
 - Do not call LLMs or external APIs.
 - Do not treat generated draft markdown as executable or reviewed scenarios.
-- Do not copy draft markdown into `scenarios/` unless a later explicit promotion workflow exists.
+- Do not copy draft markdown into `scenarios/` unless the operator explicitly selects a `draft_id`.
+- Do not overwrite existing scenario files during promotion.
+- Do not auto-promote drafts.
 - Do not run or modify `scenario_runner`.
 - Do not add pause/resume or guided/manual behavior for generation.
 - Do not store canonical planning fields only in `metadata`.

@@ -34,6 +34,7 @@ artifacts/agent/generation/<source_slug>-<run_id>/
   scenario-parse-results.json
   unsupported-checks.json
   deferred-items.json
+  promotion-result.json
   summary.json
 ```
 
@@ -89,3 +90,22 @@ py -3.14 -m tools.generation.cli `
 Rendering is conservative: it emits parser-validated markdown previews only for cases with endpoint
 path and HTTP method evidence hints. Unsupported cases are written to deferred/unsupported artifacts.
 No scenario execution, compile, preflight, API workflow, or DB workflow is triggered.
+
+Review and promotion:
+
+```powershell
+py -3.14 -m tools.generation.cli `
+  --review-drafts `
+  --run-id <generation-run-id> `
+  --workspace-root .
+
+py -3.14 -m tools.generation.cli `
+  --promote-draft `
+  --run-id <generation-run-id> `
+  --draft-id draft-tc-001 `
+  --workspace-root . `
+  --target-dir scenarios/generated
+```
+
+Promotion is explicit, never overwrites existing files, and writes `promotion-result.json` under the
+generation artifact bundle. Promoted drafts receive a metadata header and are not executed.
