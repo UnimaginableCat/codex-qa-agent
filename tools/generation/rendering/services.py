@@ -80,12 +80,15 @@ class DraftScenarioRenderer:
         for test_case in plan.test_cases:
             support = _supported_api_hint(test_case)
             if support is None:
+                reason_code = _unsupported_reason_code(test_case)
                 check = UnsupportedCheck(
                     case_id=test_case.case_id,
-                    reason_code="missing_endpoint_evidence",
-                    message="Scenario draft rendering requires endpoint path and HTTP method evidence.",
+                    reason_code=reason_code,
+                    message=_unsupported_reason_message(reason_code),
                     details={
+                        "has_route_hints": bool(test_case.metadata.get("route_hints")),
                         "has_evidence_hints": bool(test_case.metadata.get("evidence_hints")),
+                        "readiness": str(test_case.metadata.get("readiness", "")),
                     },
                 )
                 unsupported_checks.append(check)
@@ -109,6 +112,8 @@ class DraftScenarioRenderer:
                 )
                 continue
 
+            diagnostics.extend(_render_diagnostics(test_case, support))
+
             draft_id = f"draft-{test_case.case_id}"
             title = f"{plan.title} - {test_case.title}".strip(" -")
             relative_path = Path("scenario-drafts") / f"{_slugify(test_case.case_id + '-' + test_case.title)}.md"
@@ -123,7 +128,7 @@ class DraftScenarioRenderer:
                     metadata={
                         "renderer": "draft-scenario-renderer-v1",
                         "preview_only": True,
-                        "evidence_hint": support,
+                        "route_binding": support,
                     },
                 )
             )
@@ -148,13 +153,28 @@ class DraftScenarioRenderer:
         project_name = Path(plan.project).name or _slugify(plan.project)
         method = str(support["http_method"]).upper()
         endpoint_path = str(support["endpoint_path"])
+        route_source = str(support.get("route_source") or "evidence_hints")
+        route_readiness = str(support.get("readiness") or "")
         expected_results = test_case.expected_results or [
             "HTTP response is received and must be reviewed before execution."
         ]
         notes = [
             "Generated draft preview only. Do not execute without operator review.",
-            "No request body, auth headers, DB checks, or concrete assertions were invented.",
+            "Route resolved from code facts.",
+            f"Route source: {route_source}.",
+            "Request body not inferred.",
+            "Auth headers not inferred.",
+            "Assertions not generated.",
+            "No DB checks, captures, or concrete payloads were invented.",
         ]
+        if route_readiness:
+            notes.append(f"Case readiness: {route_readiness}.")
+        if support.get("handler_name"):
+            notes.append(f"Handler: {support['handler_name']}.")
+        if support.get("controller_name"):
+            notes.append(f"Controller: {support['controller_name']}.")
+        if support.get("path_shape"):
+            notes.append(f"Route shape: {support['path_shape']}.")
         for question in test_case.open_questions:
             notes.append(f"Open question: {question}")
         for assumption in test_case.assumptions:
@@ -211,6 +231,14 @@ class DraftScenarioRenderer:
 
 
 def _supported_api_hint(test_case: PlannedTestCase) -> dict[str, Any] | None:
+    readiness = str(test_case.metadata.get("readiness", ""))
+    if readiness not in {"route_resolved", "evidence_supported"}:
+        return None
+
+    route_hint = _route_hint_support(test_case)
+    if route_hint is not None:
+        return route_hint
+
     for raw_hint in test_case.metadata.get("evidence_hints", []):
         if not isinstance(raw_hint, dict):
             continue
@@ -220,8 +248,111 @@ def _supported_api_hint(test_case: PlannedTestCase) -> dict[str, Any] | None:
         endpoint_path = fields.get("endpoint_path")
         http_method = fields.get("http_method")
         if endpoint_path and http_method:
-            return dict(fields)
+            return {
+                **dict(fields),
+                "route_source": "evidence_hints",
+                "readiness": readiness,
+                "path_shape": _path_shape(str(endpoint_path)),
+            }
     return None
+
+
+def _route_hint_support(test_case: PlannedTestCase) -> dict[str, Any] | None:
+    route_hints = [
+        hint
+        for hint in test_case.metadata.get("route_hints", [])
+        if isinstance(hint, dict) and hint.get("endpoint_path") and hint.get("http_method")
+    ]
+    if not route_hints:
+        return None
+
+    unique_pairs = {
+        (str(hint["endpoint_path"]), str(hint["http_method"]).upper())
+        for hint in route_hints
+    }
+    if len(unique_pairs) != 1:
+        return None
+
+    hint = dict(route_hints[0])
+    confidence = str(hint.get("confidence", ""))
+    if confidence == "weak_inference":
+        return None
+    endpoint_path = str(hint["endpoint_path"])
+    return {
+        **hint,
+        "http_method": str(hint["http_method"]).upper(),
+        "route_source": "route_hints",
+        "readiness": str(test_case.metadata.get("readiness", "")),
+        "path_shape": _path_shape(endpoint_path),
+    }
+
+
+def _render_diagnostics(test_case: PlannedTestCase, support: dict[str, Any]) -> list[GenerationDiagnostic]:
+    diagnostics = [
+        GenerationDiagnostic(
+            code="route_used_for_rendering",
+            message="Scenario draft rendering used resolved route evidence.",
+            severity=DiagnosticSeverity.INFO,
+            source_ref=test_case.case_id,
+            details={
+                "endpoint_path": support.get("endpoint_path"),
+                "http_method": support.get("http_method"),
+            },
+        ),
+    ]
+    if support.get("route_source") == "route_hints":
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="rendering_based_on_route_hints",
+                message="Scenario draft rendering used route_hints as the primary route source.",
+                severity=DiagnosticSeverity.INFO,
+                source_ref=test_case.case_id,
+            )
+        )
+    diagnostics.append(
+        GenerationDiagnostic(
+            code="rendered_with_partial_information",
+            message="Scenario draft was rendered without inferred payloads, auth, or assertions.",
+            severity=DiagnosticSeverity.INFO,
+            source_ref=test_case.case_id,
+        )
+    )
+    return diagnostics
+
+
+def _unsupported_reason_code(test_case: PlannedTestCase) -> str:
+    readiness = str(test_case.metadata.get("readiness", ""))
+    route_hints = [
+        hint
+        for hint in test_case.metadata.get("route_hints", [])
+        if isinstance(hint, dict) and hint.get("endpoint_path") and hint.get("http_method")
+    ]
+    if route_hints:
+        unique_pairs = {
+            (str(hint["endpoint_path"]), str(hint["http_method"]).upper())
+            for hint in route_hints
+        }
+        if len(unique_pairs) > 1:
+            return "ambiguous_route_mapping"
+        if readiness not in {"route_resolved", "evidence_supported"}:
+            return "route_not_ready_for_rendering"
+        if any(str(hint.get("confidence", "")) == "weak_inference" for hint in route_hints):
+            return "low_confidence_route_evidence"
+    return "missing_endpoint_evidence"
+
+
+def _unsupported_reason_message(reason_code: str) -> str:
+    messages = {
+        "ambiguous_route_mapping": "Scenario draft rendering requires one unambiguous route binding.",
+        "route_not_ready_for_rendering": "Scenario draft rendering requires route_resolved or evidence_supported readiness.",
+        "low_confidence_route_evidence": "Scenario draft rendering does not use low-confidence route evidence.",
+        "missing_endpoint_evidence": "Scenario draft rendering requires endpoint path and HTTP method evidence.",
+    }
+    return messages.get(reason_code, messages["missing_endpoint_evidence"])
+
+
+def _path_shape(path: str) -> str:
+    return "item" if re.search(r"\{[^}]+\}", path) else "collection"
 
 
 def _slugify(value: str) -> str:
