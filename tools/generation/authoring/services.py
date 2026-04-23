@@ -12,7 +12,9 @@ from tools.generation.domain.models import (
     AgentPlannedTestCaseInput,
     AgentTestPlanInput,
     DiagnosticSeverity,
+    GapCategory,
     GenerationDiagnostic,
+    PlannedCaseGap,
     PlannedRouteIntent,
 )
 from tools.generation.evidence.models import TargetStack
@@ -70,6 +72,12 @@ class AgentPlanAuthoringService:
                     priority="normal",
                     tags=["replace-tag"],
                     unresolved_items=["Replace with unresolved case-specific detail."],
+                    gaps=[
+                        PlannedCaseGap(
+                            category=GapCategory.ENDPOINT_DETAIL,
+                            message="Replace with typed unresolved gap when the route or executable detail is not known.",
+                        )
+                    ],
                     assumptions=["Replace with case-specific assumption if needed."],
                     route=PlannedRouteIntent(
                         http_method="GET",
@@ -331,6 +339,7 @@ def _validate_agent_plan_payload_shape(
                 "expected_outcomes",
                 "tags",
                 "unresolved_items",
+                "gaps",
                 "assumptions",
             ):
                 value = item.get(field_name)
@@ -366,6 +375,41 @@ def _validate_agent_plan_payload_shape(
                         details={"case_index": index},
                     )
                 )
+            gaps = item.get("gaps")
+            if isinstance(gaps, list):
+                for gap_index, gap in enumerate(gaps, start=1):
+                    if not isinstance(gap, dict):
+                        diagnostics.append(
+                            GenerationDiagnostic(
+                                code="agent_plan_case_gap_not_object",
+                                message="Each case gap must be a JSON object.",
+                                severity=DiagnosticSeverity.ERROR,
+                                source_ref=source_ref,
+                                details={"case_index": index, "gap_index": gap_index},
+                            )
+                        )
+                        continue
+                    raw_category = gap.get("category")
+                    if raw_category not in {item.value for item in GapCategory}:
+                        diagnostics.append(
+                            GenerationDiagnostic(
+                                code="agent_plan_case_gap_invalid_category",
+                                message="Case gap category must be one of the supported typed gap values.",
+                                severity=DiagnosticSeverity.ERROR,
+                                source_ref=source_ref,
+                                details={"case_index": index, "gap_index": gap_index, "category": raw_category},
+                            )
+                        )
+                    if not str(gap.get("message", "")).strip():
+                        diagnostics.append(
+                            GenerationDiagnostic(
+                                code="agent_plan_case_gap_missing_message",
+                                message="Case gap must include a non-empty message.",
+                                severity=DiagnosticSeverity.ERROR,
+                                source_ref=source_ref,
+                                details={"case_index": index, "gap_index": gap_index},
+                            )
+                        )
 
     metadata = payload.get("metadata")
     if metadata is not None and not isinstance(metadata, dict):

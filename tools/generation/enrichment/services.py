@@ -8,9 +8,11 @@ from typing import Protocol
 
 from tools.generation.domain.models import (
     DiagnosticSeverity,
+    GapCategory,
     GenerationDiagnostic,
     NormalizedTestPlan,
     PlannedCaseSupport,
+    PlannedCaseGap,
     PlannedTestCase,
     RouteSupportHint,
     TraceabilityLink,
@@ -86,6 +88,7 @@ class EvidenceToPlanEnricher:
             case_diagnostics: list[GenerationDiagnostic] = []
             case_applied: list[AppliedEvidenceLink] = []
             resolved_questions: list[str] = []
+            resolved_gaps: list[GapCategory] = []
 
             if len(top_candidates) > 1:
                 candidate_ids = [candidate.fact.fact_id for candidate in top_candidates]
@@ -177,8 +180,9 @@ class EvidenceToPlanEnricher:
                     case_applied.append(link)
                     applied_evidence.append(link)
                     applied_fact_ids.add(fact.fact_id)
-                    resolved_questions = _resolve_open_questions(test_case, fact)
-                    _apply_evidence_to_case(test_case, fact, link, resolved_questions)
+                    resolved_gaps = _resolve_case_gaps(test_case, fact)
+                    resolved_questions = _resolve_open_questions(test_case, resolved_gaps)
+                    _apply_evidence_to_case(test_case, fact, link, resolved_questions, resolved_gaps)
                     traceability_links.append(
                         TraceabilityLink(
                             source_ref=f"evidence:{fact.fact_id}",
@@ -348,6 +352,7 @@ def _apply_evidence_to_case(
     fact: GenerationEvidenceFact,
     link: AppliedEvidenceLink,
     resolved_questions: list[str],
+    resolved_gaps: list[GapCategory],
 ) -> None:
     evidence_hints = list(test_case.metadata.get("evidence_hints", []))
     evidence_hints.append(link.to_dict())
@@ -364,7 +369,7 @@ def _apply_evidence_to_case(
         route_source="route_hints",
     )
     route_hints.append(route_hint.to_dict())
-    readiness = _readiness_from_fact(fact, resolved_questions, test_case.open_questions)
+    readiness = _readiness_from_fact(fact, resolved_gaps, test_case.gaps, resolved_questions, test_case.open_questions)
     support = test_case.support or PlannedCaseSupport()
     support.readiness = readiness.value
     support.route_hints = [*support.route_hints, route_hint]
@@ -383,6 +388,9 @@ def _apply_evidence_to_case(
         test_case.open_questions = [
             question for question in test_case.open_questions if question not in resolved_questions
         ]
+    if resolved_gaps:
+        test_case.metadata["resolved_gaps"] = [gap.value for gap in resolved_gaps]
+        test_case.gaps = [gap for gap in test_case.gaps if gap.category not in resolved_gaps]
 
 
 def _match_candidate(test_case: PlannedTestCase, fact: GenerationEvidenceFact) -> MatchCandidate:
@@ -575,6 +583,8 @@ def _case_readiness(test_case: PlannedTestCase) -> TestCaseReadiness:
         return TestCaseReadiness(readiness)
     if test_case.metadata.get("evidence_hints"):
         return TestCaseReadiness.EVIDENCE_SUPPORTED
+    if test_case.gaps:
+        return TestCaseReadiness.NEEDS_CLARIFICATION
     if test_case.open_questions:
         return TestCaseReadiness.NEEDS_CLARIFICATION
     return TestCaseReadiness.PROSE_ONLY
@@ -582,10 +592,17 @@ def _case_readiness(test_case: PlannedTestCase) -> TestCaseReadiness:
 
 def _readiness_from_fact(
     fact: GenerationEvidenceFact,
+    resolved_gaps: list[GapCategory],
+    current_gaps: list[PlannedCaseGap],
     resolved_questions: list[str],
     current_open_questions: list[str],
 ) -> TestCaseReadiness:
     if fact.confidence == EvidenceConfidence.EXPLICIT and fact.payload.get("http_method"):
+        remaining_gaps = [
+            gap for gap in current_gaps if gap.category not in resolved_gaps
+        ]
+        if remaining_gaps:
+            return TestCaseReadiness.ROUTE_RESOLVED
         remaining_questions = [
             question for question in current_open_questions if question not in resolved_questions
         ]
@@ -595,14 +612,54 @@ def _readiness_from_fact(
     return TestCaseReadiness.PARTIALLY_SUPPORTED
 
 
-def _resolve_open_questions(test_case: PlannedTestCase, fact: GenerationEvidenceFact) -> list[str]:
+def _resolve_case_gaps(test_case: PlannedTestCase, fact: GenerationEvidenceFact) -> list[GapCategory]:
     if not fact.payload.get("endpoint_path") or not fact.payload.get("http_method"):
         return []
+    resolved = [
+        gap.category
+        for gap in test_case.gaps
+        if gap.category in {GapCategory.ENDPOINT_DETAIL, GapCategory.EXECUTABLE_DETAIL}
+    ]
+    if resolved:
+        return resolved
+    inferred = {
+        _question_gap_category(question)
+        for question in test_case.open_questions
+    }
+    return [
+        category
+        for category in (GapCategory.ENDPOINT_DETAIL, GapCategory.EXECUTABLE_DETAIL)
+        if category in inferred
+    ]
+
+
+def _resolve_open_questions(test_case: PlannedTestCase, resolved_gaps: list[GapCategory]) -> list[str]:
+    if not resolved_gaps:
+        return []
+    gap_set = set(resolved_gaps)
+    gap_messages = {
+        gap.message
+        for gap in test_case.gaps
+        if gap.category in gap_set
+    }
     return [
         question
         for question in test_case.open_questions
-        if any(marker in question.lower() for marker in ("api", "endpoint", "executable detail"))
+        if _question_gap_category(question) in gap_set or question in gap_messages
     ]
+
+
+def _question_gap_category(question: str) -> GapCategory:
+    normalized = question.lower()
+    if any(marker in normalized for marker in ("endpoint", "api endpoint", "which endpoint")):
+        return GapCategory.ENDPOINT_DETAIL
+    if any(marker in normalized for marker in ("executable detail", "concrete api", "ui action", "data setup", "db check")):
+        return GapCategory.EXECUTABLE_DETAIL
+    if any(marker in normalized for marker in ("auth", "authorization", "credentials")):
+        return GapCategory.AUTH_STRATEGY
+    if any(marker in normalized for marker in ("environment", "env")):
+        return GapCategory.ENVIRONMENT
+    return GapCategory.UNKNOWN
 
 
 def _case_terms(test_case: PlannedTestCase) -> set[str]:

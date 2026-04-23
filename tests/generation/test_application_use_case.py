@@ -18,6 +18,7 @@ from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.models import (
     AgentPlannedTestCaseInput,
     AgentTestPlanInput,
+    GapCategory,
     GenerationSourceInput,
     NormalizedTestPlan,
     PlannedRouteIntent,
@@ -114,6 +115,7 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
             "/api/internal/v1/user-sessions/authenticate",
         )
         self.assertEqual(result.normalized_plan.test_cases[1].open_questions, ["Exact auth strategy is not specified."])
+        self.assertEqual(result.normalized_plan.test_cases[1].gaps[0].category, GapCategory.AUTH_STRATEGY)
         self.assertEqual(plan_payload["metadata"]["generation_phase"], "agent_plan_generation")
         self.assertEqual(source_input_payload["input_format"], "structured")
         self.assertIn("planned_test_cases", json.loads(source_input_payload["content"]))
@@ -364,6 +366,7 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
             "/users",
         )
         self.assertEqual(result.normalized_plan.test_cases[0].support.route_hints[0].endpoint_path, "/users")
+        self.assertEqual(result.normalized_plan.test_cases[0].gaps, [])
 
     def test_use_case_uses_agent_plan_evidence_scope_when_request_scope_missing(self) -> None:
         with TemporaryDirectory() as tmp:

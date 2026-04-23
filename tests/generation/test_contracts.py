@@ -11,12 +11,14 @@ from tools.generation.domain.models import (
     AgentPlannedTestCaseInput,
     AgentTestPlanInput,
     DiagnosticSeverity,
+    GapCategory,
     GenerationDiagnostic,
     GenerationRunContext,
     GenerationSourceInput,
     NormalizedProseSource,
     NormalizedTestPlan,
     PlannedCaseSupport,
+    PlannedCaseGap,
     PlannedRouteIntent,
     PlannedTestCase,
     ProseTestCaseDraft,
@@ -46,6 +48,12 @@ class GenerationContractTests(unittest.TestCase):
                     priority="high",
                     tags=["session"],
                     unresolved_items=["Auth fixture name is not selected."],
+                    gaps=[
+                        PlannedCaseGap(
+                            category=GapCategory.AUTH_STRATEGY,
+                            message="Auth fixture name is not selected.",
+                        )
+                    ],
                     assumptions=["Controller route evidence may resolve endpoint later."],
                     route=PlannedRouteIntent(
                         http_method="POST",
@@ -66,6 +74,7 @@ class GenerationContractTests(unittest.TestCase):
         self.assertEqual(restored.planned_test_cases[0].case_id, "auth-session")
         self.assertEqual(restored.planned_test_cases[0].actions, ["Call authenticate endpoint."])
         self.assertEqual(restored.planned_test_cases[0].route.http_method, "POST")
+        self.assertEqual(restored.planned_test_cases[0].gaps[0].category, GapCategory.AUTH_STRATEGY)
         self.assertEqual(
             restored.planned_test_cases[0].route.endpoint_path,
             "/api/internal/v1/user-sessions/authenticate",
@@ -107,6 +116,12 @@ class GenerationContractTests(unittest.TestCase):
                     expected_results=["Entity exists"],
                     assumptions=["API is available"],
                     open_questions=["Which auth mode is required?"],
+                    gaps=[
+                        PlannedCaseGap(
+                            category=GapCategory.AUTH_STRATEGY,
+                            message="Which auth mode is required?",
+                        )
+                    ],
                     planned_route=PlannedRouteIntent(
                         http_method="POST",
                         endpoint_path="/api/entities",
@@ -136,6 +151,7 @@ class GenerationContractTests(unittest.TestCase):
         self.assertEqual(restored.test_cases[0].assumptions, ["API is available"])
         self.assertEqual(restored.test_cases[0].open_questions, ["Which auth mode is required?"])
         self.assertEqual(restored.test_cases[0].planned_route.http_method, "POST")
+        self.assertEqual(restored.test_cases[0].gaps[0].category, GapCategory.AUTH_STRATEGY)
         self.assertEqual(restored.test_cases[0].support.readiness, "evidence_supported")
         self.assertEqual(restored.test_cases[0].support.route_hints[0].endpoint_path, "/api/entities")
 

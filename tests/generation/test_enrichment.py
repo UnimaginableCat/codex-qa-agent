@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.generation.domain.models import NormalizedTestPlan, PlannedRouteIntent, PlannedTestCase
+from tools.generation.domain.models import GapCategory, NormalizedTestPlan, PlannedCaseGap, PlannedRouteIntent, PlannedTestCase
 from tools.generation.enrichment import EnrichedTestPlanResult, EvidenceToPlanEnricher, TestCaseReadiness
 from tools.generation.evidence.models import (
     EvidenceConfidence,
@@ -430,6 +430,16 @@ class EvidenceToPlanEnricherTests(unittest.TestCase):
                         "Which concrete API endpoint should validate this case?",
                         "Which authorization model should be used?",
                     ],
+                    gaps=[
+                        PlannedCaseGap(
+                            category=GapCategory.ENDPOINT_DETAIL,
+                            message="Which concrete API endpoint should validate this case?",
+                        ),
+                        PlannedCaseGap(
+                            category=GapCategory.AUTH_STRATEGY,
+                            message="Which authorization model should be used?",
+                        ),
+                    ],
                 )
             ]
         )
@@ -453,6 +463,33 @@ class EvidenceToPlanEnricherTests(unittest.TestCase):
         self.assertEqual(result.case_enrichments[0].readiness_after, TestCaseReadiness.ROUTE_RESOLVED)
         self.assertEqual(enriched_case.metadata["readiness"], "route_resolved")
         self.assertEqual(enriched_case.open_questions, ["Which authorization model should be used?"])
+        self.assertEqual([gap.category for gap in enriched_case.gaps], [GapCategory.AUTH_STRATEGY])
+
+    def test_route_evidence_resolves_typed_endpoint_gap_without_text_heuristic(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-001",
+                    title="Create user",
+                    objective="Verify create user.",
+                    open_questions=["Need concrete execution path."],
+                    gaps=[
+                        PlannedCaseGap(
+                            category=GapCategory.ENDPOINT_DETAIL,
+                            message="Need concrete execution path.",
+                        )
+                    ],
+                )
+            ]
+        )
+        bundle = _bundle([_endpoint_fact("fact-create-user", "/users", "POST", "create_user")])
+
+        result = EvidenceToPlanEnricher().enrich(plan, bundle)
+
+        enriched_case = result.enriched_plan.test_cases[0]
+        self.assertEqual(result.case_enrichments[0].readiness_after, TestCaseReadiness.EVIDENCE_SUPPORTED)
+        self.assertEqual(enriched_case.gaps, [])
+        self.assertEqual(enriched_case.open_questions, [])
 
 
 def _plan(cases: list[PlannedTestCase]) -> NormalizedTestPlan:

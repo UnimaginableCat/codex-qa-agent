@@ -5,9 +5,11 @@ from __future__ import annotations
 from tools.generation.domain.models import (
     AgentPlannedTestCaseInput,
     AgentTestPlanInput,
+    GapCategory,
     GenerationSourceInput,
     NormalizedProseSource,
     NormalizedTestPlan,
+    PlannedCaseGap,
     PlannedTestCase,
     ProseTestCaseDraft,
     TraceabilityLink,
@@ -127,6 +129,7 @@ class NormalizedTestPlanAssembler:
             priority=draft.priority,
             assumptions=list(draft.assumptions),
             open_questions=list(draft.open_questions),
+            gaps=_infer_case_gaps(draft.open_questions, source="prose_normalized"),
             tags=list(draft.tags),
             metadata={"source": "prose-normalizer-v1"},
         )
@@ -156,8 +159,37 @@ class NormalizedTestPlanAssembler:
             priority=case_input.priority,
             assumptions=list(case_input.assumptions),
             open_questions=list(case_input.unresolved_items),
+            gaps=list(case_input.gaps) or _infer_case_gaps(case_input.unresolved_items, source="agent_authored"),
             tags=list(case_input.tags),
             planned_route=None if case_input.route is None else case_input.route,
             metadata=metadata,
         )
+
+
+def _infer_case_gaps(messages: list[str], *, source: str) -> list[PlannedCaseGap]:
+    gaps: list[PlannedCaseGap] = []
+    for message in messages:
+        normalized = message.lower()
+        if any(marker in normalized for marker in ("api endpoint", "which endpoint", "endpoint should", "executable detail")):
+            category = GapCategory.ENDPOINT_DETAIL
+        elif any(marker in normalized for marker in ("api, ui action, data setup", "concrete api", "concrete executable detail")):
+            category = GapCategory.EXECUTABLE_DETAIL
+        elif any(marker in normalized for marker in ("auth", "authorization", "credentials fixture")):
+            category = GapCategory.AUTH_STRATEGY
+        elif any(marker in normalized for marker in ("environment", "env", "fixture")):
+            category = GapCategory.ENVIRONMENT
+        elif any(marker in normalized for marker in ("assert", "expected result")):
+            category = GapCategory.ASSERTION_DETAIL
+        elif any(marker in normalized for marker in ("data setup", "fixture", "seed")):
+            category = GapCategory.DATA_SETUP
+        else:
+            category = GapCategory.UNKNOWN
+        gaps.append(
+            PlannedCaseGap(
+                category=category,
+                message=message,
+                source=source,
+            )
+        )
+    return gaps
 
