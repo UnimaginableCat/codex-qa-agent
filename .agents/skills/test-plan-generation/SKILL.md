@@ -75,6 +75,26 @@ useful structured plan:
 - Ask for explicit evidence scope only when evidence/enrichment is actually needed.
 - Stop at `NormalizedTestPlan` unless the user asked for downstream phases.
 
+# Decomposition Defaults
+
+For controller/API requests, default to a compact initial plan instead of an exhaustive branch
+inventory.
+
+- Start from operations, not internal handlers.
+- Use an operation x coverage-bucket matrix.
+- Prefer core buckets first: happy path, validation, not found/ownership, and only the state-specific negative cases that matter externally.
+- Keep the first plan compact. A good default is roughly `8-10` strong cases unless the user explicitly asked for exhaustive coverage.
+- If multiple internal branches lead to the same observable API behavior, merge them into one case instead of splitting them.
+- Keep `expected_outcomes` at the observable contract level. Do not fill the initial plan with implementation-only details that do not improve testability or rendering.
+
+For requests like "cover full XController functionality", the agent should default to:
+
+1. identify operations
+2. choose core buckets per operation
+3. build a compact plan
+4. check quality gate
+5. only then run generation
+
 # When To Ask The User
 
 Ask only when a real blocker exists, such as:
@@ -85,6 +105,18 @@ Ask only when a real blocker exists, such as:
 - multiple plausible project/controller targets exist
 
 Do not ask the user to repeat operational defaults that belong in this skill.
+
+# Plan Quality Gate
+
+Before generation, the agent should quickly check that the plan is:
+
+- `compact`: not inflated by low-value edge splitting
+- `observable`: focused on externally visible behavior
+- `non-duplicative`: near-duplicate cases merged
+- `render-friendly`: cases still map cleanly toward endpoint/method-oriented drafts
+- `explicit-unknowns`: unresolved details kept in assumptions/open questions/unresolved items instead of disguised as facts
+
+If the plan fails this gate, reduce or reshape the decomposition before calling generation.
 
 # Primary Workflow
 

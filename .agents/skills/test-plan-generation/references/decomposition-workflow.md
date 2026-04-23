@@ -19,6 +19,15 @@ short sentence without restating decomposition rules.
 5. Add assumptions and open questions.
 6. Optionally define evidence scope.
 
+## Compact-First Rule
+
+For controller/API requests, the initial plan should be compact by default.
+
+- Start with roughly `8-10` strong cases unless the user explicitly wants exhaustive coverage.
+- Prefer operation-first coverage over branch-by-branch code inventory.
+- If several internal branches collapse to the same observable API behavior, merge them into one case.
+- Do not treat every internal outcome as a separate test case unless it is meaningfully distinct at the API contract level.
+
 ## Default Trigger
 
 Trigger this workflow by default when the request names:
@@ -106,6 +115,12 @@ Examples:
 - `Get session by id when entity is missing`
 - `Revoke single session`
 - `Revoke all sessions`
+
+While expanding cases:
+
+- keep the case set compact
+- prefer observable differences over internal cause differences
+- avoid field-by-field DTO assertions unless those fields are central to the public contract
 
 ## Step 5 - Add Assumptions And Open Questions
 
@@ -327,6 +342,19 @@ Reasonable decomposition:
 ## What Not To Do
 
 - Do not create one giant generic case like "check full controller functionality".
+- Do not explode one controller into a large branch inventory by default.
 - Do not guess DTO fields, DB behavior, or auth details when they are not known.
 - Do not turn planning actions into runner-ready steps at this phase.
 - Do not add evidence scope unless the next phase will actually use it.
+
+## Quality Gate
+
+Before generation, quickly check the plan against this gate:
+
+- `compact`
+- `observable`
+- `non-duplicative`
+- `render-friendly`
+- `explicit-unknowns`
+
+If the plan fails the gate, reduce or reshape it before generation.
