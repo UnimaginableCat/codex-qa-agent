@@ -16,12 +16,18 @@ class DiagnosticSeverity(StrEnum):
     ERROR = "ERROR"
 
 
+class SourceInputFormat(StrEnum):
+    PROSE = "prose"
+    STRUCTURED = "structured"
+
+
 @dataclass(slots=True)
 class GenerationSourceInput:
     """Source material accepted by the generation pipeline."""
 
     source_id: str
     project: str
+    input_format: SourceInputFormat = SourceInputFormat.PROSE
     name: str = ""
     content: str = ""
     source_path: Path | None = None
@@ -35,6 +41,7 @@ class GenerationSourceInput:
         return cls(
             source_id=str(payload["source_id"]),
             project=str(payload["project"]),
+            input_format=SourceInputFormat(str(payload.get("input_format", SourceInputFormat.PROSE.value))),
             name=str(payload.get("name", "")),
             content=str(payload.get("content", "")),
             source_path=_optional_path(payload.get("source_path")),
@@ -54,6 +61,8 @@ class PlannedTestCase:
     steps: list[str] = field(default_factory=list)
     expected_results: list[str] = field(default_factory=list)
     priority: str = "normal"
+    assumptions: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -71,7 +80,77 @@ class PlannedTestCase:
             steps=[str(item) for item in payload.get("steps", [])],
             expected_results=[str(item) for item in payload.get("expected_results", [])],
             priority=str(payload.get("priority", "normal")),
+            assumptions=[str(item) for item in payload.get("assumptions", [])],
+            open_questions=[str(item) for item in payload.get("open_questions", [])],
             tags=[str(item) for item in payload.get("tags", [])],
+            metadata=dict(payload.get("metadata") or {}),
+        )
+
+
+@dataclass(slots=True)
+class ProseTestCaseDraft:
+    """Deterministically extracted prose-level test case draft."""
+
+    draft_id: str
+    title: str
+    objective: str
+    source_ref: str
+    preconditions: list[str] = field(default_factory=list)
+    steps: list[str] = field(default_factory=list)
+    expected_results: list[str] = field(default_factory=list)
+    priority: str = "normal"
+    assumptions: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ProseTestCaseDraft":
+        return cls(
+            draft_id=str(payload["draft_id"]),
+            title=str(payload["title"]),
+            objective=str(payload.get("objective", "")),
+            source_ref=str(payload["source_ref"]),
+            preconditions=[str(item) for item in payload.get("preconditions", [])],
+            steps=[str(item) for item in payload.get("steps", [])],
+            expected_results=[str(item) for item in payload.get("expected_results", [])],
+            priority=str(payload.get("priority", "normal")),
+            assumptions=[str(item) for item in payload.get("assumptions", [])],
+            open_questions=[str(item) for item in payload.get("open_questions", [])],
+            tags=[str(item) for item in payload.get("tags", [])],
+        )
+
+
+@dataclass(slots=True)
+class NormalizedProseSource:
+    """Intermediate normalized representation of prose generation input."""
+
+    source_id: str
+    project: str
+    title: str
+    normalized_text: str
+    test_case_drafts: list[ProseTestCaseDraft] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "NormalizedProseSource":
+        return cls(
+            source_id=str(payload["source_id"]),
+            project=str(payload["project"]),
+            title=str(payload.get("title", "")),
+            normalized_text=str(payload.get("normalized_text", "")),
+            test_case_drafts=[
+                ProseTestCaseDraft.from_dict(item) for item in payload.get("test_case_drafts", [])
+            ],
+            assumptions=[str(item) for item in payload.get("assumptions", [])],
+            open_questions=[str(item) for item in payload.get("open_questions", [])],
             metadata=dict(payload.get("metadata") or {}),
         )
 

@@ -9,9 +9,12 @@ from .models import (
     GenerationDiagnostic,
     GenerationRunContext,
     GenerationSourceInput,
+    NormalizedProseSource,
     NormalizedTestPlan,
     TraceabilityMap,
 )
+from tools.generation.enrichment.models import EnrichedTestPlanResult
+from tools.generation.evidence.models import GenerationEvidenceBundle
 
 
 class GenerationArtifactStore(Protocol):
@@ -27,6 +30,14 @@ class GenerationArtifactStore(Protocol):
         source_input: GenerationSourceInput,
     ) -> Path:
         """Persist the typed source input captured for the run."""
+        ...
+
+    def write_normalized_source(
+        self,
+        run_context: GenerationRunContext,
+        normalized_source: NormalizedProseSource,
+    ) -> Path:
+        """Persist the normalized prose source artifact."""
         ...
 
     def write_normalized_plan(
@@ -51,6 +62,30 @@ class GenerationArtifactStore(Protocol):
         diagnostics: list[GenerationDiagnostic],
     ) -> Path:
         """Persist generation diagnostics."""
+        ...
+
+    def write_evidence_bundle(
+        self,
+        run_context: GenerationRunContext,
+        evidence_bundle: GenerationEvidenceBundle,
+    ) -> Path:
+        """Persist typed code facts and evidence diagnostics."""
+        ...
+
+    def write_enriched_plan(
+        self,
+        run_context: GenerationRunContext,
+        normalized_plan: NormalizedTestPlan,
+    ) -> Path:
+        """Persist the enriched normalized plan as an explicit artifact."""
+        ...
+
+    def write_enrichment_result(
+        self,
+        run_context: GenerationRunContext,
+        enrichment_result: EnrichedTestPlanResult,
+    ) -> Path:
+        """Persist enrichment result and applied/unapplied evidence projections."""
         ...
 
     def write_summary(self, run_context: GenerationRunContext, summary: dict[str, object]) -> Path:

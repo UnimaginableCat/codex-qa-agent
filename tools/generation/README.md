@@ -8,6 +8,7 @@ Run state:
 ```text
 .codex-qa/generation/runs/<run_id>/
   context.json
+  evidence.json        # only when code facts collection is enabled
   summary.json
 ```
 
@@ -18,12 +19,31 @@ artifacts/agent/generation/<source_slug>-<run_id>/
   manifest.json
   context.json
   source-input.json
+  normalized-source.json
   normalized-plan.json
   traceability-map.json
   diagnostics.json
+  evidence-bundle.json # only when code facts collection is enabled
+  enriched-plan.json   # only when evidence enrichment is enabled
+  enrichment-result.json
+  applied-evidence.json
+  unapplied-evidence.json
   summary.json
 ```
 
 Canonical Phase 1 contracts live in `tools.generation.domain.models`.
-The orchestration service intentionally stops before scenario synthesis, pause/resume, and LLM/API integration.
+The canonical application entrypoint is `GenerateTestPlanUseCase` with `GenerateTestPlanRequest`.
+It builds a prose-first `NormalizedTestPlan` and intentionally stops before scenario synthesis,
+pause/resume, plan enrichment, and LLM/API integration.
 
+Code facts are a separate opt-in evidence layer. Canonical evidence contracts live in
+`tools.generation.evidence.models`; the extractor interface is `CodeFactsExtractor`.
+`ApiSurfaceFactsExtractor` currently supports targeted Python API-surface extraction only from
+explicit scoped paths and returns a `GenerationEvidenceBundle`. Evidence is returned beside the
+generation result and persisted as evidence artifacts.
+
+Evidence enrichment is a separate opt-in phase. Canonical enrichment contracts live in
+`tools.generation.enrichment.models`; the service boundary is `TestPlanEnricher`, with
+`EvidenceToPlanEnricher` as the deterministic implementation. Enrichment may attach endpoint
+hints, readiness metadata, diagnostics, and traceability links to relevant `PlannedTestCase`
+records. It does not render runnable scenarios and does not replace prose-first planning.

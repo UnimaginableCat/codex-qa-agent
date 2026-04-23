@@ -6,8 +6,11 @@ from .models import (
     GenerationDiagnostic,
     GenerationRunContext,
     GenerationSourceInput,
+    NormalizedProseSource,
     NormalizedTestPlan,
     PlannedTestCase,
+    ProseTestCaseDraft,
+    SourceInputFormat,
     TraceabilityLink,
     TraceabilityMap,
 )
@@ -18,9 +21,11 @@ __all__ = [
     "GenerationDiagnostic",
     "GenerationRunContext",
     "GenerationSourceInput",
+    "NormalizedProseSource",
     "NormalizedTestPlan",
     "PlannedTestCase",
+    "ProseTestCaseDraft",
+    "SourceInputFormat",
     "TraceabilityLink",
     "TraceabilityMap",
 ]
-

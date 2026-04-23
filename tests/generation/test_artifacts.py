@@ -13,23 +13,38 @@ from tools.generation.domain.models import (
     GenerationDiagnostic,
     GenerationRunContext,
     GenerationSourceInput,
+    NormalizedProseSource,
     NormalizedTestPlan,
     TraceabilityLink,
     TraceabilityMap,
 )
 from tools.generation.persistence.artifacts import (
+    APPLIED_EVIDENCE_FILENAME,
     CONTEXT_FILENAME,
     DIAGNOSTICS_FILENAME,
+    ENRICHED_PLAN_FILENAME,
+    ENRICHMENT_RESULT_FILENAME,
+    EVIDENCE_BUNDLE_FILENAME,
+    EVIDENCE_RUN_STATE_FILENAME,
     FileGenerationArtifactStore,
     GENERATION_ARTIFACTS_DIRNAME,
     GENERATION_RUNS_DIRNAME,
     MANIFEST_FILENAME,
+    NORMALIZED_SOURCE_FILENAME,
     NORMALIZED_PLAN_FILENAME,
     SOURCE_INPUT_FILENAME,
     SUMMARY_FILENAME,
     TRACEABILITY_MAP_FILENAME,
+    UNAPPLIED_EVIDENCE_FILENAME,
     GenerationArtifactPolicyError,
     ensure_generation_artifact_output_path,
+)
+from tools.generation.enrichment.models import AppliedEvidenceLink, EnrichedTestPlanResult
+from tools.generation.evidence.models import (
+    EvidenceConfidence,
+    EvidenceProvenance,
+    GenerationEvidenceBundle,
+    GenerationEvidenceFact,
 )
 
 
@@ -60,6 +75,15 @@ class GenerationArtifactStoreTests(unittest.TestCase):
                     title="Demo",
                 ),
             )
+            store.write_normalized_source(
+                context,
+                NormalizedProseSource(
+                    source_id="src-1",
+                    project="code/demo",
+                    title="Demo",
+                    normalized_text="Verify demo flow",
+                ),
+            )
             store.write_traceability_map(
                 context,
                 TraceabilityMap(
@@ -83,6 +107,52 @@ class GenerationArtifactStoreTests(unittest.TestCase):
                     )
                 ],
             )
+            store.write_evidence_bundle(
+                context,
+                GenerationEvidenceBundle(
+                    bundle_id="evidence-api",
+                    target_project="code/demo",
+                    scope="api",
+                    facts=[
+                        GenerationEvidenceFact(
+                            fact_id="api-users-get",
+                            fact_type="api_endpoint",
+                            summary="GET /users",
+                            payload={"endpoint_path": "/users", "http_method": "GET"},
+                            provenance=EvidenceProvenance(
+                                source_kind="python_ast",
+                                file_path=Path("app/api.py"),
+                                symbol="list_users",
+                                line_range=(1, 2),
+                            ),
+                            confidence=EvidenceConfidence.EXPLICIT,
+                        )
+                    ],
+                ),
+            )
+            enriched_plan = NormalizedTestPlan(
+                plan_id="plan-src-1",
+                source_id="src-1",
+                project="code/demo",
+                title="Demo",
+                metadata={"enrichment": {"stage": "evidence-to-plan-v1"}},
+            )
+            store.write_enriched_plan(context, enriched_plan)
+            store.write_enrichment_result(
+                context,
+                EnrichedTestPlanResult(
+                    enriched_plan=enriched_plan,
+                    applied_evidence=[
+                        AppliedEvidenceLink(
+                            case_id="tc-001",
+                            fact_id="api-users-get",
+                            relation="evidence_supports_case",
+                            confidence=EvidenceConfidence.EXPLICIT,
+                            summary="GET /users",
+                        )
+                    ],
+                ),
+            )
             store.write_summary(context, {"status": "PASS"})
 
             manifest = json.loads((context.artifact_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
@@ -90,13 +160,36 @@ class GenerationArtifactStoreTests(unittest.TestCase):
             self.assertTrue((context.run_state_dir / CONTEXT_FILENAME).exists())
             self.assertTrue((context.run_state_dir / SUMMARY_FILENAME).exists())
             self.assertTrue((context.artifact_dir / SOURCE_INPUT_FILENAME).exists())
+            self.assertTrue((context.artifact_dir / NORMALIZED_SOURCE_FILENAME).exists())
             self.assertTrue((context.artifact_dir / NORMALIZED_PLAN_FILENAME).exists())
             self.assertTrue((context.artifact_dir / TRACEABILITY_MAP_FILENAME).exists())
             self.assertTrue((context.artifact_dir / DIAGNOSTICS_FILENAME).exists())
+            self.assertTrue((context.run_state_dir / EVIDENCE_RUN_STATE_FILENAME).exists())
+            self.assertTrue((context.artifact_dir / EVIDENCE_BUNDLE_FILENAME).exists())
+            self.assertTrue((context.artifact_dir / ENRICHED_PLAN_FILENAME).exists())
+            self.assertTrue((context.artifact_dir / ENRICHMENT_RESULT_FILENAME).exists())
+            self.assertTrue((context.artifact_dir / APPLIED_EVIDENCE_FILENAME).exists())
+            self.assertTrue((context.artifact_dir / UNAPPLIED_EVIDENCE_FILENAME).exists())
             self.assertEqual(manifest["layout_version"], 1)
             self.assertEqual(
                 manifest["bundle"]["source_input_path"],
                 str(context.artifact_dir / SOURCE_INPUT_FILENAME),
+            )
+            self.assertEqual(
+                manifest["bundle"]["normalized_source_path"],
+                str(context.artifact_dir / NORMALIZED_SOURCE_FILENAME),
+            )
+            self.assertEqual(
+                manifest["bundle"]["evidence_bundle_path"],
+                str(context.artifact_dir / EVIDENCE_BUNDLE_FILENAME),
+            )
+            self.assertEqual(
+                manifest["run_state"]["evidence_path"],
+                str(context.run_state_dir / EVIDENCE_RUN_STATE_FILENAME),
+            )
+            self.assertEqual(
+                manifest["bundle"]["enrichment_result_path"],
+                str(context.artifact_dir / ENRICHMENT_RESULT_FILENAME),
             )
 
     def test_artifact_policy_rejects_paths_outside_generation_artifact_root(self) -> None:
@@ -125,4 +218,3 @@ def _context(root: Path) -> GenerationRunContext:
 
 if __name__ == "__main__":
     unittest.main()
-

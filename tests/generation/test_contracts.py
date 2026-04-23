@@ -12,8 +12,11 @@ from tools.generation.domain.models import (
     GenerationDiagnostic,
     GenerationRunContext,
     GenerationSourceInput,
+    NormalizedProseSource,
     NormalizedTestPlan,
     PlannedTestCase,
+    ProseTestCaseDraft,
+    SourceInputFormat,
     TraceabilityLink,
     TraceabilityMap,
 )
@@ -35,6 +38,7 @@ class GenerationContractTests(unittest.TestCase):
 
         self.assertEqual(restored.source_id, source.source_id)
         self.assertEqual(restored.project, source.project)
+        self.assertEqual(restored.input_format, SourceInputFormat.PROSE)
         self.assertEqual(restored.source_path, Path("scenarios/source.md"))
         self.assertEqual(restored.metadata["owner"], "qa")
 
@@ -52,6 +56,8 @@ class GenerationContractTests(unittest.TestCase):
                     source_refs=["src-1"],
                     steps=["Send request"],
                     expected_results=["Entity exists"],
+                    assumptions=["API is available"],
+                    open_questions=["Which auth mode is required?"],
                 )
             ],
         )
@@ -61,6 +67,33 @@ class GenerationContractTests(unittest.TestCase):
         self.assertEqual(restored.test_cases[0].case_id, "tc-001")
         self.assertEqual(restored.test_cases[0].source_refs, ["src-1"])
         self.assertEqual(restored.test_cases[0].expected_results, ["Entity exists"])
+        self.assertEqual(restored.test_cases[0].assumptions, ["API is available"])
+        self.assertEqual(restored.test_cases[0].open_questions, ["Which auth mode is required?"])
+
+    def test_normalized_prose_source_preserves_drafts(self) -> None:
+        normalized = NormalizedProseSource(
+            source_id="src-1",
+            project="code/demo",
+            title="Users",
+            normalized_text="Verify user creation",
+            test_case_drafts=[
+                ProseTestCaseDraft(
+                    draft_id="tc-001",
+                    title="User creation",
+                    objective="Verify user creation.",
+                    source_ref="src-1#case-001",
+                    steps=["Exercise behavior described as: user creation"],
+                    expected_results=["User is created"],
+                    assumptions=["Expected result provided by operator"],
+                    open_questions=["Which endpoint should be used?"],
+                )
+            ],
+        )
+
+        restored = NormalizedProseSource.from_dict(json.loads(json.dumps(normalized.to_dict())))
+
+        self.assertEqual(restored.test_case_drafts[0].draft_id, "tc-001")
+        self.assertEqual(restored.test_case_drafts[0].open_questions, ["Which endpoint should be used?"])
 
     def test_diagnostics_and_traceability_round_trip(self) -> None:
         diagnostic = GenerationDiagnostic(
@@ -111,4 +144,3 @@ class GenerationContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -11,9 +11,12 @@ from tools.common.statuses import StepStatus
 from tools.generation.domain.models import (
     GenerationDiagnostic,
     GenerationRunContext,
+    NormalizedProseSource,
     NormalizedTestPlan,
     TraceabilityMap,
 )
+from tools.generation.enrichment.models import EnrichedTestPlanResult
+from tools.generation.evidence.models import GenerationEvidenceBundle
 
 
 @dataclass(slots=True)
@@ -25,6 +28,9 @@ class GenerationRunResult:
     message: str
     normalized_plan: NormalizedTestPlan
     traceability_map: TraceabilityMap
+    normalized_source: NormalizedProseSource | None = None
+    evidence_bundle: GenerationEvidenceBundle | None = None
+    enrichment_result: EnrichedTestPlanResult | None = None
     diagnostics: list[GenerationDiagnostic] = field(default_factory=list)
     artifact_paths: dict[str, Path] = field(default_factory=dict)
     details: dict[str, Any] = field(default_factory=dict)
@@ -33,4 +39,3 @@ class GenerationRunResult:
         payload = to_json_safe(asdict(self))
         payload["status"] = self.final_status.value
         return payload
-

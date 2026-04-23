@@ -22,13 +22,16 @@ class GenerationOrchestrationTests(unittest.TestCase):
                     source_id="Checkout Flow",
                     project="code/demo",
                     name="Checkout Flow",
-                    content="Verify that a customer can complete checkout.",
+                    content="Нужен тест-план на internal tenants API: create, get, list, patch, invalid status transition, missing entity",
                 ),
                 workspace_root=root,
             )
 
             source_payload = json.loads(
                 result.artifact_paths["source_input"].read_text(encoding="utf-8")
+            )
+            normalized_source_payload = json.loads(
+                result.artifact_paths["normalized_source"].read_text(encoding="utf-8")
             )
             plan_payload = json.loads(
                 result.artifact_paths["normalized_plan"].read_text(encoding="utf-8")
@@ -40,15 +43,21 @@ class GenerationOrchestrationTests(unittest.TestCase):
                 result.artifact_paths["diagnostics"].read_text(encoding="utf-8")
             )
 
-            self.assertEqual(result.final_status, StepStatus.PASS)
-            self.assertEqual(result.normalized_plan.test_cases[0].case_id, "tc-001")
-            self.assertEqual(source_payload["source_id"], "Checkout Flow")
-            self.assertEqual(plan_payload["source_id"], "Checkout Flow")
-            self.assertEqual(traceability_payload["links"][0]["relation"], "source_to_plan")
-            self.assertEqual(diagnostics_payload["diagnostics"][0]["code"], "source_input_captured")
-            self.assertTrue(str(result.run_context.artifact_dir).endswith(result.run_context.run_id))
+        self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertGreaterEqual(len(result.normalized_plan.test_cases), 6)
+        self.assertEqual(result.normalized_plan.test_cases[0].case_id, "tc-001")
+        self.assertEqual(result.normalized_plan.test_cases[0].title, "Create")
+        self.assertTrue(result.normalized_plan.test_cases[0].steps)
+        self.assertTrue(result.normalized_plan.test_cases[0].expected_results)
+        self.assertTrue(result.normalized_plan.test_cases[-1].open_questions)
+        self.assertEqual(source_payload["source_id"], "Checkout Flow")
+        self.assertEqual(normalized_source_payload["metadata"]["normalizer"], "prose-rule-v1")
+        self.assertEqual(plan_payload["source_id"], "Checkout Flow")
+        self.assertEqual(traceability_payload["links"][0]["relation"], "source_to_plan")
+        self.assertEqual(diagnostics_payload["diagnostics"][0]["code"], "source_input_captured")
+        self.assertTrue(str(result.run_context.artifact_dir).endswith(result.run_context.run_id))
 
-    def test_empty_source_input_emits_warning_but_keeps_foundation_run_terminal(self) -> None:
+    def test_empty_source_input_blocks_plan_generation(self) -> None:
         with TemporaryDirectory() as tmp:
             result = GenerationPipelineService().run(
                 GenerationSourceInput(
@@ -58,13 +67,36 @@ class GenerationOrchestrationTests(unittest.TestCase):
                 workspace_root=Path(tmp),
             )
 
-        self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertEqual(result.diagnostics[-1].severity, DiagnosticSeverity.WARNING)
+        self.assertEqual(result.final_status, StepStatus.BLOCKED)
+        self.assertEqual(result.diagnostics[-1].severity, DiagnosticSeverity.ERROR)
         self.assertEqual(result.diagnostics[-1].code, "source_content_empty")
         self.assertEqual(result.normalized_plan.test_cases, [])
         self.assertEqual(len(result.traceability_map.links), 1)
 
+    def test_file_source_input_is_read_and_normalized(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = root / "request.md"
+            source_path.write_text(
+                "Проверить создание пользователя, валидацию email, получение пользователя по id и ошибку при несуществующем id",
+                encoding="utf-8",
+            )
+
+            result = GenerationPipelineService().run(
+                GenerationSourceInput(
+                    source_id="users-flow",
+                    project="code/demo",
+                    source_path=source_path,
+                ),
+                workspace_root=root,
+            )
+            source_artifact = result.artifact_paths["source_input"].read_text(encoding="utf-8")
+
+        self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertEqual(len(result.normalized_plan.test_cases), 4)
+        self.assertEqual(result.normalized_plan.test_cases[0].title, "Создание пользователя")
+        self.assertIn("source_path", source_artifact)
+
 
 if __name__ == "__main__":
     unittest.main()
-
