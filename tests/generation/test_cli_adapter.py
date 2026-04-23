@@ -468,6 +468,75 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertEqual(payload["scenario_parse_valid_count"], 1)
         self.assertIn("scenario_render_result", payload["artifact_paths"])
 
+    def test_render_drafts_summary_includes_typed_unresolved_intents(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "code" / "demo"
+            project.mkdir(parents=True)
+            agent_plan_path = root / "agent-plan.json"
+            agent_plan_path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users",
+                        "project": "code/demo",
+                        "title": "Users API",
+                        "planned_test_cases": [
+                            {
+                                "title": "Create user",
+                                "objective": "Verify create user.",
+                                "gaps": [
+                                    {
+                                        "category": "environment",
+                                        "message": "Use staging env before execution.",
+                                    },
+                                    {
+                                        "category": "data_setup",
+                                        "message": "Create an active user fixture before execution.",
+                                    },
+                                ],
+                                "route": {
+                                    "http_method": "POST",
+                                    "endpoint_path": "/users",
+                                },
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--agent-plan-file",
+                        str(agent_plan_path),
+                        "--workspace-root",
+                        str(root),
+                        "--project-path",
+                        str(project),
+                        "--render-drafts",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["scenario_unresolved_intent_count"], 2)
+        self.assertEqual(len(payload["scenario_unresolved_intents"]), 1)
+        self.assertEqual(
+            payload["scenario_unresolved_intents"][0]["gap_categories"],
+            ["environment", "data_setup"],
+        )
+        self.assertIn(
+            "environment_unresolved",
+            payload["scenario_unresolved_intents"][0]["gap_codes"],
+        )
+        self.assertIn(
+            "Typed gap [environment]: Use staging env before execution.",
+            payload["scenario_unresolved_intents"][0]["notes"],
+        )
+
     def test_render_drafts_requires_persistence(self) -> None:
         with TemporaryDirectory() as tmp:
             stdout = io.StringIO()

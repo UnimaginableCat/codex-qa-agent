@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from tools.generation.domain.gaps import format_case_gap_note, project_case_gap
 from tools.generation.domain.models import (
     DiagnosticSeverity,
     GenerationDiagnostic,
@@ -161,6 +162,8 @@ class DraftScenarioRenderer:
         expected_results = test_case.expected_results or [
             "HTTP response is received and must be reviewed before execution."
         ]
+        typed_gap_notes = _typed_gap_notes(test_case)
+        typed_gap_summary = _typed_gap_summary_lines(test_case)
         notes = [
             "Generated draft preview only. Do not execute without operator review.",
             "Route resolved for preview rendering.",
@@ -182,6 +185,7 @@ class DraftScenarioRenderer:
             notes.append(f"Open question: {question}")
         for assumption in test_case.assumptions:
             notes.append(f"Assumption: {assumption}")
+        notes.extend(typed_gap_notes)
 
         lines = [
             f"# Scenario: {_escape_line(title)}",
@@ -227,6 +231,8 @@ class DraftScenarioRenderer:
                 "",
                 "## Report output",
                 f"artifacts/agent/{project_name}-{_slugify(test_case.case_id)}-draft-report.md",
+                "Summary:",
+                *(_escape_line(item) for item in typed_gap_summary),
                 "",
             ]
         )
@@ -439,9 +445,39 @@ def _draft_case_support(test_case: PlannedTestCase, support: dict[str, Any]) -> 
     }
 
 
+def _typed_gap_notes(test_case: PlannedTestCase) -> list[str]:
+    return [format_case_gap_note(gap) for gap in test_case.gaps if gap.message or gap.category]
+
+
+def _typed_gap_summary_lines(test_case: PlannedTestCase) -> list[str]:
+    if not test_case.gaps:
+        return ["- No typed unresolved intent was captured upstream."]
+    categories: list[str] = []
+    lines = [f"- Typed unresolved intent count: {len(test_case.gaps)}"]
+    for gap in test_case.gaps:
+        code, _ = project_case_gap(gap)
+        if code:
+            categories.append(gap.category.value)
+    if categories:
+        lines.append(f"- Typed unresolved intent categories: {', '.join(_dedupe_preserve_order(categories))}")
+    lines.extend(f"- {format_case_gap_note(gap)}" for gap in test_case.gaps)
+    return lines
+
+
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-._")
     return slug.lower() or "scenario-draft"
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _escape_line(value: str) -> str:

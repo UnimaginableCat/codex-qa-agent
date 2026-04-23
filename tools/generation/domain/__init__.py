@@ -1,6 +1,7 @@
 """Domain contracts for generation pipeline inputs, plans, and traceability."""
 
 from .contracts import GenerationArtifactStore
+from .gaps import format_case_gap_note, gap_code_for_category, project_case_gap
 from .models import (
     AgentPlannedTestCaseInput,
     AgentTestPlanInput,
@@ -26,7 +27,9 @@ __all__ = [
     "AgentPlannedTestCaseInput",
     "AgentTestPlanInput",
     "DiagnosticSeverity",
+    "format_case_gap_note",
     "GapCategory",
+    "gap_code_for_category",
     "GenerationArtifactStore",
     "GenerationDiagnostic",
     "GenerationRunContext",
@@ -38,6 +41,7 @@ __all__ = [
     "PlannedRouteIntent",
     "PlannedTestCase",
     "ProseTestCaseDraft",
+    "project_case_gap",
     "RouteSupportHint",
     "SourceInputFormat",
     "TraceabilityLink",

@@ -8,9 +8,9 @@ from pathlib import Path
 
 from tools.common.io import read_json_file
 from tools.common.statuses import StepStatus
+from tools.generation.domain.gaps import project_case_gap
 from tools.generation.domain.models import (
     DiagnosticSeverity,
-    GapCategory,
     GenerationDiagnostic,
     GenerationRunContext,
     PlannedCaseGap,
@@ -1697,16 +1697,7 @@ def _case_gaps_from_draft_metadata(draft: ScenarioDraft) -> list[PlannedCaseGap]
 
 
 def _gap_projection(gap: PlannedCaseGap) -> tuple[str, str]:
-    mapping = {
-        GapCategory.ENDPOINT_DETAIL: "endpoint_detail_unresolved",
-        GapCategory.EXECUTABLE_DETAIL: "executable_detail_unresolved",
-        GapCategory.AUTH_STRATEGY: "auth_strategy_unresolved",
-        GapCategory.ENVIRONMENT: "environment_unresolved",
-        GapCategory.ASSERTION_DETAIL: "assertion_detail_unresolved",
-        GapCategory.DATA_SETUP: "data_setup_unresolved",
-    }
-    code = mapping.get(gap.category, "")
-    return code, gap.message
+    return project_case_gap(gap)
 
 
 def _first_api_step(scenario: ScenarioDefinition | None):

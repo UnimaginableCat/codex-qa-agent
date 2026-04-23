@@ -161,6 +161,14 @@ class ScenarioRenderingTests(unittest.TestCase):
             render_result.draft_set.drafts[0].metadata["case_gaps"][0]["category"],
             "auth_strategy",
         )
+        self.assertIn(
+            "Typed gap [auth_strategy]: Auth strategy is not selected.",
+            render_result.draft_set.drafts[0].markdown,
+        )
+        self.assertIn(
+            "- Typed unresolved intent count: 1",
+            render_result.draft_set.drafts[0].markdown,
+        )
 
     def test_renderer_renders_java_spring_list_case_from_route_hints(self) -> None:
         render_result = DraftScenarioRenderer().render(

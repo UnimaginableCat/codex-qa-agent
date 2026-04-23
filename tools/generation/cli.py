@@ -17,11 +17,13 @@ from tools.common.statuses import StepStatus
 from tools.generation.authoring import AgentPlanAuthoringService
 from tools.generation.application import GenerateTestPlanOptions, GenerateTestPlanRequest, GenerationInputMode
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
+from tools.generation.domain.gaps import format_case_gap_note, project_case_gap
 from tools.generation.domain.models import (
     AgentTestPlanInput,
     DiagnosticSeverity,
     GenerationDiagnostic,
     GenerationSourceInput,
+    PlannedCaseGap,
     SourceInputFormat,
 )
 from tools.generation.evidence.models import CodeFactsScope, TargetStack
@@ -246,6 +248,7 @@ def summarize_result(result: Any) -> dict[str, Any]:
     evidence_bundle = result.evidence_bundle
     enrichment_result = result.enrichment_result
     scenario_render_result = result.scenario_render_result
+    unresolved_intents = _scenario_unresolved_intents(scenario_render_result)
     return to_json_safe(
         {
             "status": result.final_status.value,
@@ -276,6 +279,8 @@ def summarize_result(result: Any) -> dict[str, Any]:
                 if scenario_render_result
                 else 0
             ),
+            "scenario_unresolved_intent_count": sum(item["gap_count"] for item in unresolved_intents),
+            "scenario_unresolved_intents": unresolved_intents,
             "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
             "evidence_diagnostics": (
                 [diagnostic.to_dict() for diagnostic in evidence_bundle.diagnostics]
@@ -344,6 +349,47 @@ def main(argv: list[str] | None = None) -> int:
     )
     _print_payload(payload, output_format=args.output_format, workflow=workflow)
     return 0 if payload["status"] == StepStatus.PASS.value else 1
+
+
+def _scenario_unresolved_intents(scenario_render_result: Any) -> list[dict[str, Any]]:
+    if scenario_render_result is None:
+        return []
+    summaries: list[dict[str, Any]] = []
+    for draft in scenario_render_result.draft_set.drafts:
+        raw_gaps = draft.metadata.get("case_gaps", [])
+        if not isinstance(raw_gaps, list):
+            continue
+        gaps = [
+            PlannedCaseGap.from_dict(item)
+            for item in raw_gaps
+            if isinstance(item, dict)
+        ]
+        if not gaps:
+            continue
+        categories: list[str] = []
+        codes: list[str] = []
+        messages: list[str] = []
+        notes: list[str] = []
+        for gap in gaps:
+            code, message = project_case_gap(gap)
+            categories.append(gap.category.value)
+            if code:
+                codes.append(code)
+            if message:
+                messages.append(message)
+            notes.append(format_case_gap_note(gap))
+        summaries.append(
+            {
+                "draft_id": draft.draft_id,
+                "case_id": draft.case_id,
+                "gap_count": len(gaps),
+                "gap_categories": _dedupe_preserve_order(categories),
+                "gap_codes": _dedupe_preserve_order(codes),
+                "gap_messages": _dedupe_preserve_order(messages),
+                "notes": notes,
+            }
+        )
+    return summaries
 
 
 def run_review(args: argparse.Namespace) -> dict[str, Any]:
@@ -940,6 +986,17 @@ def _render_revalidation_text(payload: dict[str, Any]) -> str:
         for diagnostic in diagnostics:
             lines.append(f"  - {diagnostic.get('severity', '')}: {diagnostic.get('message', '')}")
     return "\n".join(lines).rstrip()
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _average_completeness_ratio(review_set: Any) -> float:
