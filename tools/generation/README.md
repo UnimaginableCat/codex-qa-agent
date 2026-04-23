@@ -47,3 +47,20 @@ Evidence enrichment is a separate opt-in phase. Canonical enrichment contracts l
 `EvidenceToPlanEnricher` as the deterministic implementation. Enrichment may attach endpoint
 hints, readiness metadata, diagnostics, and traceability links to relevant `PlannedTestCase`
 records. It does not render runnable scenarios and does not replace prose-first planning.
+
+Agent-facing adapter:
+
+```powershell
+py -3.14 -m tools.generation.cli `
+  --source-id users-api `
+  --project code/demo `
+  --prose "Verify create user" `
+  --workspace-root . `
+  --project-path code/demo `
+  --collect-code-facts `
+  --enrich `
+  --evidence-scope-path app/api/users.py
+```
+
+The adapter only gathers arguments, builds typed request objects, calls `GenerateTestPlanUseCase`,
+and prints a JSON summary. It does not scan outside explicit evidence scope paths.

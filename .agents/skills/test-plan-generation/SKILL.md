@@ -20,15 +20,52 @@ Create a `tools.generation.domain.models.NormalizedTestPlan` from operator prose
 
 Structured input is reserved for future work. If `input_format=structured`, report it as unsupported for this phase.
 
+## Modes
+
+### Mode A - Plan Only
+
+Use when the operator provides prose and does not provide an explicit code evidence scope.
+
+```powershell
+py -3.14 -m tools.generation.cli `
+  --source-id users-api `
+  --project code/demo `
+  --prose "Verify create user and get user by id" `
+  --workspace-root .
+```
+
+This mode produces a prose-first `NormalizedTestPlan`. It does not collect code facts and does not
+enrich cases with evidence.
+
+### Mode B - Plan With Evidence
+
+Use only when the operator provides an explicit target project path and explicit scoped files or
+directories to inspect.
+
+```powershell
+py -3.14 -m tools.generation.cli `
+  --source-id users-api `
+  --project code/demo `
+  --prose "Verify create user" `
+  --workspace-root . `
+  --project-path code/demo `
+  --collect-code-facts `
+  --enrich `
+  --evidence-scope-path app/api/users.py
+```
+
+This mode invokes `GenerateTestPlanUseCase` with `collect_code_facts=True` and
+`enrichment_enabled=True`. Code facts are extracted only from `CodeFactsScope.paths`; there is no
+implicit repository-wide discovery.
+
 ## Workflow
 
-1. Build a typed `GenerationSourceInput`.
-2. Build `GenerateTestPlanRequest(source_input=..., workspace_root=<repo-root>)`.
-3. Run `GenerateTestPlanUseCase().execute(request)`.
-4. Read the returned `GenerationRunResult`.
-5. Inspect diagnostics before trusting the plan.
-6. Use `normalized_plan` as the canonical output.
-7. Reference artifact paths from `artifact_paths` when reporting.
+1. Choose Mode A or Mode B.
+2. Prefer `python -m tools.generation.cli` / `py -3.14 -m tools.generation.cli` for agent-facing runs.
+3. Read the JSON summary printed by the adapter.
+4. Inspect diagnostics before trusting the plan.
+5. Use `normalized_plan` artifacts as the canonical output.
+6. Reference artifact paths from `artifact_paths` when reporting.
 
 `GenerationPipelineService` exists only as a compatibility facade. Prefer the use-case boundary for new skill-facing work.
 
@@ -40,6 +77,9 @@ Optional evidence enrichment is available through `GenerateTestPlanOptions(colle
 enrichment_enabled=True)`. It returns an `EnrichedTestPlanResult`, updates the returned
 `normalized_plan` with conservative evidence hints, and appends evidence traceability links. It still
 stops before markdown scenario rendering.
+
+The CLI adapter is only an argument-gathering layer. It must not be treated as the source of
+generation semantics.
 
 ## Outputs
 
@@ -91,6 +131,8 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 
 - Do not perform dynamic code scanning as part of normalization.
 - Do not collect code facts without explicit scoped paths.
+- Do not infer `project_path` or `CodeFactsScope` from the whole repository.
+- Do not run Mode B unless the operator supplied a targeted evidence scope.
 - Do not use code facts to mutate `NormalizedTestPlan` unless `enrichment_enabled=True`.
 - Do not treat evidence hints as runnable scenario steps.
 - Do not call LLMs or external APIs.
