@@ -78,6 +78,21 @@ allow_invalid: true|false
 - Never infer repository-wide scope from `project` alone.
 - If a required field for the selected mode is missing, ask only for the missing field.
 
+## Interpreter Rule
+
+Before running any generation CLI command, resolve the Python interpreter/venv for the target
+project and prefer that interpreter first.
+
+Priority:
+
+1. target project venv/interpreter resolved from the project workspace
+2. workspace-level Python explicitly known to satisfy the repo requirements
+3. fallback `py -3.14` only when no better project-specific interpreter is available
+
+This matters even for deterministic generation because local imports, parser behavior, and helper
+tooling must run under the same interpreter family the project expects. Do not default straight to
+global Python if a project venv is available.
+
 ## Modes
 
 ### Mode A - Plan Only
@@ -85,7 +100,7 @@ allow_invalid: true|false
 Use when the operator provides prose and does not provide an explicit code evidence scope.
 
 ```powershell
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --source-id users-api `
   --project code/demo `
   --prose "Verify create user and get user by id" `
@@ -101,7 +116,7 @@ Use only when the operator provides an explicit target project path and explicit
 directories to inspect.
 
 ```powershell
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --source-id users-api `
   --project code/demo `
   --prose "Verify create user" `
@@ -121,7 +136,7 @@ implicit repository-wide discovery.
 Use only after Mode B inputs are available and the operator wants markdown preview artifacts.
 
 ```powershell
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --source-id users-api `
   --project code/demo `
   --prose "Verify create user" `
@@ -144,7 +159,7 @@ Use after Mode C has produced draft artifacts.
 Review:
 
 ```powershell
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --review-drafts `
   --run-id <generation-run-id> `
   --workspace-root .
@@ -153,7 +168,7 @@ py -3.14 -m tools.generation.cli `
 Promote one explicit draft:
 
 ```powershell
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --promote-draft `
   --run-id <generation-run-id> `
   --draft-id draft-tc-001 `
@@ -229,13 +244,15 @@ target_dir: scenarios/generated
 ## Workflow
 
 1. Choose Mode A or Mode B.
-2. Prefer `python -m tools.generation.cli` / `py -3.14 -m tools.generation.cli` for agent-facing runs.
-3. Read the JSON summary printed by the adapter.
-4. Inspect diagnostics before trusting the plan.
-5. Use `normalized_plan` artifacts as the canonical output.
-6. Reference artifact paths from `artifact_paths` when reporting.
-7. For draft review, surface parse status and diagnostics before promotion.
-8. Promote only the operator-selected `draft_id`.
+2. Resolve the target project venv/interpreter first.
+3. Prefer `<project-venv-python> -m tools.generation.cli` for agent-facing runs.
+4. Use `py -3.14 -m tools.generation.cli` only as fallback when project venv is unavailable.
+5. Read the JSON summary printed by the adapter.
+6. Inspect diagnostics before trusting the plan.
+7. Use `normalized_plan` artifacts as the canonical output.
+8. Reference artifact paths from `artifact_paths` when reporting.
+9. For draft review, surface parse status and diagnostics before promotion.
+10. Promote only the operator-selected `draft_id`.
 
 `GenerationPipelineService` exists only as a compatibility facade. Prefer the use-case boundary for new skill-facing work.
 
@@ -315,6 +332,7 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 - Do not collect code facts without explicit scoped paths.
 - Do not infer `project_path` or `CodeFactsScope` from the whole repository.
 - Do not run Mode B unless the operator supplied a targeted evidence scope.
+- Do not skip project venv/interpreter resolution when the target project has its own environment.
 - Do not use code facts to mutate `NormalizedTestPlan` unless `enrichment_enabled=True`.
 - Do not treat evidence hints as runnable scenario steps.
 - Do not call LLMs or external APIs.

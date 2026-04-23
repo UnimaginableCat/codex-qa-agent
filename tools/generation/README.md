@@ -58,7 +58,7 @@ records. It does not render runnable scenarios and does not replace prose-first 
 Agent-facing adapter:
 
 ```powershell
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --source-id users-api `
   --project code/demo `
   --prose "Verify create user" `
@@ -72,10 +72,13 @@ py -3.14 -m tools.generation.cli `
 The adapter only gathers arguments, builds typed request objects, calls `GenerateTestPlanUseCase`,
 and prints a JSON summary. It does not scan outside explicit evidence scope paths.
 
+When invoking generation locally, prefer the target project's resolved venv/interpreter first.
+Use `py -3.14` only as fallback when no project-specific interpreter is available.
+
 Draft scenario rendering preview:
 
 ```powershell
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --source-id users-api `
   --project code/demo `
   --prose "Verify create user" `
@@ -94,12 +97,12 @@ No scenario execution, compile, preflight, API workflow, or DB workflow is trigg
 Review and promotion:
 
 ```powershell
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --review-drafts `
   --run-id <generation-run-id> `
   --workspace-root .
 
-py -3.14 -m tools.generation.cli `
+<project-venv-python> -m tools.generation.cli `
   --promote-draft `
   --run-id <generation-run-id> `
   --draft-id draft-tc-001 `
