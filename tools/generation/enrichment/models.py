@@ -15,6 +15,7 @@ class TestCaseReadiness(StrEnum):
     NEEDS_CLARIFICATION = "needs_clarification"
     PROSE_ONLY = "prose_only"
     PARTIALLY_SUPPORTED = "partially_supported"
+    ROUTE_RESOLVED = "route_resolved"
     EVIDENCE_SUPPORTED = "evidence_supported"
 
 
@@ -26,6 +27,7 @@ class AppliedEvidenceLink:
     confidence: EvidenceConfidence
     summary: str
     applied_fields: dict[str, Any] = field(default_factory=dict)
+    match_reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -39,6 +41,7 @@ class AppliedEvidenceLink:
             confidence=EvidenceConfidence(str(payload["confidence"])),
             summary=str(payload.get("summary", "")),
             applied_fields=dict(payload.get("applied_fields") or {}),
+            match_reasons=[str(item) for item in payload.get("match_reasons", [])],
         )
 
 
