@@ -5,6 +5,9 @@
 These phases come after plan authoring/generation. They are optional and should not be confused
 with the primary job of this skill, which is to produce a good `NormalizedTestPlan`.
 
+They are not default behavior for a short generation request. The agent should stop at
+`NormalizedTestPlan` unless the user explicitly asked for more.
+
 ## Evidence And Enrichment
 
 Use evidence/enrichment only when you need code-derived route or interface facts.

@@ -9,6 +9,9 @@
 5. Validate before generation.
 6. Run generation with `--agent-plan-file`.
 
+The agent should do this by default for decomposable requests. The user does not need to explicitly
+ask for scaffold/validate steps.
+
 ## Scaffold Command
 
 ```powershell
@@ -85,6 +88,7 @@ Write only what the agent can justify.
 - Put uncertain details into `unresolved_items[]` or `open_questions[]`.
 - Use `assumptions[]` only for stable assumptions the plan depends on.
 - Do not hide primary planning fields inside `metadata`.
+- Do not ask the user to prescribe the JSON structure unless a true ambiguity remains.
 
 ## When To Add `evidence_scope`
 

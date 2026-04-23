@@ -7,6 +7,9 @@ high-quality `AgentTestPlanInput`.
 
 The intent is deterministic decomposition, not prose summarization and not speculative design.
 
+This is an internal agent workflow. The user should usually be able to ask for coverage in one
+short sentence without restating decomposition rules.
+
 ## Core Method
 
 1. Identify scope.
@@ -15,6 +18,25 @@ The intent is deterministic decomposition, not prose summarization and not specu
 4. Expand planned test cases.
 5. Add assumptions and open questions.
 6. Optionally define evidence scope.
+
+## Default Trigger
+
+Trigger this workflow by default when the request names:
+
+- a controller
+- an API surface
+- a feature/workflow
+- a lifecycle/state-transition area
+- a validation-heavy operation
+
+Example short request:
+
+```text
+project: code/beck-end-1.0
+request: Проверить полный функционал InternalUserSessionController
+```
+
+This should normally go through decomposition, not prose bootstrap.
 
 ## Step 1 - Identify Scope
 
@@ -31,6 +53,9 @@ Examples:
 - "invalid status transition" -> lifecycle/state constraint scope
 
 Do not decompose across the entire repository unless the user explicitly asked for cross-cutting coverage.
+
+If scope is still ambiguous after a narrow read of the request, ask only the smallest clarifying
+question needed to choose the right boundary.
 
 ## Step 2 - Extract Concrete Operations
 

@@ -15,6 +15,33 @@ The canonical output remains `NormalizedTestPlan`. Optional downstream stages su
 collection, enrichment, draft rendering, review, and validation stay separate from the initial
 authoring step.
 
+# Default Interpretation
+
+Assume the user will usually provide only:
+
+- target project
+- feature/controller/API request
+- optional explicit scope
+
+That is enough for this skill in the normal case.
+
+Given a short request such as:
+
+```text
+project: code/<project-name>
+request: <feature/controller/API scope>
+```
+
+the agent should, by default:
+
+1. choose `agent_plan` as the primary path
+2. decompose the request into `AgentTestPlanInput`
+3. scaffold/fill structured input as needed
+4. validate the structured plan
+5. run generation from `--agent-plan-file`
+
+Do not expect the user to restate these decisions in the prompt.
+
 # Architecture Boundaries
 
 - Authoring: `AgentTestPlanInput` and `AgentPlannedTestCaseInput`.
@@ -39,16 +66,37 @@ useful structured plan:
 
 - Prose fallback: `<venv-python> -m tools.generation.cli --source-id <id> --project code/<project> --prose "<text>" --workspace-root .`
 
+# Default Decisions
+
+- Use `agent_plan` unless the request is too vague or the user explicitly wants prose bootstrap.
+- Decompose first for controller, feature, lifecycle, workflow, validation, or API-surface requests.
+- Validate structured input before generation when the agent authored or edited JSON.
+- Use evidence only when the user asked for it or the next requested phase clearly depends on scoped code facts.
+- Ask for explicit evidence scope only when evidence/enrichment is actually needed.
+- Stop at `NormalizedTestPlan` unless the user asked for downstream phases.
+
+# When To Ask The User
+
+Ask only when a real blocker exists, such as:
+
+- target project is unclear
+- scope is too ambiguous to decompose responsibly
+- user asked for evidence/enrichment but did not provide explicit scope
+- multiple plausible project/controller targets exist
+
+Do not ask the user to repeat operational defaults that belong in this skill.
+
 # Primary Workflow
 
-1. Identify the target project and the requested feature/controller scope.
-2. Decompose the request into a structured `AgentTestPlanInput`.
-3. Scaffold a starter JSON when needed.
-4. Fill planned test cases, assumptions, and open questions.
-5. Validate the structured plan before generation.
-6. Run generation from `--agent-plan-file`.
-7. Add explicit evidence scope only when the next phase needs code facts.
-8. Continue to enrichment/rendering/review only if the user asked for those phases.
+1. Identify the target project and requested feature/controller scope.
+2. Decide whether the request is decomposable enough for `agent_plan`. Default to yes for controller/feature/API requests.
+3. Decompose into a structured `AgentTestPlanInput`.
+4. Scaffold a starter JSON when needed.
+5. Fill planned test cases, assumptions, and open questions.
+6. Validate the structured plan before generation.
+7. Run generation from `--agent-plan-file`.
+8. Add explicit evidence scope only when the next requested phase needs code facts.
+9. Continue to enrichment/rendering/review only if the user asked for those phases.
 
 # Decomposition Rule
 

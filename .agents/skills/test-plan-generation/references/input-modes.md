@@ -14,6 +14,9 @@ cases. This is the normal path for controller/feature requests such as:
 This path is preferred because it preserves agent reasoning explicitly instead of forcing a broad
 request through prose scanning first.
 
+The user should not need to say "use agent_plan". The agent should infer that from the nature of
+the request.
+
 ## Fallback Rule
 
 Use prose mode only when one of these is true:
@@ -32,12 +35,35 @@ Choose `agent_plan` when:
 - scope is clear enough to enumerate operations or coverage buckets
 - the agent can name likely cases directly
 - the request targets a controller, API surface, workflow, validation area, or lifecycle
+- the user gave a short but concrete request like "cover full InternalUserSessionController functionality"
 
 Choose prose when:
 
 - scope is still unclear and the next best step is just to capture operator wording
 - the user wants a rough seed plan
 - decomposition would be mostly guessing
+
+## Default Interpretation Of Short Requests
+
+Given only:
+
+```text
+project: code/<project-name>
+request: <what to cover>
+```
+
+the agent should normally treat this as an `agent_plan` task, not a prose-normalization task,
+whenever the request names a real controller, API, workflow, lifecycle, or validation area.
+
+Use prose only when the agent genuinely cannot decompose without inventing coverage structure.
+
+## Internal Decision Rule
+
+The user prompt should stay short. The mode decision lives inside the skill:
+
+- short concrete request -> `agent_plan`
+- vague/bootstrap request -> prose fallback
+- evidence/enrichment requested -> same plan path, plus explicit scoped evidence
 
 ## Minimal Commands
 
