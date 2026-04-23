@@ -59,6 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--draft-id", help="Draft id selected for promotion.")
     parser.add_argument("--path", help="Scenario markdown path for --validate-scenario.")
     parser.add_argument(
+        "--mode",
+        choices=["parser", "compile"],
+        default="parser",
+        help="Validation mode for --validate-scenario. Defaults to parser.",
+    )
+    parser.add_argument(
         "--target-type",
         choices=[target_type.value for target_type in DraftEditTargetType],
         help="Edit target type for --show-patch-template.",
@@ -362,13 +368,15 @@ def run_validate_scenario(args: argparse.Namespace) -> dict[str, Any]:
     if diagnostics:
         raise GenerationCliInputError(diagnostics)
     result = ScenarioRevalidationService().validate(
-        ScenarioRevalidationRequest(file_path=Path(args.path))
+        ScenarioRevalidationRequest(file_path=Path(args.path), validation_mode=args.mode)
     )
+    compile_validation = result.compile_validation
     return to_json_safe(
         {
             "status": StepStatus.PASS.value,
             "file_path": result.file_path,
             "parse_status": result.parse_status.value,
+            "validation_mode": result.validation_mode,
             "diagnostics": result.diagnostics,
             "checklist": result.checklist.to_dict(),
             "gap_summary": result.gap_summary.to_dict(),
@@ -376,6 +384,9 @@ def run_validate_scenario(args: argparse.Namespace) -> dict[str, Any]:
             "edit_target_count": len(result.edit_targets.targets),
             "promotion_advisory": result.promotion_advisory.value,
             "completeness_ratio": result.completeness_ratio,
+            "compile_status": None if compile_validation is None else compile_validation.compile_status.value,
+            "execution_readiness_category": result.execution_readiness_category.value,
+            "compile_validation": None if compile_validation is None else compile_validation.to_dict(),
             "based_on_generated_draft": result.based_on_generated_draft,
             "generation_run_id": result.generation_run_id,
             "draft_id": result.draft_id,
@@ -648,6 +659,9 @@ def _render_revalidation_text(payload: dict[str, Any]) -> str:
         f"Status: {payload['status']}",
         f"File: {payload['file_path']}",
         f"Parse: {payload['parse_status']}",
+        f"Validation mode: {payload.get('validation_mode', 'parser')}",
+        f"Compile: {payload.get('compile_status') or 'not_requested'}",
+        f"Readiness: {payload.get('execution_readiness_category', '')}",
         f"Promotion advisory: {payload.get('promotion_advisory', '')}",
         f"Completeness: {payload.get('completeness_ratio', 0.0)}",
     ]
@@ -671,6 +685,15 @@ def _render_revalidation_text(payload: dict[str, Any]) -> str:
             lines.append(f"  - {code}")
     else:
         lines.append("  - none")
+    compile_validation = payload.get("compile_validation") or {}
+    compile_issues = compile_validation.get("issues") or []
+    compile_warnings = compile_validation.get("warnings") or []
+    if compile_issues or compile_warnings:
+        lines.append("Compile issues:")
+        for issue in compile_issues:
+            lines.append(f"  - {issue.get('issue_type', '')}: {issue.get('message', '')}")
+        for warning in compile_warnings:
+            lines.append(f"  - warning/{warning.get('issue_type', '')}: {warning.get('message', '')}")
     lines.append("Edit targets:")
     edit_targets = (payload.get("edit_targets") or {}).get("targets", [])
     if edit_targets:

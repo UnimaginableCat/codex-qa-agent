@@ -52,6 +52,29 @@ class PatchTemplateType(StrEnum):
     STRUCTURAL_HINT = "structural_hint"
 
 
+class ScenarioCompileStatus(StrEnum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class CompileIssueType(StrEnum):
+    PARSE_ERROR = "parse_error"
+    COMPILE_ERROR = "compile_error"
+    COMPILE_WARNING = "compile_warning"
+    VARIABLE_REQUIREMENT = "variable_requirement"
+    EXPECTATION_DSL = "expectation_dsl"
+    CAPTURE_REFERENCE = "capture_reference"
+    STEP_REFERENCE = "step_reference"
+
+
+class ExecutionReadinessCategory(StrEnum):
+    PARSER_INVALID = "parser_invalid"
+    COMPILE_BLOCKED = "compile_blocked"
+    COMPILE_VALID_BUT_INCOMPLETE = "compile_valid_but_incomplete"
+    COMPILE_VALID_RUNNER_READY = "compile_valid_runner_ready"
+
+
 @dataclass(slots=True)
 class ScenarioRequirement:
     requirement_id: str
@@ -398,9 +421,68 @@ class ScenarioPromotionRequest:
 @dataclass(slots=True)
 class ScenarioRevalidationRequest:
     file_path: Path
+    validation_mode: str = "parser"
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
+
+
+@dataclass(slots=True)
+class CompileIssue:
+    issue_id: str
+    issue_type: CompileIssueType
+    message: str
+    severity: str = "error"
+    source: str = "compile"
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "CompileIssue":
+        return cls(
+            issue_id=str(payload["issue_id"]),
+            issue_type=CompileIssueType(str(payload["issue_type"])),
+            message=str(payload["message"]),
+            severity=str(payload.get("severity", "error")),
+            source=str(payload.get("source", "compile")),
+            details=dict(payload.get("details") or {}),
+        )
+
+
+@dataclass(slots=True)
+class ScenarioCompileValidationResult:
+    file_path: Path
+    parse_status: ScenarioDraftParseStatus
+    compile_status: ScenarioCompileStatus = ScenarioCompileStatus.SKIPPED
+    issues: list[CompileIssue] = field(default_factory=list)
+    warnings: list[CompileIssue] = field(default_factory=list)
+    readiness_category: ExecutionReadinessCategory = ExecutionReadinessCategory.PARSER_INVALID
+    summary: str = ""
+    checks: list[dict[str, Any]] = field(default_factory=list)
+    required_external_inputs: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ScenarioCompileValidationResult":
+        return cls(
+            file_path=Path(str(payload["file_path"])),
+            parse_status=ScenarioDraftParseStatus(str(payload["parse_status"])),
+            compile_status=ScenarioCompileStatus(
+                str(payload.get("compile_status", ScenarioCompileStatus.SKIPPED.value))
+            ),
+            issues=[CompileIssue.from_dict(item) for item in payload.get("issues", [])],
+            warnings=[CompileIssue.from_dict(item) for item in payload.get("warnings", [])],
+            readiness_category=ExecutionReadinessCategory(
+                str(payload.get("readiness_category", ExecutionReadinessCategory.PARSER_INVALID.value))
+            ),
+            summary=str(payload.get("summary", "")),
+            checks=[dict(item) for item in payload.get("checks", [])],
+            required_external_inputs=[dict(item) for item in payload.get("required_external_inputs", [])],
+        )
 
 
 @dataclass(slots=True)
@@ -416,6 +498,9 @@ class ScenarioRevalidationResult:
     based_on_generated_draft: bool = False
     generation_run_id: str = ""
     draft_id: str = ""
+    validation_mode: str = "parser"
+    compile_validation: ScenarioCompileValidationResult | None = None
+    execution_readiness_category: ExecutionReadinessCategory = ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -438,6 +523,20 @@ class ScenarioRevalidationResult:
             based_on_generated_draft=bool(payload.get("based_on_generated_draft", False)),
             generation_run_id=str(payload.get("generation_run_id", "")),
             draft_id=str(payload.get("draft_id", "")),
+            validation_mode=str(payload.get("validation_mode", "parser")),
+            compile_validation=(
+                None
+                if not payload.get("compile_validation")
+                else ScenarioCompileValidationResult.from_dict(dict(payload["compile_validation"]))
+            ),
+            execution_readiness_category=ExecutionReadinessCategory(
+                str(
+                    payload.get(
+                        "execution_readiness_category",
+                        ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE.value,
+                    )
+                )
+            ),
         )
 
 

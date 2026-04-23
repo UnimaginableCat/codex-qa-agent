@@ -31,6 +31,7 @@ or use-case invocation without asking for the long operational prompt again.
 Use skill: test-plan-generation
 
 mode: <plan-only | plan-with-evidence | draft-preview | review-drafts | promote-draft | validate-scenario>
+validation_mode: <parser | compile>
 project: code/<project-name>
 source_id: <optional for review/promote>
 prose: <required for generation modes>
@@ -53,7 +54,7 @@ path: <required for validate-scenario>
   - `draft-preview` -> enriched plan + parser-validated draft markdown preview
   - `review-drafts` -> inspect already generated drafts by `run_id`
   - `promote-draft` -> copy one selected draft into `scenarios/`
-  - `validate-scenario` -> parser-only revalidate one manually edited draft/promoted scenario file
+  - `validate-scenario` -> revalidate one manually edited draft/promoted scenario file with parser mode or compile-only mode
 - `project`
   - required for generation modes
 - `source_id`
@@ -78,6 +79,10 @@ path: <required for validate-scenario>
   - optional for `promote-draft`, defaults to `false`
 - `path`
   - required for `validate-scenario`
+- `validation_mode`
+  - optional for `validate-scenario`, defaults to `parser`
+  - `parser` runs markdown parser checks only
+  - `compile` runs parser checks plus scenario compiler contract checks, still without execution
 
 ### Default Agent Interpretation
 
@@ -198,8 +203,8 @@ Promotion still does not execute the scenario.
 
 ### Mode E - Manual Patch Revalidation
 
-Use after the operator manually edits a draft or promoted scenario file and wants parser-only
-feedback before any execution.
+Use after the operator manually edits a draft or promoted scenario file and wants parser-only or
+compile-only feedback before any execution.
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
@@ -211,6 +216,20 @@ feedback before any execution.
 This mode loads the markdown file, runs `MarkdownScenarioParser.parse_result()`, rebuilds the
 checklist/edit-target/template guidance, and returns a promotion advisory. It does not need
 generation artifacts and does not execute the scenario.
+
+Compile-only readiness:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --validate-scenario `
+  --path scenarios/generated/users-draft-tc-001.md `
+  --mode compile `
+  --output-format text
+```
+
+Compile mode additionally calls the existing `ScenarioCompiler` to check variable dependencies,
+capture contracts, step references, and supported expectation DSL. It must not run preflight,
+API tools, DB tools, or `ScenarioRunnerService`.
 
 ## Canonical Short Examples
 
@@ -295,6 +314,7 @@ Use skill: test-plan-generation
 
 mode: validate-scenario
 path: scenarios/generated/users-draft-tc-001.md
+validation_mode: compile
 ```
 
 ## Workflow
@@ -309,7 +329,7 @@ path: scenarios/generated/users-draft-tc-001.md
 8. Reference artifact paths from `artifact_paths` when reporting.
 9. For draft review, surface parse status and diagnostics before promotion.
 10. Promote only the operator-selected `draft_id`.
-11. After manual edits, use `validate-scenario` for parser-only feedback before considering execution.
+11. After manual edits, use `validate-scenario` for parser-only or compile-only feedback before considering execution.
 
 `GenerationPipelineService` exists only as a compatibility facade. Prefer the use-case boundary for new skill-facing work.
 
@@ -327,6 +347,7 @@ or CLI `--render-drafts`. It writes preview artifacts and validates them with th
 
 Draft review and promotion are available through CLI `--review-drafts` and `--promote-draft`.
 Manual patch revalidation is available through CLI `--validate-scenario --path <scenario.md>`.
+Use `--mode compile` only when the operator asks whether the scenario is structurally runner-ready.
 
 The CLI adapter is only an argument-gathering layer. It must not be treated as the source of
 generation semantics.
@@ -401,7 +422,8 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 - Do not overwrite existing scenario files during promotion.
 - Do not auto-promote drafts.
 - Do not run or modify `scenario_runner`.
-- Do not execute scenarios during `validate-scenario`; parser-only validation is the limit.
+- Do not execute scenarios during `validate-scenario`; parser-only or compile-only validation is the limit.
+- Do not treat compile-only readiness as runtime correctness; it only checks pre-execution contracts.
 - Do not add pause/resume or guided/manual behavior for generation.
 - Do not store canonical planning fields only in `metadata`.
 

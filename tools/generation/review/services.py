@@ -16,6 +16,8 @@ from tools.generation.persistence.artifacts import (
 from tools.generation.rendering.models import ScenarioDraft, ScenarioDraftValidationResult, ScenarioRenderResult
 
 from .models import (
+    CompileIssue,
+    CompileIssueType,
     DeferredDraftReviewItem,
     DraftChecklistResult,
     DraftEditTarget,
@@ -26,8 +28,11 @@ from .models import (
     DraftRequirementCheck,
     DraftReadinessCategory,
     DraftReviewDiagnosticsSummary,
+    ExecutionReadinessCategory,
     ScenarioRequirement,
     ScenarioRequirementStatus,
+    ScenarioCompileStatus,
+    ScenarioCompileValidationResult,
     ScenarioDraftParseStatus,
     ScenarioDraftReviewItem,
     ScenarioDraftReviewSet,
@@ -38,6 +43,7 @@ from .models import (
 )
 from .templates import PatchTemplateCatalogService
 from tools.scenario_runner.domain.models import ScenarioDefinition, ScenarioStepType
+from tools.scenario_runner.orchestration.compiler import ScenarioCompiler
 from tools.scenario_runner.parser import MarkdownScenarioParser
 
 
@@ -251,6 +257,7 @@ class ScenarioRevalidationService:
     """Parser-only validation for manually edited draft or promoted scenario files."""
 
     parser: MarkdownScenarioParser = field(default_factory=MarkdownScenarioParser)
+    compile_validator: "ScenarioCompileValidationService" = field(default_factory=lambda: ScenarioCompileValidationService())
 
     def validate(self, request: ScenarioRevalidationRequest) -> ScenarioRevalidationResult:
         file_path = Path(request.file_path)
@@ -306,6 +313,25 @@ class ScenarioRevalidationService:
             parse_status=parse_status,
             route_binding=route_binding,
         )
+        compile_validation = None
+        execution_readiness = _parser_only_readiness(parse_status, checklist)
+        if request.validation_mode == "compile":
+            compile_validation = self.compile_validator.validate(
+                file_path=file_path,
+                parse_status=parse_status,
+                scenario=parse_result.scenario,
+                checklist=checklist,
+            )
+            execution_readiness = compile_validation.readiness_category
+            gap_summary = _merge_compile_gaps(gap_summary, compile_validation)
+            edit_targets = _build_edit_targets(
+                draft,
+                checklist=checklist,
+                gap_summary=gap_summary,
+                parse_status=parse_status,
+                route_binding=route_binding,
+            )
+
         return ScenarioRevalidationResult(
             file_path=file_path,
             parse_status=parse_status,
@@ -318,7 +344,178 @@ class ScenarioRevalidationService:
             based_on_generated_draft=bool(metadata),
             generation_run_id=metadata.get("generation_run_id", ""),
             draft_id=draft_id,
+            validation_mode=request.validation_mode,
+            compile_validation=compile_validation,
+            execution_readiness_category=execution_readiness,
         )
+
+
+@dataclass(slots=True)
+class ScenarioCompileValidationService:
+    """Run scenario compiler checks without preflight, execution, API, or DB calls."""
+
+    compiler: ScenarioCompiler = field(default_factory=ScenarioCompiler)
+
+    def validate(
+        self,
+        *,
+        file_path: Path,
+        parse_status: ScenarioDraftParseStatus,
+        scenario: ScenarioDefinition | None,
+        checklist: DraftChecklistResult,
+    ) -> ScenarioCompileValidationResult:
+        if parse_status == ScenarioDraftParseStatus.INVALID or scenario is None:
+            issue = CompileIssue(
+                issue_id="parse:parser_invalid",
+                issue_type=CompileIssueType.PARSE_ERROR,
+                message="Compile validation was skipped because parser validation failed.",
+                severity="error",
+                source="parser",
+            )
+            return ScenarioCompileValidationResult(
+                file_path=file_path,
+                parse_status=parse_status,
+                compile_status=ScenarioCompileStatus.SKIPPED,
+                issues=[issue],
+                readiness_category=ExecutionReadinessCategory.PARSER_INVALID,
+                summary="Parser invalid; compile-only validation was skipped.",
+            )
+
+        compiled = self.compiler.compile(scenario)
+        compile_result = compiled.compile_result
+        issues = [_compile_issue_from_execution_issue(issue, index) for index, issue in enumerate(compile_result.issues)]
+        warnings = [
+            _compile_warning_from_external_input(requirement, index)
+            for index, requirement in enumerate(compile_result.required_external_inputs)
+        ]
+        compile_status = (
+            ScenarioCompileStatus.SUCCESS
+            if compile_result.passed
+            else ScenarioCompileStatus.FAILED
+        )
+        readiness = _compile_readiness(
+            parse_status=parse_status,
+            compile_status=compile_status,
+            checklist=checklist,
+            warnings=warnings,
+        )
+        return ScenarioCompileValidationResult(
+            file_path=file_path,
+            parse_status=parse_status,
+            compile_status=compile_status,
+            issues=issues,
+            warnings=warnings,
+            readiness_category=readiness,
+            summary=_compile_summary(compile_status, readiness, issues, warnings),
+            checks=[check.to_dict() for check in compile_result.checks],
+            required_external_inputs=[item.to_dict() for item in compile_result.required_external_inputs],
+        )
+
+
+def _compile_issue_from_execution_issue(issue: object, index: int) -> CompileIssue:
+    payload = issue.to_dict()
+    code = str(payload.get("code", f"compile_issue_{index}"))
+    return CompileIssue(
+        issue_id=f"compile:{code}:{index}",
+        issue_type=_compile_issue_type(code),
+        message=str(payload.get("message", "")),
+        severity=str(payload.get("outcome") or "error").lower(),
+        source="scenario_compiler",
+        details=payload,
+    )
+
+
+def _compile_warning_from_external_input(requirement: object, index: int) -> CompileIssue:
+    payload = requirement.to_dict()
+    variable_name = str(payload.get("variable_name", ""))
+    return CompileIssue(
+        issue_id=f"compile:external_input:{variable_name}:{index}",
+        issue_type=CompileIssueType.VARIABLE_REQUIREMENT,
+        message=f"External variable '{variable_name}' must be resolvable before runner execution.",
+        severity="warning",
+        source="scenario_compiler",
+        details=payload,
+    )
+
+
+def _compile_issue_type(code: str) -> CompileIssueType:
+    if "expectation" in code:
+        return CompileIssueType.EXPECTATION_DSL
+    if "capture" in code:
+        return CompileIssueType.CAPTURE_REFERENCE
+    if "variable" in code:
+        return CompileIssueType.VARIABLE_REQUIREMENT
+    if "reference" in code or "step" in code:
+        return CompileIssueType.STEP_REFERENCE
+    return CompileIssueType.COMPILE_ERROR
+
+
+def _compile_readiness(
+    *,
+    parse_status: ScenarioDraftParseStatus,
+    compile_status: ScenarioCompileStatus,
+    checklist: DraftChecklistResult,
+    warnings: list[CompileIssue],
+) -> ExecutionReadinessCategory:
+    if parse_status == ScenarioDraftParseStatus.INVALID:
+        return ExecutionReadinessCategory.PARSER_INVALID
+    if compile_status != ScenarioCompileStatus.SUCCESS:
+        return ExecutionReadinessCategory.COMPILE_BLOCKED
+    if warnings:
+        return ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE
+    if any(check.status != ScenarioRequirementStatus.SATISFIED for check in checklist.checks):
+        return ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE
+    return ExecutionReadinessCategory.COMPILE_VALID_RUNNER_READY
+
+
+def _compile_summary(
+    compile_status: ScenarioCompileStatus,
+    readiness: ExecutionReadinessCategory,
+    issues: list[CompileIssue],
+    warnings: list[CompileIssue],
+) -> str:
+    if compile_status == ScenarioCompileStatus.SKIPPED:
+        return "Compile-only validation was skipped."
+    if compile_status == ScenarioCompileStatus.FAILED:
+        return f"Compile-only validation failed with {len(issues)} issue(s)."
+    if readiness == ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE:
+        return f"Compile-only validation passed with {len(warnings)} warning(s) or remaining checklist gaps."
+    return "Compile-only validation passed and the scenario is structurally runner-ready."
+
+
+def _parser_only_readiness(
+    parse_status: ScenarioDraftParseStatus,
+    checklist: DraftChecklistResult,
+) -> ExecutionReadinessCategory:
+    if parse_status == ScenarioDraftParseStatus.INVALID:
+        return ExecutionReadinessCategory.PARSER_INVALID
+    if any(check.status != ScenarioRequirementStatus.SATISFIED for check in checklist.checks):
+        return ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE
+    return ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE
+
+
+def _merge_compile_gaps(
+    gap_summary: DraftGapSummary,
+    compile_validation: ScenarioCompileValidationResult,
+) -> DraftGapSummary:
+    gap_codes = list(gap_summary.gap_codes)
+    gap_messages = list(gap_summary.gap_messages)
+    if compile_validation.readiness_category == ExecutionReadinessCategory.COMPILE_BLOCKED:
+        gap_codes.append("compile_blocked")
+        gap_messages.append("Compile-only validation failed before runner execution.")
+    for issue in compile_validation.issues:
+        gap_codes.append(issue.details.get("code", issue.issue_type.value))
+        gap_messages.append(issue.message)
+    if compile_validation.warnings:
+        gap_codes.append("external_inputs_required")
+        gap_messages.append("One or more external variables must be resolved before execution.")
+    for warning in compile_validation.warnings:
+        gap_codes.append(warning.issue_type.value)
+        gap_messages.append(warning.message)
+    return DraftGapSummary(
+        gap_codes=_dedupe_preserve_order([str(item) for item in gap_codes]),
+        gap_messages=_dedupe_preserve_order([str(item) for item in gap_messages]),
+    )
 
 
 def _load_run_context(workspace_root: Path, run_id: str) -> GenerationRunContext:
@@ -934,6 +1131,50 @@ def _build_edit_targets(
         check.requirement.requirement_id: check.status for check in checklist.checks
     }
     gap_codes = set(gap_summary.gap_codes)
+
+    if "compile_unsupported_expectation" in gap_codes:
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.ADD_EXPECTED_ASSERTION,
+                section_name="Final expectations",
+                reason="Compile validation found unsupported expectation DSL.",
+                related_requirements=["assertions"],
+                priority="high",
+                suggested_minimum_patch="Replace unsupported expectation text with a runner-supported deterministic assertion.",
+            )
+        )
+
+    if gap_codes & {
+        "compile_capture_rule_invalid",
+        "compile_capture_variable_invalid",
+        "compile_step_self_capture_dependency",
+        "compile_future_capture_dependency",
+    }:
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.ADD_CAPTURE,
+                section_name="Steps",
+                reason="Compile validation found an invalid or unresolved capture contract.",
+                related_requirements=["captures"],
+                priority="high",
+                suggested_minimum_patch="Fix capture syntax or reorder steps so referenced captured variables exist before use.",
+            )
+        )
+
+    if "external_inputs_required" in gap_codes:
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.CLARIFY_NOTES_ONLY,
+                section_name="Variables",
+                reason="Compile validation found external variable inputs required before execution.",
+                related_requirements=[],
+                priority="normal",
+                suggested_minimum_patch="Declare the variable source in Variables or ensure the environment provides it before runner execution.",
+            )
+        )
 
     if status_by_requirement.get("request_structure") == ScenarioRequirementStatus.MISSING:
         targets.append(

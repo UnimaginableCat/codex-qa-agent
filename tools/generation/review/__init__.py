@@ -2,6 +2,8 @@
 
 from .models import (
     DeferredDraftReviewItem,
+    CompileIssue,
+    CompileIssueType,
     DraftChecklistResult,
     DraftEditTarget,
     DraftEditTargetList,
@@ -12,6 +14,7 @@ from .models import (
     DraftRequirementCheck,
     DraftReadinessCategory,
     DraftReviewDiagnosticsSummary,
+    ExecutionReadinessCategory,
     PatchTemplate,
     PatchTemplateCatalog,
     PatchTemplateType,
@@ -22,14 +25,23 @@ from .models import (
     ScenarioDraftReviewSet,
     ScenarioPromotionRequest,
     ScenarioPromotionResult,
+    ScenarioCompileStatus,
+    ScenarioCompileValidationResult,
     ScenarioRevalidationRequest,
     ScenarioRevalidationResult,
 )
-from .services import ScenarioDraftPromotionService, ScenarioDraftReviewService, ScenarioRevalidationService
+from .services import (
+    ScenarioCompileValidationService,
+    ScenarioDraftPromotionService,
+    ScenarioDraftReviewService,
+    ScenarioRevalidationService,
+)
 from .templates import PatchTemplateCatalogService
 
 __all__ = [
     "DeferredDraftReviewItem",
+    "CompileIssue",
+    "CompileIssueType",
     "DraftChecklistResult",
     "DraftEditTarget",
     "DraftEditTargetList",
@@ -40,6 +52,7 @@ __all__ = [
     "DraftRequirementCheck",
     "DraftReadinessCategory",
     "DraftReviewDiagnosticsSummary",
+    "ExecutionReadinessCategory",
     "PatchTemplate",
     "PatchTemplateCatalog",
     "PatchTemplateCatalogService",
@@ -53,6 +66,9 @@ __all__ = [
     "ScenarioDraftReviewSet",
     "ScenarioPromotionRequest",
     "ScenarioPromotionResult",
+    "ScenarioCompileStatus",
+    "ScenarioCompileValidationResult",
+    "ScenarioCompileValidationService",
     "ScenarioRevalidationRequest",
     "ScenarioRevalidationResult",
     "ScenarioRevalidationService",
