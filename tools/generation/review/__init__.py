@@ -1,15 +1,51 @@
 """Review and promotion workflow for generated scenario drafts."""
 
 from .models import (
+    DeferredDraftReviewItem,
+    DraftChecklistResult,
+    DraftEditTarget,
+    DraftEditTargetList,
+    DraftEditTargetType,
+    DraftGapSummary,
+    DraftPatchSuggestion,
+    DraftPromotionAdvisory,
+    DraftRequirementCheck,
+    DraftReadinessCategory,
+    DraftReviewDiagnosticsSummary,
+    PatchTemplate,
+    PatchTemplateCatalog,
+    PatchTemplateType,
+    ScenarioRequirement,
+    ScenarioRequirementStatus,
     ScenarioDraftParseStatus,
     ScenarioDraftReviewItem,
     ScenarioDraftReviewSet,
     ScenarioPromotionRequest,
     ScenarioPromotionResult,
+    ScenarioRevalidationRequest,
+    ScenarioRevalidationResult,
 )
-from .services import ScenarioDraftPromotionService, ScenarioDraftReviewService
+from .services import ScenarioDraftPromotionService, ScenarioDraftReviewService, ScenarioRevalidationService
+from .templates import PatchTemplateCatalogService
 
 __all__ = [
+    "DeferredDraftReviewItem",
+    "DraftChecklistResult",
+    "DraftEditTarget",
+    "DraftEditTargetList",
+    "DraftEditTargetType",
+    "DraftGapSummary",
+    "DraftPatchSuggestion",
+    "DraftPromotionAdvisory",
+    "DraftRequirementCheck",
+    "DraftReadinessCategory",
+    "DraftReviewDiagnosticsSummary",
+    "PatchTemplate",
+    "PatchTemplateCatalog",
+    "PatchTemplateCatalogService",
+    "PatchTemplateType",
+    "ScenarioRequirement",
+    "ScenarioRequirementStatus",
     "ScenarioDraftParseStatus",
     "ScenarioDraftPromotionService",
     "ScenarioDraftReviewItem",
@@ -17,4 +53,7 @@ __all__ = [
     "ScenarioDraftReviewSet",
     "ScenarioPromotionRequest",
     "ScenarioPromotionResult",
+    "ScenarioRevalidationRequest",
+    "ScenarioRevalidationResult",
+    "ScenarioRevalidationService",
 ]

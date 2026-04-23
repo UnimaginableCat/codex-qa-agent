@@ -19,9 +19,13 @@ from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic, GenerationSourceInput
 from tools.generation.evidence.models import CodeFactsScope, TargetStack
 from tools.generation.review import (
+    DraftEditTargetType,
+    PatchTemplateCatalogService,
     ScenarioDraftPromotionService,
     ScenarioDraftReviewService,
     ScenarioPromotionRequest,
+    ScenarioRevalidationRequest,
+    ScenarioRevalidationService,
 )
 
 
@@ -33,6 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
     workflow = parser.add_mutually_exclusive_group()
     workflow.add_argument("--review-drafts", action="store_true", help="Review generated drafts for a run id.")
     workflow.add_argument("--promote-draft", action="store_true", help="Promote one selected draft into scenarios/.")
+    workflow.add_argument("--list-patch-templates", action="store_true", help="List deterministic draft edit templates.")
+    workflow.add_argument("--show-patch-template", action="store_true", help="Show one draft edit template by target type.")
+    workflow.add_argument("--validate-scenario", action="store_true", help="Parser-only revalidate one scenario file.")
 
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--prose", help="Inline prose source for test-plan generation.")
@@ -41,9 +48,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project", help="Project identifier stored in generation contracts.")
     parser.add_argument("--name", default="", help="Optional human-readable source name.")
     parser.add_argument("--workspace-root", default=".", help="Workspace root for artifact persistence.")
+    parser.add_argument(
+        "--output-format",
+        choices=["json", "text"],
+        default="json",
+        help="Output format for review-oriented commands. Defaults to json.",
+    )
     parser.add_argument("--no-persist", action="store_true", help="Do not persist generation artifacts.")
     parser.add_argument("--run-id", help="Generation run id for review or promotion.")
     parser.add_argument("--draft-id", help="Draft id selected for promotion.")
+    parser.add_argument("--path", help="Scenario markdown path for --validate-scenario.")
+    parser.add_argument(
+        "--target-type",
+        choices=[target_type.value for target_type in DraftEditTargetType],
+        help="Edit target type for --show-patch-template.",
+    )
     parser.add_argument("--allow-invalid", action="store_true", help="Allow promotion of parser-invalid drafts.")
     parser.add_argument(
         "--target-dir",
@@ -197,11 +216,17 @@ def main(argv: list[str] | None = None) -> int:
             payload = run_review(args)
         elif args.promote_draft:
             payload = run_promotion(args)
+        elif args.list_patch_templates:
+            payload = run_list_patch_templates(args)
+        elif args.show_patch_template:
+            payload = run_show_patch_template(args)
+        elif args.validate_scenario:
+            payload = run_validate_scenario(args)
         else:
             payload = run_generation(args)
     except GenerationCliInputError as exc:
         payload = _error_payload(exc.diagnostics)
-        _print_payload(payload)
+        _print_payload(payload, output_format=args.output_format, workflow="error")
         return 1
     except Exception as exc:  # noqa: BLE001
         payload = _error_payload(
@@ -213,10 +238,21 @@ def main(argv: list[str] | None = None) -> int:
                 )
             ]
         )
-        _print_payload(payload)
+        _print_payload(payload, output_format=args.output_format, workflow="error")
         return 1
 
-    _print_payload(payload)
+    workflow = (
+        "review"
+        if args.review_drafts
+        else "promotion"
+        if args.promote_draft
+        else "template"
+        if args.list_patch_templates or args.show_patch_template
+        else "revalidation"
+        if args.validate_scenario
+        else "generation"
+    )
+    _print_payload(payload, output_format=args.output_format, workflow=workflow)
     return 0 if payload["status"] == StepStatus.PASS.value else 1
 
 
@@ -237,6 +273,21 @@ def run_review(args: argparse.Namespace) -> dict[str, Any]:
             "draft_count": len(review_set.items),
             "valid_draft_count": sum(1 for item in review_set.items if item.parse_status.value == "valid"),
             "invalid_draft_count": sum(1 for item in review_set.items if item.parse_status.value == "invalid"),
+            "partial_draft_count": sum(
+                1
+                for item in review_set.items
+                if item.readiness_category.value == "parser_valid_partial"
+            ),
+            "strongly_supported_draft_count": sum(
+                1
+                for item in review_set.items
+                if item.readiness_category.value == "parser_valid_strongly_supported"
+            ),
+            "deferred_item_count": len(review_set.deferred_items),
+            "drafts_with_edit_targets": sum(1 for item in review_set.items if item.edit_target_count > 0),
+            "total_edit_targets": sum(item.edit_target_count for item in review_set.items),
+            "average_completeness_ratio": _average_completeness_ratio(review_set),
+            "close_to_runnable_count": _close_to_runnable_count(review_set),
             "review_set": review_set.to_dict(),
             "diagnostics": [diagnostic.to_dict() for diagnostic in review_set.diagnostics],
         }
@@ -265,6 +316,69 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
             "target_path": result.target_path,
             "promotion_result_path": result.promotion_result_path,
             "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
+        }
+    )
+
+
+def run_list_patch_templates(args: argparse.Namespace) -> dict[str, Any]:
+    catalog = PatchTemplateCatalogService().list_templates()
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "catalog_version": catalog.catalog_version,
+            "template_count": len(catalog.templates),
+            "templates": [template.to_dict() for template in catalog.templates],
+        }
+    )
+
+
+def run_show_patch_template(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _patch_template_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    target_type = DraftEditTargetType(str(args.target_type))
+    template = PatchTemplateCatalogService().get_template(target_type)
+    if template is None:
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_patch_template_missing",
+                    message=f"No patch template exists for target type {target_type.value}.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=target_type.value,
+                )
+            ]
+        )
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "template": template.to_dict(),
+        }
+    )
+
+
+def run_validate_scenario(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _revalidation_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    result = ScenarioRevalidationService().validate(
+        ScenarioRevalidationRequest(file_path=Path(args.path))
+    )
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "file_path": result.file_path,
+            "parse_status": result.parse_status.value,
+            "diagnostics": result.diagnostics,
+            "checklist": result.checklist.to_dict(),
+            "gap_summary": result.gap_summary.to_dict(),
+            "edit_targets": result.edit_targets.to_dict(),
+            "edit_target_count": len(result.edit_targets.targets),
+            "promotion_advisory": result.promotion_advisory.value,
+            "completeness_ratio": result.completeness_ratio,
+            "based_on_generated_draft": result.based_on_generated_draft,
+            "generation_run_id": result.generation_run_id,
+            "draft_id": result.draft_id,
         }
     )
 
@@ -385,6 +499,30 @@ def _promotion_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationD
     return diagnostics
 
 
+def _patch_template_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if args.target_type:
+        return []
+    return [
+        GenerationDiagnostic(
+            code="adapter_patch_template_requires_target_type",
+            message="--show-patch-template requires --target-type.",
+            severity=DiagnosticSeverity.ERROR,
+        )
+    ]
+
+
+def _revalidation_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if args.path:
+        return []
+    return [
+        GenerationDiagnostic(
+            code="adapter_revalidation_requires_path",
+            message="--validate-scenario requires --path.",
+            severity=DiagnosticSeverity.ERROR,
+        )
+    ]
+
+
 def _error_payload(diagnostics: list[GenerationDiagnostic]) -> dict[str, Any]:
     return to_json_safe(
         {
@@ -396,8 +534,178 @@ def _error_payload(diagnostics: list[GenerationDiagnostic]) -> dict[str, Any]:
     )
 
 
-def _print_payload(payload: dict[str, Any]) -> None:
+def _print_payload(payload: dict[str, Any], *, output_format: str = "json", workflow: str = "generation") -> None:
+    if output_format == "text" and workflow == "review":
+        print(_render_review_text(payload))
+        return
+    if output_format == "text" and workflow == "template":
+        print(_render_template_text(payload))
+        return
+    if output_format == "text" and workflow == "revalidation":
+        print(_render_revalidation_text(payload))
+        return
     print(json.dumps(payload, ensure_ascii=False))
+
+
+def _render_review_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Status: {payload['status']}",
+        f"Run ID: {payload['run_id']}",
+        f"Source ID: {payload['source_id']}",
+        f"Drafts: {payload['draft_count']}",
+        f"Partial drafts: {payload.get('partial_draft_count', 0)}",
+        f"Strongly supported drafts: {payload.get('strongly_supported_draft_count', 0)}",
+        f"Deferred items: {payload.get('deferred_item_count', 0)}",
+        f"Drafts with edit targets: {payload.get('drafts_with_edit_targets', 0)}",
+        f"Total edit targets: {payload.get('total_edit_targets', 0)}",
+        f"Average completeness: {payload.get('average_completeness_ratio', 0.0)}",
+        f"Close to runnable: {payload.get('close_to_runnable_count', 0)}",
+        "",
+    ]
+    review_set = payload.get("review_set") or {}
+    for item in review_set.get("items", []):
+        lines.extend(
+            [
+                f"Draft: {item['draft_id']}",
+                f"Title: {item.get('title', '')}",
+                f"Status: {item['readiness_category']}",
+                f"Parse: {item['parse_status']}",
+                f"Route: {item.get('route_status', 'unknown')}",
+                f"Promotion advisory: {item.get('promotion_advisory', '')}",
+                "Checklist:",
+            ]
+        )
+        checklist = item.get("checklist") or {}
+        for line in checklist.get("diff_lines", []):
+            lines.append(f"  {line}")
+        lines.append("Remaining gaps:")
+        gap_summary = item.get("gap_summary") or {}
+        for code in gap_summary.get("gap_codes", []):
+            lines.append(f"  - {code}")
+        lines.append("Edit targets:")
+        edit_targets = (item.get("edit_targets") or {}).get("targets", [])
+        if edit_targets:
+            for target in edit_targets:
+                lines.append(
+                    f"  - [{target['section_name']}] {target['target_type']}: {target['suggested_minimum_patch']}"
+                )
+                suggestion = target.get("patch_suggestion") or {}
+                template_id = suggestion.get("template_id")
+                if template_id:
+                    lines.append(f"    Template: {template_id}")
+                    preview = suggestion.get("template_preview") or []
+                    if preview:
+                        lines.append("    Preview:")
+                        for preview_line in preview[:6]:
+                            lines.append(f"      {preview_line}")
+        else:
+            lines.append("  - none")
+        lines.append("")
+
+    deferred_items = review_set.get("deferred_items") or []
+    if deferred_items:
+        lines.append("Deferred:")
+        for item in deferred_items:
+            lines.append(f"  {item['case_id']}: {item['reason_code']}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _render_template_text(payload: dict[str, Any]) -> str:
+    if "template" in payload:
+        template = payload["template"]
+        lines = [
+            f"Status: {payload['status']}",
+            f"Template: {template['template_id']}",
+            f"Target type: {template['target_type']}",
+            f"Section: {template['section_name']}",
+            f"Title: {template['title']}",
+            f"Description: {template['description']}",
+            "Preview:",
+        ]
+        lines.extend(f"  {line}" for line in template.get("template_lines", []))
+        usage_notes = template.get("usage_notes", [])
+        if usage_notes:
+            lines.append("Usage notes:")
+            lines.extend(f"  - {line}" for line in usage_notes)
+        return "\n".join(lines)
+
+    lines = [
+        f"Status: {payload['status']}",
+        f"Catalog version: {payload.get('catalog_version', '')}",
+        f"Templates: {payload.get('template_count', 0)}",
+        "",
+    ]
+    for template in payload.get("templates", []):
+        lines.append(
+            f"- {template['template_id']} [{template['section_name']}] {template['target_type']}: {template['title']}"
+        )
+    return "\n".join(lines).rstrip()
+
+
+def _render_revalidation_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Status: {payload['status']}",
+        f"File: {payload['file_path']}",
+        f"Parse: {payload['parse_status']}",
+        f"Promotion advisory: {payload.get('promotion_advisory', '')}",
+        f"Completeness: {payload.get('completeness_ratio', 0.0)}",
+    ]
+    if payload.get("based_on_generated_draft"):
+        lines.extend(
+            [
+                "Origin: generated draft",
+                f"Generation run: {payload.get('generation_run_id', '')}",
+                f"Draft ID: {payload.get('draft_id', '')}",
+            ]
+        )
+    lines.append("Checklist:")
+    checklist = payload.get("checklist") or {}
+    for line in checklist.get("diff_lines", []):
+        lines.append(f"  {line}")
+    lines.append("Remaining gaps:")
+    gap_summary = payload.get("gap_summary") or {}
+    gap_codes = gap_summary.get("gap_codes", [])
+    if gap_codes:
+        for code in gap_codes:
+            lines.append(f"  - {code}")
+    else:
+        lines.append("  - none")
+    lines.append("Edit targets:")
+    edit_targets = (payload.get("edit_targets") or {}).get("targets", [])
+    if edit_targets:
+        for target in edit_targets:
+            lines.append(
+                f"  - [{target['section_name']}] {target['target_type']}: {target['suggested_minimum_patch']}"
+            )
+            suggestion = target.get("patch_suggestion") or {}
+            if suggestion.get("template_id"):
+                lines.append(f"    Template: {suggestion['template_id']}")
+    else:
+        lines.append("  - none")
+    diagnostics = payload.get("diagnostics") or []
+    if diagnostics:
+        lines.append("Parser diagnostics:")
+        for diagnostic in diagnostics:
+            lines.append(f"  - {diagnostic.get('severity', '')}: {diagnostic.get('message', '')}")
+    return "\n".join(lines).rstrip()
+
+
+def _average_completeness_ratio(review_set: Any) -> float:
+    if not review_set.items:
+        return 0.0
+    total = sum(item.checklist.completeness_ratio for item in review_set.items)
+    return round(total / len(review_set.items), 3)
+
+
+def _close_to_runnable_count(review_set: Any) -> int:
+    return sum(
+        1
+        for item in review_set.items
+        if item.parse_status.value == "valid"
+        and item.checklist.completeness_ratio >= 0.6
+        and item.route_status.startswith("resolved")
+    )
 
 
 if __name__ == "__main__":
