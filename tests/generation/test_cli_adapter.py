@@ -14,6 +14,115 @@ from tools.generation import cli
 
 
 class GenerationCliAdapterTests(unittest.TestCase):
+    def test_init_agent_plan_scaffolds_template_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_path = root / "artifacts" / "agent" / "input" / "users-api-plan.json"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--init-agent-plan",
+                        "--output",
+                        str(output_path),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            written_payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["input_mode"], "agent_plan")
+        self.assertEqual(written_payload["source_id"], "users-api")
+        self.assertEqual(written_payload["project"], "code/demo")
+        self.assertEqual(written_payload["title"], "Users API")
+        self.assertIn("planned_test_cases", written_payload)
+
+    def test_validate_agent_plan_returns_pass_for_valid_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agent_plan_path = root / "agent-plan.json"
+            agent_plan_path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users-api",
+                        "project": "code/demo",
+                        "title": "Users API",
+                        "goal": "Cover user API behavior.",
+                        "planned_test_cases": [
+                            {
+                                "title": "Create user",
+                                "objective": "Verify user creation.",
+                                "actions": ["Call the create user API."],
+                                "expected_outcomes": ["User is created."],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--validate-agent-plan",
+                        "--agent-plan-file",
+                        str(agent_plan_path),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["input_mode"], "agent_plan")
+        self.assertEqual(payload["case_count"], 1)
+
+    def test_validate_agent_plan_returns_blocked_for_missing_required_fields(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agent_plan_path = root / "agent-plan.json"
+            agent_plan_path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "",
+                        "project": "code/demo",
+                        "title": "",
+                        "planned_test_cases": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--validate-agent-plan",
+                        "--agent-plan-file",
+                        str(agent_plan_path),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        diagnostic_codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(payload["status"], "BLOCKED")
+        self.assertIn("agent_plan_missing_source_id", diagnostic_codes)
+        self.assertIn("agent_plan_missing_title", diagnostic_codes)
+        self.assertIn("agent_plan_no_cases", diagnostic_codes)
+
     def test_agent_plan_file_generates_plan_without_prose_scanning(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

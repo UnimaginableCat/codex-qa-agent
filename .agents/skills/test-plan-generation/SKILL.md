@@ -20,6 +20,8 @@ markdown draft previews, review/promote drafts, and validate edited scenarios. D
 ## Accepted Inputs
 
 - Preferred: `--agent-plan-file <path>` containing `AgentTestPlanInput` JSON.
+- Authoring helper: `--init-agent-plan --output <path>` scaffolds a canonical starter JSON.
+- Validation helper: `--validate-agent-plan --agent-plan-file <path>` validates structured input before generation.
 - Use-case API: `GenerateTestPlanRequest(input_mode=agent_plan, agent_plan=AgentTestPlanInput(...))`.
 - Fallback: inline prose via `--prose` or file-backed prose via `--source-file`.
 - For `agent_plan`, required fields are `source_id`, `project`, `title`, and `planned_test_cases[]`.
@@ -69,6 +71,7 @@ mode: <plan-only | plan-with-evidence | draft-preview | review-drafts | promote-
 input_mode: <agent_plan | prose>
 validation_mode: <parser | compile | preflight>
 agent_plan_file: <path to AgentTestPlanInput JSON>
+output: <required for init-agent-plan>
 project: code/<project-name>
 source_id: <source id for prose fallback>
 prose: <fallback source text>
@@ -86,6 +89,8 @@ path: <required for validate-scenario>
 Default interpretation:
 
 - Prefer `input_mode=agent_plan` when the agent can decompose the operator request into cases.
+- Start with `--init-agent-plan` when a fresh structured skeleton is needed.
+- Run `--validate-agent-plan` after editing JSON and before generation.
 - Use prose only when the operator explicitly wants bootstrap from prose or no decomposition is available.
 - If `agent_plan_file` is supplied, CLI defaults to `input_mode=agent_plan`.
 - If `--prose` or `--source-file` is supplied, CLI defaults to `input_mode=prose`.
@@ -103,6 +108,37 @@ Priority:
 3. fallback `py -3.14` only when no better project-specific interpreter is available
 
 ## Modes
+
+### Mode 0 - Author Agent Plan
+
+Scaffold a starter template:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --init-agent-plan `
+  --output artifacts/agent/input/internal-user-sessions-plan.json `
+  --source-id internal-user-sessions `
+  --project code/demo `
+  --name "Internal user sessions" `
+  --goal "Cover session lifecycle behavior."
+```
+
+Validate before generation:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --validate-agent-plan `
+  --agent-plan-file artifacts/agent/input/internal-user-sessions-plan.json `
+  --output-format text
+```
+
+This is the standard structured authoring workflow:
+
+1. scaffold template
+2. fill the JSON
+3. validate it
+4. run generation
+5. optionally continue with evidence/enrichment/rendering/review
 
 ### Mode A - Plan Only
 
@@ -222,14 +258,16 @@ All validation modes are non-executing.
 ## Workflow
 
 1. Resolve the target project venv/interpreter first.
-2. If the agent can decompose the request, author an `AgentTestPlanInput` JSON and use `--agent-plan-file`.
-3. Use prose fallback only when structured decomposition is not available yet.
-4. Add evidence only with explicit `project_path` and `scope`.
-5. Read the adapter JSON summary.
-6. Inspect diagnostics before trusting the plan.
-7. Treat `normalized-plan.json` as the canonical generated plan artifact.
-8. Promote only operator-selected drafts.
-9. Revalidate manually edited drafts/scenarios before considering execution.
+2. If the agent can decompose the request, start with `--init-agent-plan`.
+3. Fill the structured JSON.
+4. Run `--validate-agent-plan`.
+5. Run generation with `--agent-plan-file`.
+6. Use prose fallback only when structured decomposition is not available yet.
+7. Add evidence only with explicit `project_path` and `scope`.
+8. Read the adapter JSON summary.
+9. Treat `normalized-plan.json` as the canonical generated plan artifact.
+10. Promote only operator-selected drafts.
+11. Revalidate manually edited drafts/scenarios before considering execution.
 
 `GenerateTestPlanUseCase` is the canonical application entrypoint. The CLI only gathers arguments
 and constructs typed request objects.
@@ -281,6 +319,7 @@ payloads, DB tables, auth flows, or exact runtime steps.
 
 - Do not run or modify `scenario_runner`.
 - Do not force broad operator requests through prose scanning when the agent can author a structured plan.
+- Do not skip validation after manually editing `AgentTestPlanInput` JSON.
 - Do not collect code facts without explicit scoped paths.
 - Do not infer `project_path`, `CodeFactsScope`, or `stack_hint` from vague prose alone.
 - Do not perform repository-wide discovery.

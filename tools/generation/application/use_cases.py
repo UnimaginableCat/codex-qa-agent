@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tools.generation.authoring import validate_agent_plan_input
 from tools.generation.domain.contracts import GenerationArtifactStore
 from tools.generation.domain.models import (
     AgentTestPlanInput,
@@ -204,7 +205,7 @@ class GenerateTestPlanUseCase:
     def _validate_request(request: GenerateTestPlanRequest) -> list[GenerationDiagnostic]:
         diagnostics: list[GenerationDiagnostic] = []
         if request.input_mode == GenerationInputMode.AGENT_PLAN:
-            diagnostics.extend(_validate_agent_plan_input(request.agent_plan, request.source_input.source_id))
+            diagnostics.extend(validate_agent_plan_input(request.agent_plan, request.source_input.source_id))
         elif request.input_mode == GenerationInputMode.PROSE:
             pass
         else:
@@ -348,77 +349,3 @@ def _empty_agent_plan(request: GenerateTestPlanRequest) -> NormalizedTestPlan:
         },
     )
 
-
-def _validate_agent_plan_input(
-    agent_plan: AgentTestPlanInput | None,
-    source_ref: str,
-) -> list[GenerationDiagnostic]:
-    diagnostics: list[GenerationDiagnostic] = []
-    if agent_plan is None:
-        return [
-            GenerationDiagnostic(
-                code="agent_plan_missing",
-                message="input_mode=agent_plan requires an AgentTestPlanInput payload.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=source_ref,
-            )
-        ]
-    if not agent_plan.source_id.strip():
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="agent_plan_missing_source_id",
-                message="Agent-authored plan input must include source_id.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=source_ref,
-            )
-        )
-    if not agent_plan.project.strip():
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="agent_plan_missing_project",
-                message="Agent-authored plan input must include project.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=agent_plan.source_id or source_ref,
-            )
-        )
-    if not agent_plan.title.strip():
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="agent_plan_missing_title",
-                message="Agent-authored plan input must include a plan title.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=agent_plan.source_id or source_ref,
-            )
-        )
-    if not agent_plan.planned_test_cases:
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="agent_plan_no_cases",
-                message="Agent-authored plan input must include at least one planned test case.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=agent_plan.source_id or source_ref,
-            )
-        )
-    for index, case_input in enumerate(agent_plan.planned_test_cases, start=1):
-        case_ref = case_input.case_id or f"{agent_plan.source_id or source_ref}#case-{index:03d}"
-        if not case_input.title.strip():
-            diagnostics.append(
-                GenerationDiagnostic(
-                    code="agent_plan_case_missing_title",
-                    message="Agent-authored planned test case must include a title.",
-                    severity=DiagnosticSeverity.ERROR,
-                    source_ref=case_ref,
-                    details={"case_index": index},
-                )
-            )
-        if not case_input.objective.strip():
-            diagnostics.append(
-                GenerationDiagnostic(
-                    code="agent_plan_case_missing_objective",
-                    message="Agent-authored planned test case must include an objective.",
-                    severity=DiagnosticSeverity.ERROR,
-                    source_ref=case_ref,
-                    details={"case_index": index},
-                )
-            )
-    return diagnostics

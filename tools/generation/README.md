@@ -60,6 +60,40 @@ prose -> prose normalizer -> NormalizedTestPlan
 Both paths use the same downstream evidence, enrichment, rendering, review, promotion, and
 validation services.
 
+Authoring helper workflow:
+
+```text
+agent reasoning
+-> scaffold AgentTestPlanInput
+-> validate AgentTestPlanInput
+-> run generation
+```
+
+CLI scaffold:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --init-agent-plan `
+  --output artifacts/agent/input/users-api-plan.json `
+  --source-id users-api `
+  --project code/demo `
+  --name "Users API" `
+  --goal "Cover user API behavior."
+```
+
+CLI validate-only:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --validate-agent-plan `
+  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --output-format text
+```
+
+The scaffolded template is deterministic and section-complete for Phase 1 authoring. Validation is
+deterministic and checks required top-level fields, case presence, required case fields, malformed
+JSON, and unsupported payload shape before full generation runs.
+
 Code facts are a separate opt-in evidence layer. Canonical evidence contracts live in
 `tools.generation.evidence.models`; the extractor interface is `CodeFactsExtractor`, and the
 stack-aware orchestration boundary is `CodeFactsExtractionService`. Extractor selection is

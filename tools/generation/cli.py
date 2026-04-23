@@ -14,6 +14,7 @@ if __package__ in {None, ""}:
 
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
+from tools.generation.authoring import AgentPlanAuthoringService
 from tools.generation.application import GenerateTestPlanOptions, GenerateTestPlanRequest, GenerationInputMode
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.models import (
@@ -41,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Generate a NormalizedTestPlan, optionally enriched by explicit scoped code facts.",
     )
     workflow = parser.add_mutually_exclusive_group()
+    workflow.add_argument("--init-agent-plan", action="store_true", help="Write an AgentTestPlanInput template JSON file.")
+    workflow.add_argument("--validate-agent-plan", action="store_true", help="Validate an AgentTestPlanInput file without generation.")
     workflow.add_argument("--review-drafts", action="store_true", help="Review generated drafts for a run id.")
     workflow.add_argument("--promote-draft", action="store_true", help="Promote one selected draft into scenarios/.")
     workflow.add_argument("--list-patch-templates", action="store_true", help="List deterministic draft edit templates.")
@@ -59,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-id", help="Stable source id for this generation run.")
     parser.add_argument("--project", help="Project identifier stored in generation contracts.")
     parser.add_argument("--name", default="", help="Optional human-readable source name.")
+    parser.add_argument("--goal", default="", help="Optional goal used when scaffolding an agent plan template.")
+    parser.add_argument("--output", help="Output path for --init-agent-plan.")
     parser.add_argument("--workspace-root", default=".", help="Workspace root for artifact persistence.")
     parser.add_argument(
         "--output-format",
@@ -194,6 +199,49 @@ def run_generation(args: argparse.Namespace) -> dict[str, Any]:
     return summarize_result(result)
 
 
+def run_init_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _init_agent_plan_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    output_path = Path(args.output)
+    authoring_service = AgentPlanAuthoringService()
+    template = authoring_service.write_template(
+        output_path,
+        source_id=args.source_id or "",
+        project=args.project or "",
+        title=args.name or "",
+        goal=args.goal or "",
+    )
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "message": "Agent-authored plan template scaffolded.",
+            "output_path": output_path,
+            "template_version": template.metadata.get("template_version", ""),
+            "input_mode": GenerationInputMode.AGENT_PLAN.value,
+            "template": template.to_dict(),
+        }
+    )
+
+
+def run_validate_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _validate_agent_plan_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    result = AgentPlanAuthoringService().validate_file(Path(args.agent_plan_file))
+    return to_json_safe(
+        {
+            "status": result.status.value,
+            "message": result.message,
+            "file_path": result.file_path,
+            "input_mode": GenerationInputMode.AGENT_PLAN.value,
+            "case_count": result.case_count,
+            "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
+            "agent_plan": None if result.agent_plan is None else result.agent_plan.to_dict(),
+        }
+    )
+
+
 def summarize_result(result: Any) -> dict[str, Any]:
     evidence_bundle = result.evidence_bundle
     enrichment_result = result.enrichment_result
@@ -248,7 +296,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.review_drafts:
+        if args.init_agent_plan:
+            payload = run_init_agent_plan(args)
+        elif args.validate_agent_plan:
+            payload = run_validate_agent_plan(args)
+        elif args.review_drafts:
             payload = run_review(args)
         elif args.promote_draft:
             payload = run_promotion(args)
@@ -278,7 +330,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     workflow = (
-        "review"
+        "authoring"
+        if args.init_agent_plan or args.validate_agent_plan
+        else "review"
         if args.review_drafts
         else "promotion"
         if args.promote_draft
@@ -457,44 +511,12 @@ def _resolve_input_mode(args: argparse.Namespace) -> GenerationInputMode:
 
 
 def _load_agent_plan_file(path: Path) -> AgentTestPlanInput:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    load_result = AgentPlanAuthoringService().load(path)
+    if load_result.agent_plan is None:
         raise GenerationCliInputError(
-            [
-                GenerationDiagnostic(
-                    code="adapter_agent_plan_file_invalid_json",
-                    message="Agent-authored plan file must contain valid JSON.",
-                    severity=DiagnosticSeverity.ERROR,
-                    source_ref=str(path),
-                    details={"error": str(exc)},
-                )
-            ]
-        ) from exc
-    except OSError as exc:
-        raise GenerationCliInputError(
-            [
-                GenerationDiagnostic(
-                    code="adapter_agent_plan_file_unreadable",
-                    message="Agent-authored plan file could not be read.",
-                    severity=DiagnosticSeverity.ERROR,
-                    source_ref=str(path),
-                    details={"error": str(exc)},
-                )
-            ]
-        ) from exc
-    if not isinstance(payload, dict):
-        raise GenerationCliInputError(
-            [
-                GenerationDiagnostic(
-                    code="adapter_agent_plan_file_not_object",
-                    message="Agent-authored plan file must contain a JSON object.",
-                    severity=DiagnosticSeverity.ERROR,
-                    source_ref=str(path),
-                )
-            ]
+            load_result.diagnostics
         )
-    return AgentTestPlanInput.from_dict(payload)
+    return load_result.agent_plan
 
 
 def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
@@ -612,6 +634,40 @@ def _review_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiag
     ]
 
 
+def _init_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    if not args.output:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_init_agent_plan_requires_output",
+                message="--init-agent-plan requires --output.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        )
+    elif Path(args.output).exists():
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_init_agent_plan_output_exists",
+                message="Agent plan scaffold output already exists. Choose a new file path.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.output,
+            )
+        )
+    return diagnostics
+
+
+def _validate_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if args.agent_plan_file:
+        return []
+    return [
+        GenerationDiagnostic(
+            code="adapter_validate_agent_plan_requires_file",
+            message="--validate-agent-plan requires --agent-plan-file.",
+            severity=DiagnosticSeverity.ERROR,
+        )
+    ]
+
+
 def _promotion_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     if not args.run_id:
@@ -670,6 +726,9 @@ def _error_payload(diagnostics: list[GenerationDiagnostic]) -> dict[str, Any]:
 
 
 def _print_payload(payload: dict[str, Any], *, output_format: str = "json", workflow: str = "generation") -> None:
+    if output_format == "text" and workflow == "authoring":
+        print(_render_authoring_text(payload))
+        return
     if output_format == "text" and workflow == "review":
         print(_render_review_text(payload))
         return
@@ -680,6 +739,40 @@ def _print_payload(payload: dict[str, Any], *, output_format: str = "json", work
         print(_render_revalidation_text(payload))
         return
     print(json.dumps(payload, ensure_ascii=False))
+
+
+def _render_authoring_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Status: {payload['status']}",
+        f"Message: {payload.get('message', '')}",
+    ]
+    if payload.get("output_path"):
+        lines.extend(
+            [
+                f"Output: {payload['output_path']}",
+                f"Template version: {payload.get('template_version', '')}",
+                f"Input mode: {payload.get('input_mode', '')}",
+            ]
+        )
+    if payload.get("file_path"):
+        lines.extend(
+            [
+                f"File: {payload['file_path']}",
+                f"Input mode: {payload.get('input_mode', '')}",
+                f"Case count: {payload.get('case_count', 0)}",
+            ]
+        )
+    diagnostics = payload.get("diagnostics") or []
+    if diagnostics:
+        lines.append("Diagnostics:")
+        for diagnostic in diagnostics:
+            lines.append(f"  - {diagnostic.get('code', '')}: {diagnostic.get('message', '')}")
+    template = payload.get("template") or {}
+    if template:
+        lines.append("Template preview:")
+        for preview_line in json.dumps(template, ensure_ascii=False, indent=2).splitlines()[:12]:
+            lines.append(f"  {preview_line}")
+    return "\n".join(lines).rstrip()
 
 
 def _render_review_text(payload: dict[str, Any]) -> str:
