@@ -17,7 +17,8 @@ short sentence without restating decomposition rules.
 3. Define coverage buckets.
 4. Expand planned test cases.
 5. Add assumptions and open questions.
-6. Optionally define evidence scope.
+6. Align API/DB cases with downstream scenario syntax.
+7. Optionally define evidence scope.
 
 ## Compact-First Rule
 
@@ -27,6 +28,7 @@ For controller/API requests, the initial plan should be compact by default.
 - Prefer operation-first coverage over branch-by-branch code inventory.
 - If several internal branches collapse to the same observable API behavior, merge them into one case.
 - Do not treat every internal outcome as a separate test case unless it is meaningfully distinct at the API contract level.
+- For `kind=api` and `kind=db`, keep the authored case compatible with downstream scenario expectations instead of leaving assertions as narrative prose.
 
 ## Default Trigger
 
@@ -96,6 +98,9 @@ For each operation, decide which buckets matter:
 
 Do not expand every bucket blindly. Use only buckets that are justified by the request or obvious operation semantics.
 
+When the request is API-heavy, prefer buckets that naturally map to distinct endpoint contracts.
+This keeps later coverage assessment against extracted endpoint facts useful instead of noisy.
+
 ## Step 4 - Expand Planned Test Cases
 
 Turn operations plus buckets into cases.
@@ -105,7 +110,8 @@ Good case pattern:
 - title names the operation + bucket
 - objective says what behavior is being confirmed
 - actions stay at plan level
-- expected outcomes are explicit but conservative
+- `observable_outcomes[]` keep the human-readable behavior
+- `expected_outcomes[]` stay executable and scenario-compatible for API/DB cases
 
 Examples:
 
@@ -121,6 +127,7 @@ While expanding cases:
 - keep the case set compact
 - prefer observable differences over internal cause differences
 - avoid field-by-field DTO assertions unless those fields are central to the public contract
+- avoid vague API expectations like "entity is returned successfully" when the downstream assertion DSL is already known
 
 ## Step 5 - Add Assumptions And Open Questions
 
@@ -136,7 +143,24 @@ Examples:
 - open question: "Which auth fixture should be used?"
 - unresolved item: "Exact endpoint path should be confirmed from code facts."
 
-## Step 6 - Optionally Define Evidence Scope
+## Step 6 - Align API/DB Cases With Downstream Scenario Syntax
+
+For `kind=api` and `kind=db`, author the case so it can survive draft rendering without semantic
+drift.
+
+Prefer adding:
+
+- `observable_outcomes[]` for human-readable behavior
+- DSL-compatible `expected_outcomes[]`
+- `capture[]` when later checks need captured values
+- `request_body` / `requires_request_body` when the request shape matters
+- `auth_strategy[]` / `requires_auth_strategy` when auth is not implicit
+- `db_verification` / `requires_db_verification` when persisted state is part of the contract
+
+If the agent cannot justify a concrete assertion yet, keep it as an explicit unknown instead of
+writing narrative `expected_outcomes[]` that downstream tooling cannot preserve.
+
+## Step 7 - Optionally Define Evidence Scope
 
 If the next phase should enrich from code facts, define narrow scope such as:
 
@@ -215,8 +239,12 @@ Reasonable decomposition:
       "actions": [
         "Call the authenticate session operation with valid credentials."
       ],
-      "expected_outcomes": [
+      "observable_outcomes": [
         "A new session is created and returned."
+      ],
+      "expected_outcomes": [
+        "HTTP 200 or HTTP 201",
+        "response JSON exists"
       ],
       "priority": "high",
       "tags": [
@@ -236,8 +264,12 @@ Reasonable decomposition:
       "actions": [
         "Call the list sessions operation."
       ],
-      "expected_outcomes": [
+      "observable_outcomes": [
         "Existing sessions are returned as a collection."
+      ],
+      "expected_outcomes": [
+        "HTTP 200",
+        "response JSON is an array"
       ],
       "priority": "normal",
       "tags": [
@@ -258,8 +290,12 @@ Reasonable decomposition:
       "actions": [
         "Call the get session operation with a valid session id."
       ],
-      "expected_outcomes": [
+      "observable_outcomes": [
         "The requested session is returned."
+      ],
+      "expected_outcomes": [
+        "HTTP 200",
+        "response JSON exists"
       ],
       "priority": "normal",
       "tags": [
@@ -278,8 +314,11 @@ Reasonable decomposition:
       "actions": [
         "Call the get session operation with a non-existent session id."
       ],
-      "expected_outcomes": [
+      "observable_outcomes": [
         "The controller returns the missing-entity behavior defined by the API."
+      ],
+      "expected_outcomes": [
+        "HTTP 404"
       ],
       "priority": "normal",
       "tags": [
@@ -301,8 +340,11 @@ Reasonable decomposition:
       "actions": [
         "Call the revoke session operation for one session."
       ],
-      "expected_outcomes": [
+      "observable_outcomes": [
         "The targeted session is revoked."
+      ],
+      "expected_outcomes": [
+        "HTTP 200 or HTTP 204"
       ],
       "priority": "normal",
       "tags": [
@@ -323,8 +365,11 @@ Reasonable decomposition:
       "actions": [
         "Call the revoke-all operation."
       ],
-      "expected_outcomes": [
+      "observable_outcomes": [
         "All targeted active sessions are revoked."
+      ],
+      "expected_outcomes": [
+        "HTTP 200 or HTTP 204"
       ],
       "priority": "normal",
       "tags": [
@@ -346,6 +391,7 @@ Reasonable decomposition:
 - Do not guess DTO fields, DB behavior, or auth details when they are not known.
 - Do not turn planning actions into runner-ready steps at this phase.
 - Do not add evidence scope unless the next phase will actually use it.
+- Do not leave uncovered endpoint facts unaddressed after collecting code facts; use missing-case suggestions to repair the decomposition before polishing drafts.
 
 ## Quality Gate
 
@@ -355,6 +401,7 @@ Before generation, quickly check the plan against this gate:
 - `observable`
 - `non-duplicative`
 - `render-friendly`
+- `scenario-aligned`
 - `explicit-unknowns`
 
 If the plan fails the gate, reduce or reshape it before generation.
