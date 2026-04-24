@@ -210,13 +210,43 @@ def _infer_case_gaps(messages: list[str], *, source: str) -> list[PlannedCaseGap
             category = GapCategory.ENDPOINT_DETAIL
         elif any(marker in normalized for marker in ("api, ui action, data setup", "concrete api", "concrete executable detail")):
             category = GapCategory.EXECUTABLE_DETAIL
+        elif any(
+            marker in normalized
+            for marker in (
+                "runner variable",
+                "variable declaration",
+                "variable declarations",
+                "generated variable",
+                "generated variables",
+                "machine-readable",
+                "run_suffix",
+                "email_suffix",
+                "missing_user_id",
+            )
+        ):
+            category = GapCategory.EXECUTABLE_DETAIL
         elif any(marker in normalized for marker in ("auth", "authorization", "credentials fixture")):
             category = GapCategory.AUTH_STRATEGY
         elif any(marker in normalized for marker in ("environment", "env", "fixture")):
             category = GapCategory.ENVIRONMENT
         elif any(marker in normalized for marker in ("assert", "expected result")):
             category = GapCategory.ASSERTION_DETAIL
-        elif any(marker in normalized for marker in ("data setup", "fixture", "seed")):
+        elif any(
+            marker in normalized
+            for marker in (
+                "data setup",
+                "fixture",
+                "seed",
+                "seeded",
+                "must be supplied",
+                "must be generated",
+                "must be selected",
+                "previously created",
+                "pre-existing",
+                "guaranteed absent",
+                "setup step",
+            )
+        ):
             category = GapCategory.DATA_SETUP
         else:
             category = GapCategory.UNKNOWN

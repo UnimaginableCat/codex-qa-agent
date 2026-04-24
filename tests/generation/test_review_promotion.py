@@ -72,6 +72,17 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertEqual(review_set.items[0].readiness_category.value, "parser_invalid")
         self.assertEqual(review_set.items[0].promotion_advisory.value, "invalid_draft")
 
+    def test_review_service_defers_case_with_seeded_id_gap(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_seeded_id_gap_run(root)
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        self.assertEqual(review_set.items, [])
+        self.assertEqual(len(review_set.deferred_items), 1)
+        self.assertIn("data_setup_unresolved", review_set.deferred_items[0].gap_summary.gap_codes)
+        self.assertEqual(review_set.deferred_items[0].promotion_advisory.value, "not_recommended_for_promotion")
+
     def test_promotion_promotes_one_draft(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -235,6 +246,46 @@ def _generate_workflow_draft_run(root: Path) -> dict[str, object]:
                                 "expected_outcomes": ["HTTP 200"],
                             },
                         ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = cli.main(
+            [
+                "--agent-plan-file",
+                str(agent_plan_path),
+                "--workspace-root",
+                str(root),
+                "--render-drafts",
+            ]
+        )
+    payload = json.loads(stdout.getvalue())
+    if exit_code != 0:
+        raise AssertionError(payload)
+    return payload
+
+
+def _generate_seeded_id_gap_run(root: Path) -> dict[str, object]:
+    agent_plan_path = root / "agent-plan.json"
+    agent_plan_path.write_text(
+        json.dumps(
+            {
+                "source_id": "users",
+                "project": "code/demo",
+                "title": "Users API",
+                "planned_test_cases": [
+                    {
+                        "case_id": "tc-001",
+                        "title": "Get existing user",
+                        "objective": "Verify GET /users/{user_id} returns an existing user.",
+                        "route": {"http_method": "GET", "endpoint_path": "/users/{{user_id}}"},
+                        "expected_outcomes": ["HTTP 200", "response JSON exists"],
+                        "unresolved_items": ["A seeded or previously created user_id must be supplied."],
                     }
                 ],
             },

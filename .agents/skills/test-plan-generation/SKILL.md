@@ -78,12 +78,26 @@ for later phases.
 - When an expected value depends on normalization or transformation, author a derived/template/captured variable for the post-transform value and assert against that. Do not reuse raw input placeholders in normalized expectations.
 - Split independent negative or validation variants into separate executable cases or explicit `workflow_steps[]`. Do not compress multiple invalid requests into one prose-only case.
 - Put high-level behavior into `observable_outcomes[]` and use `expected_outcomes[]` only for executable assertions.
+- Do not author standalone cases that depend on seeded, pre-existing, or operator-supplied entity ids unless that dependency is already modeled as machine-readable setup. If a case needs an existing entity, prefer `workflow_steps[]` that create/setup it first.
+- Do not treat unresolved variable declarations such as `run_suffix`, `email_suffix`, generated UUIDs, or other machine-readable scenario variables as acceptable runnable-case leftovers. Either author the variable flow concretely or keep the case explicitly unresolved.
+- Do not accept weak proof cases whose executable assertions stop at transport-level checks such as `HTTP 200` or `response JSON is an array` when the objective claims business filtering, matching, mutation, or validation behavior. Author at least one deterministic assertion that proves the stated behavior.
+- For negative mutating cases that claim "does not create", "does not update", or "status remains unchanged", include deterministic persisted-state verification whenever the claimed non-effect is observable through DB checks.
+- Treat cases with unresolved data setup, assertion detail, auth strategy, environment selection, or executable detail as non-runnable authoring defects to fix in `agent-plan.json`, not as acceptable near-runnable coverage.
 
 ## Quality Gates
 
 - `validate-agent-plan` is the minimum gate, not the only gate.
 - If later phases are requested, treat render/review/compile warnings as authoring defects to fix back in `agent-plan.json`, not as acceptable follow-up manual cleanup.
 - Do not continue expanding a full-controller plan after the first seed cases if those cases still show DSL, workflow-shape, capture, or DB-verification problems.
+- Do not treat drafts with unresolved `data_setup`, `assertion_detail`, `environment`, `auth_strategy`, or `executable_detail` gaps as close to runnable or promotable. Return to `agent-plan.json` and fix the source plan instead.
+- If a rendered standalone case still depends on seeded IDs, missing machine-readable variables, or undeclared setup fixtures, rewrite it as a self-contained workflow case or keep it deferred on purpose.
+
+# Short Examples
+
+- Bad: `GET /users/{{user_id}}` with unresolved note "seeded user_id must be supplied."
+- Good: create the user in `workflow_steps[]`, capture `user_id`, then call `GET /users/{{user_id}}`.
+- Bad: objective claims filter behavior, but assertions only check `HTTP 200` and `response JSON is an array`.
+- Good: set up a matching entity first, then assert the collection proves the expected filter result deterministically.
 
 # Rendering Rule
 
@@ -93,6 +107,7 @@ Draft rendering is authored-route-first:
 - workflow cases should define complete `workflow_steps[]`
 - rendering should not invent missing route, auth, payload, or DB details
 - if render/review shows missing assertions, captures, or DB checks for a case intended for execution, return to `agent-plan.json` and fix the source plan before promotion
+- drafts with execution-blocking typed gaps should remain deferred rather than being treated as acceptable preview candidates for promotion
 
 # Guardrails
 

@@ -430,13 +430,14 @@ class ScenarioRevalidationService:
             route_binding=route_binding,
             gap_summary=gap_summary,
         )
-        readiness_category = _draft_readiness_category(parse_status, route_binding)
+        readiness_category = _draft_readiness_category(parse_status, route_binding, gap_summary)
         promotion_advisory = _promotion_advisory(
             parse_status=parse_status,
             readiness_category=readiness_category,
             has_unsupported_items=False,
             has_deferred_items=False,
             checklist=checklist,
+            gap_summary=gap_summary,
         )
         edit_targets = _build_edit_targets(
             draft,
@@ -894,23 +895,19 @@ def _build_review_item(
         parse_messages=diagnostics_summary,
         render_codes=[diagnostic.code for diagnostic in render_diagnostics],
     )
-    readiness_category = _draft_readiness_category(parse_status, route_binding)
+    checklist = _build_draft_checklist(
+        draft,
+        parse_status=parse_status,
+        route_binding=route_binding,
+        gap_summary=gap_summary,
+    )
+    readiness_category = _draft_readiness_category(parse_status, route_binding, gap_summary)
     promotion_advisory = _promotion_advisory(
         parse_status=parse_status,
         readiness_category=readiness_category,
         has_unsupported_items=bool(unsupported_checks),
         has_deferred_items=deferred_item is not None,
-        checklist=_build_draft_checklist(
-            draft,
-            parse_status=parse_status,
-            route_binding=route_binding,
-            gap_summary=gap_summary,
-        ),
-    )
-    checklist = _build_draft_checklist(
-        draft,
-        parse_status=parse_status,
-        route_binding=route_binding,
+        checklist=checklist,
         gap_summary=gap_summary,
     )
     edit_targets = _build_edit_targets(
@@ -1143,9 +1140,12 @@ def _deferred_gap_summary(unsupported_checks: list[object]) -> DraftGapSummary:
 def _draft_readiness_category(
     parse_status: ScenarioDraftParseStatus,
     route_binding: dict[str, object],
+    gap_summary: DraftGapSummary,
 ) -> DraftReadinessCategory:
     if parse_status == ScenarioDraftParseStatus.INVALID:
         return DraftReadinessCategory.PARSER_INVALID
+    if _has_execution_blocking_gaps(gap_summary):
+        return DraftReadinessCategory.PARSER_VALID_PARTIAL
     readiness = str(route_binding.get("readiness") or "")
     if readiness in {"evidence_supported", "route_resolved", "planned_route_defined", "workflow_authored", "manual_revalidated"}:
         return DraftReadinessCategory.PARSER_VALID_STRONGLY_SUPPORTED
@@ -1159,10 +1159,13 @@ def _promotion_advisory(
     has_unsupported_items: bool,
     has_deferred_items: bool,
     checklist: DraftChecklistResult,
+    gap_summary: DraftGapSummary,
 ) -> DraftPromotionAdvisory:
     if parse_status == ScenarioDraftParseStatus.INVALID:
         return DraftPromotionAdvisory.INVALID_DRAFT
     if has_unsupported_items or has_deferred_items:
+        return DraftPromotionAdvisory.NOT_RECOMMENDED_FOR_PROMOTION
+    if _has_execution_blocking_gaps(gap_summary):
         return DraftPromotionAdvisory.NOT_RECOMMENDED_FOR_PROMOTION
     core_missing = {
         check.requirement.requirement_id
@@ -1179,6 +1182,17 @@ def _promotion_advisory(
     if readiness_category == DraftReadinessCategory.PARSER_VALID_STRONGLY_SUPPORTED:
         return DraftPromotionAdvisory.PROMOTABLE_WITH_KNOWN_GAPS
     return DraftPromotionAdvisory.SAFE_PREVIEW_ONLY
+
+
+def _has_execution_blocking_gaps(gap_summary: DraftGapSummary) -> bool:
+    blocking_codes = {
+        "auth_strategy_unresolved",
+        "environment_unresolved",
+        "data_setup_unresolved",
+        "assertion_detail_unresolved",
+        "executable_detail_unresolved",
+    }
+    return any(code in blocking_codes for code in gap_summary.gap_codes)
 
 
 def _route_status(route_binding: dict[str, object]) -> str:

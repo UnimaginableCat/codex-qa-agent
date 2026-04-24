@@ -9,8 +9,10 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.generation.domain.models import (
+    GapCategory,
     GenerationRunContext,
     NormalizedTestPlan,
+    PlannedCaseGap,
     PlannedCaseSupport,
     PlannedRouteIntent,
     PlannedTestCase,
@@ -47,6 +49,31 @@ class ScenarioRenderingTests(unittest.TestCase):
 
         self.assertEqual(render_result.draft_set.drafts, [])
         self.assertEqual(render_result.unsupported_checks[0].reason_code, "missing_planned_route")
+
+    def test_renderer_defers_case_with_execution_blocking_gap(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-001",
+                    title="Get existing user",
+                    objective="Verify get user by seeded id.",
+                    expected_results=["HTTP 200"],
+                    planned_route=PlannedRouteIntent(http_method="GET", endpoint_path="/users/{{user_id}}"),
+                    gaps=[
+                        PlannedCaseGap(
+                            category=GapCategory.DATA_SETUP,
+                            message="A seeded or previously created user_id must be supplied.",
+                        )
+                    ],
+                )
+            ]
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        self.assertEqual(render_result.draft_set.drafts, [])
+        self.assertEqual(len(render_result.draft_set.deferred_items), 1)
+        self.assertEqual(render_result.unsupported_checks[0].reason_code, "data_setup_unresolved")
 
     def test_renderer_can_still_use_route_hints_metadata(self) -> None:
         plan = _plan(

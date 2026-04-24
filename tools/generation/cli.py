@@ -321,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
 def _scenario_unresolved_intents(scenario_render_result: Any) -> list[dict[str, Any]]:
     if scenario_render_result is None:
         return []
-    summaries: list[dict[str, Any]] = []
+    summaries_by_case_id: dict[str, dict[str, Any]] = {}
     for draft in scenario_render_result.draft_set.drafts:
         raw_gaps = draft.metadata.get("case_gaps", [])
         if not isinstance(raw_gaps, list):
@@ -333,30 +333,74 @@ def _scenario_unresolved_intents(scenario_render_result: Any) -> list[dict[str, 
         ]
         if not gaps:
             continue
-        categories: list[str] = []
-        codes: list[str] = []
-        messages: list[str] = []
-        notes: list[str] = []
-        for gap in gaps:
-            code, message = project_case_gap(gap)
-            categories.append(gap.category.value)
-            if code:
-                codes.append(code)
-            if message:
-                messages.append(message)
-            notes.append(format_case_gap_note(gap))
-        summaries.append(
+        summary = summaries_by_case_id.setdefault(
+            draft.case_id,
             {
                 "draft_id": draft.draft_id,
                 "case_id": draft.case_id,
-                "gap_count": len(gaps),
-                "gap_categories": _dedupe_preserve_order(categories),
-                "gap_codes": _dedupe_preserve_order(codes),
-                "gap_messages": _dedupe_preserve_order(messages),
-                "notes": notes,
+                "gap_count": 0,
+                "gap_categories": [],
+                "gap_codes": [],
+                "gap_messages": [],
+                "notes": [],
+            },
+        )
+        for gap in gaps:
+            code, message = project_case_gap(gap)
+            summary["gap_categories"].append(gap.category.value)
+            if code:
+                summary["gap_codes"].append(code)
+            if message:
+                summary["gap_messages"].append(message)
+            summary["notes"].append(format_case_gap_note(gap))
+        summary["gap_count"] += len(gaps)
+    for deferred_item in scenario_render_result.draft_set.deferred_items:
+        summary = summaries_by_case_id.setdefault(
+            deferred_item.case_id,
+            {
+                "draft_id": "",
+                "case_id": deferred_item.case_id,
+                "gap_count": 0,
+                "gap_categories": [],
+                "gap_codes": [],
+                "gap_messages": [],
+                "notes": [],
+            },
+        )
+        for check in deferred_item.unsupported_checks:
+            category = _gap_category_from_reason_code(check.reason_code)
+            if category is None:
+                continue
+            summary["gap_count"] += 1
+            summary["gap_categories"].append(category)
+            summary["gap_codes"].append(check.reason_code)
+            if check.message:
+                summary["gap_messages"].append(check.message)
+            summary["notes"].append(f"Typed gap [{category}]: {check.message}")
+    summaries: list[dict[str, Any]] = []
+    for summary in summaries_by_case_id.values():
+        summaries.append(
+            {
+                **summary,
+                "gap_categories": _dedupe_preserve_order(summary["gap_categories"]),
+                "gap_codes": _dedupe_preserve_order(summary["gap_codes"]),
+                "gap_messages": _dedupe_preserve_order(summary["gap_messages"]),
+                "notes": _dedupe_preserve_order(summary["notes"]),
             }
         )
     return summaries
+
+
+def _gap_category_from_reason_code(reason_code: str) -> str | None:
+    mapping = {
+        "endpoint_detail_unresolved": "endpoint_detail",
+        "executable_detail_unresolved": "executable_detail",
+        "auth_strategy_unresolved": "auth_strategy",
+        "environment_unresolved": "environment",
+        "assertion_detail_unresolved": "assertion_detail",
+        "data_setup_unresolved": "data_setup",
+    }
+    return mapping.get(str(reason_code))
 
 
 def run_review(args: argparse.Namespace) -> dict[str, Any]:

@@ -30,6 +30,13 @@ from .models import (
 )
 
 MUTATING_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+EXECUTION_BLOCKING_GAP_CODES = {
+    "auth_strategy_unresolved",
+    "environment_unresolved",
+    "data_setup_unresolved",
+    "assertion_detail_unresolved",
+    "executable_detail_unresolved",
+}
 
 
 @dataclass(slots=True)
@@ -84,6 +91,28 @@ class DraftScenarioRenderer:
         diagnostics: list[GenerationDiagnostic] = []
 
         for test_case in plan.test_cases:
+            blocking_gap_checks = _blocking_gap_checks(test_case)
+            if blocking_gap_checks:
+                unsupported_checks.extend(blocking_gap_checks)
+                deferred_items.append(
+                    DeferredScenarioItem(
+                        case_id=test_case.case_id,
+                        title=test_case.title,
+                        reason_code="execution_blocking_case_gaps",
+                        message="Planned case was deferred because execution-blocking authored gaps remain.",
+                        unsupported_checks=blocking_gap_checks,
+                    )
+                )
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="scenario_draft_deferred_due_to_case_gaps",
+                        message="Planned case was deferred because execution-blocking authored gaps remain.",
+                        severity=DiagnosticSeverity.WARNING,
+                        source_ref=test_case.case_id,
+                        details={"gap_codes": [check.reason_code for check in blocking_gap_checks]},
+                    )
+                )
+                continue
             if test_case.workflow_steps:
                 workflow_support = _workflow_route_binding(test_case)
                 if workflow_support is None or not _workflow_steps_renderable(test_case):
@@ -895,6 +924,25 @@ def _typed_gap_summary_lines(test_case: PlannedTestCase) -> list[str]:
         lines.append(f"- Typed unresolved intent categories: {', '.join(_dedupe_preserve_order(categories))}")
     lines.extend(f"- {format_case_gap_note(gap)}" for gap in test_case.gaps)
     return lines
+
+
+def _blocking_gap_checks(test_case: PlannedTestCase) -> list[UnsupportedCheck]:
+    checks: list[UnsupportedCheck] = []
+    seen_codes: set[str] = set()
+    for gap in test_case.gaps:
+        code, message = project_case_gap(gap)
+        if not code or code not in EXECUTION_BLOCKING_GAP_CODES or code in seen_codes:
+            continue
+        seen_codes.add(code)
+        checks.append(
+            UnsupportedCheck(
+                case_id=test_case.case_id,
+                reason_code=code,
+                message=message or "Execution-blocking authored gap remains unresolved.",
+                details={"gap_category": gap.category.value, "gap_source": gap.source},
+            )
+        )
+    return checks
 
 
 def _slugify(value: str) -> str:
