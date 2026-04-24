@@ -17,6 +17,27 @@ from urllib.parse import urlsplit
 
 import requests
 
+
+def _ensure_requests_exception_aliases() -> None:
+    exceptions_module = getattr(requests, "exceptions", None)
+    if exceptions_module is None:
+        return
+    for exception_name in (
+        "RequestException",
+        "ConnectionError",
+        "SSLError",
+        "ReadTimeout",
+        "ConnectTimeout",
+    ):
+        if hasattr(requests, exception_name):
+            continue
+        exception_type = getattr(exceptions_module, exception_name, None)
+        if exception_type is not None:
+            setattr(requests, exception_name, exception_type)
+
+
+_ensure_requests_exception_aliases()
+
 from tools.common import ExecutionResult, JsonFileLoadError, StepStatus, ValidationError
 from tools.common.errors import EnvFileLoadError
 from tools.common.runtime_signals import (
