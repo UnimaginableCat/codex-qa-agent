@@ -7,6 +7,8 @@ description: Use this skill to resolve which environment file, credentials, toke
 
 This skill standardizes how environment configuration is resolved before API or DB execution.
 
+Apply the shared workspace instructions from `qa-entrypoint` first. This skill adds environment-specific resolution rules.
+
 Use this skill when:
 - a scenario references an environment file
 - a project has multiple env files
@@ -82,11 +84,8 @@ Use ready-to-execute when:
 
 # Guardrails
 
-- Never expose tokens, passwords, or raw secrets.
-- Never pretend missing config is a product failure.
 - Never silently ignore missing required variables.
 - If multiple env files are plausible, say which one was selected and why.
-- Do not edit runner-generated artifacts while resolving environment issues.
 
 # Completion criteria
 

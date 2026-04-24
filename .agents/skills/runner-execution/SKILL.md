@@ -7,6 +7,8 @@ description: Execute runnable QA scenario markdown files through the local scena
 
 Use this skill as the default path for runnable scenario-based QA in this workspace.
 
+Apply the shared workspace instructions from `qa-entrypoint` first. This skill adds runner-specific execution and pause/resume rules.
+
 Prefer `scenario_runner` over manual API/DB replay when a valid scenario file exists. The runner owns execution semantics; direct API/DB investigation is only a fallback for runner startup failures, contradictory artifacts, or explicit debugging requests.
 
 # Architecture Boundaries
@@ -38,10 +40,6 @@ Use the runner as the first source of execution truth for runnable scenarios.
 Guided/manual mode does not mean asking the operator before every scenario step. Ask the operator only when runner output contains a real pause/decision artifact, such as `operator_state.resumable=true`, `pause_state_path`, and an active decision point with available actions.
 
 If the run finishes terminally without a pause-state or active decision point, report the terminal result. Do not simulate an interactive session or ask for an action that the runner did not expose.
-
-Do not perform broad code scanning or code-analysis before the first runner execution by default. Code-analysis is allowed before the first run only when the user explicitly asks for it, the scenario path/content is ambiguous enough to prevent runner startup, or a narrowly scoped check is required to identify the target project/env file.
-
-Do not edit generated runner artifacts such as `report.md`, `summary.json`, `journal.jsonl`, `pause-state.json`, manifests, or step raw results unless the user explicitly asks to repair or rewrite artifacts. Treat them as evidence produced by the runner.
 
 # Default Guided Request
 
@@ -101,7 +99,7 @@ Keep these separate:
 - Termination semantics: completed, failed, blocked, errored, skipped, aborted, partially completed.
 - Operator resolution: selected action and resume strategy.
 
-Do not mark a scenario `PASS` if critical steps are `BLOCKED`, `FAIL`, or `ERROR`. Treat auth/config/setup issues as `BLOCKED`, assertion mismatches as `FAIL`, and tool/runtime crashes as `ERROR`.
+Use the shared status model from `qa-entrypoint`. For runner outcomes, continue to keep operator state and termination semantics separate from report status.
 
 # When More Detail Is Needed
 
@@ -113,10 +111,5 @@ Read these references only when needed:
 
 # Guardrails
 
-- Never expose secrets or raw credentials.
 - Never write source code into `artifacts/`.
-- Never mutate runner-generated artifacts unless explicitly requested.
-- Never execute destructive or mutating SQL for verification.
 - Do not bypass the runner unless it cannot start or the user explicitly asks for manual debugging.
-- Do not run broad pre-run code analysis for runnable scenarios.
-- Do not treat environment/network restrictions as product failures.

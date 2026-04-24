@@ -7,6 +7,8 @@ description: Use this skill to execute scenario API steps against a target envir
 
 This skill handles HTTP-based scenario steps.
 
+Apply the shared workspace instructions from `qa-entrypoint` first. This skill adds API-step execution rules.
+
 Use this skill when:
 - a scenario step is of type API
 - authentication may be needed
@@ -99,6 +101,8 @@ If a required capture cannot be extracted because the response shape is differen
 
 # Status rules
 
+Use the shared status model from `qa-entrypoint`. The mapping below clarifies how that model applies to API execution.
+
 - PASS — request executed and matched expectations
 - FAIL — request executed but expectations were not met
 - BLOCKED — missing base URL, missing credentials, missing auth config, unresolved required variables, service unavailable, or auth issue
@@ -134,10 +138,7 @@ Save or reference:
 
 # Guardrails
 
-- Never print secrets or full credentials.
-- Never expose Authorization header values, passwords, or tokens in the report.
 - Do not silently drop headers or body fields.
-- Do not mark missing env/auth as FAIL.
 - Do not fake successful results if the service is unreachable.
 - Do not invent auth flows, endpoints, or response fields without saying so explicitly.
 - If auth mode came from env/config, say so briefly in the report.

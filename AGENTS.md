@@ -154,7 +154,9 @@ The final report must include:
 
 ## Skill usage policy
 
-Prefer using the dedicated skills:
+Prefer a single entry point plus dedicated skills:
+
+- `qa-entrypoint` as the default top-level router for workspace requests; it should choose the primary branch before deeper execution or investigation starts
 
 - `runner-execution` for scenario runner orchestration, auto/guided execution, pause inspection, and resume
 - `env-resolution` for env/config readiness
@@ -162,6 +164,7 @@ Prefer using the dedicated skills:
 - `api-workflow` for HTTP/API steps
 - `db-verification` for read-only DB checks
 - `reporting` for final QA report assembly
+- `test-plan-generation` for authored test-plan generation when the goal is a `NormalizedTestPlan` rather than scenario execution
 
 ## Completion criteria
 

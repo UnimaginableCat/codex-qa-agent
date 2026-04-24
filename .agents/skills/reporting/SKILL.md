@@ -7,6 +7,8 @@ description: Use this skill to assemble a final QA report from scenario executio
 
 This skill standardizes the final QA report so results are consistent, evidence-based, and easy to read.
 
+Apply the shared workspace instructions from `qa-entrypoint` first. This skill adds report assembly and presentation rules.
+
 Use this skill when:
 - multiple scenario steps have already been analyzed or executed
 - a final user-facing QA result is needed
@@ -47,18 +49,7 @@ Before writing the report, collect:
 
 # Final status rules
 
-Determine one final status using the following priority:
-
-1. ERROR
-   - use when the run failed due to tool/runtime/parsing failures
-2. BLOCKED
-   - use when required setup, auth, config, environment, or dependencies were missing
-3. FAIL
-   - use when execution happened, but expectations were not met
-4. PASS
-   - use when all critical checks passed
-
-If multiple statuses are present, use the highest-priority one from the list above.
+Use the shared status model and priority from `qa-entrypoint`.
 
 Tooling issues must influence final status only when they actually prevented or invalidated execution.
 Do not downgrade a legitimate business PASS unless the tooling issue materially affected confidence or correctness.
@@ -153,14 +144,11 @@ List output files or raw evidence paths if they exist.
 
 # Guardrails
 
-- Never expose secrets.
 - Do not confuse runner lifecycle/termination semantics with legacy report statuses.
 - Do not infer operator decisions from status alone; use decision resolution or operator state when available.
 - Do not invent guided/manual interaction when the run is terminal and no pause-state or active decision point exists.
-- Do not edit generated runner artifacts such as `report.md`, `summary.json`, `journal.jsonl`, `pause-state.json`, manifests, or raw step results unless the user explicitly asks to repair artifacts.
 - Do not hide assumptions.
 - Do not hide scenario path substitutions or variable resolutions that materially affected execution.
-- Do not mark a scenario PASS if critical steps were BLOCKED, FAIL, or ERROR.
 - Do not overstate confidence when evidence is incomplete.
 - Do not present tooling workarounds as if they were part of the intended business flow.
 - Do not include empty sections unless they add value.

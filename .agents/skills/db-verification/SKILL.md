@@ -7,6 +7,8 @@ description: Use this skill to execute read-only database verification steps for
 
 This skill verifies whether the system state in the database matches expectations after scenario execution.
 
+Apply the shared workspace instructions from `qa-entrypoint` first. This skill adds DB-step execution and SQL-specific rules.
+
 Use this skill when:
 - a scenario step is of type DB
 - the user wants post-action verification
@@ -67,6 +69,8 @@ Check as applicable:
 
 # Status rules
 
+Use the shared status model from `qa-entrypoint`. The mapping below clarifies how that model applies to DB verification.
+
 - PASS — query executed and returned expected data
 - FAIL — query executed but returned unexpected data
 - BLOCKED — missing DB config/access, unresolved required variables, or disallowed query
@@ -91,7 +95,6 @@ Do not inspect the codebase by default when the scenario already provides:
 
 - Allow only read-only SELECT queries.
 - Never mutate data.
-- Never mark missing DB access as FAIL.
 - Never invent table names, columns, or relationships without saying so explicitly.
 - If the SQL is ambiguous or not aligned with the scenario, say so clearly.
 - If execution is blocked by a tooling limitation, say so clearly.

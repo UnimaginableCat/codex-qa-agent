@@ -7,14 +7,14 @@ description: Use this skill to inspect a target project under code/ only when a 
 
 This skill provides implementation-backed clarification for QA execution when the scenario alone is not sufficient.
 
+Apply the shared workspace instructions from `qa-entrypoint` first. This skill adds targeted implementation tracing rules.
+
 Use this skill when:
 - a scenario references an endpoint or business flow, but the expected behavior is unclear
 - you need to verify which code path is actually responsible for a response or side effect
 - API or DB results contradict scenario expectations
 - you need to identify likely DB side effects that are not explicit in the scenario
 - you need targeted debugging evidence for a FAIL / ERROR / unexpected runtime result
-
-For runnable scenarios, do not use this skill before the first `scenario_runner` execution by default. Runner execution comes first, then artifact reading, then targeted code analysis only if the runner result or the user asks for it.
 
 Do not use this skill by default if the scenario already provides:
 - explicit API paths
@@ -93,8 +93,6 @@ Produce a concise structured summary with:
 - Do not claim behavior that is not supported by code or tests.
 - Do not scan large parts of the codebase when a narrow targeted lookup is enough.
 - If the scenario is already explicit enough, skip code analysis.
-- If a runnable scenario has not been executed yet, do not do pre-run broad code scanning unless the user explicitly requested it or runner startup is blocked by a narrow ambiguity.
-- Do not edit runner-generated artifacts while doing code analysis.
 
 # Completion criteria
 
