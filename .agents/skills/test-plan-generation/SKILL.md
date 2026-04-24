@@ -195,5 +195,7 @@ Read these references only when needed:
 - Do not ignore uncovered endpoint facts after collecting evidence; either tighten the scope, add the missing case, or use `--strict-coverage` when the user wants blocking behavior.
 - Do not call LLMs or external APIs from local generation services.
 - Do not treat generated draft markdown as executable or reviewed scenarios.
-- Do not auto-promote drafts or overwrite existing scenario files.
+- Do not auto-promote after a generation-only request or overwrite existing scenario files.
+- When the user explicitly asks for scenario files for the whole rendered set, continue through review
+  and use `--promote-all-drafts` instead of stopping at draft previews.
 - Do not store canonical planning fields only in `metadata`.

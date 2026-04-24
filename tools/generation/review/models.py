@@ -445,6 +445,18 @@ class ScenarioPromotionRequest:
 
 
 @dataclass(slots=True)
+class ScenarioPromotionBatchRequest:
+    run_id: str
+    workspace_root: Path = Path(".")
+    target_dir: Path = Path("scenarios/generated")
+    allow_invalid: bool = False
+    draft_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+
+@dataclass(slots=True)
 class ScenarioRevalidationRequest:
     file_path: Path
     validation_mode: str = "parser"
@@ -666,6 +678,38 @@ class ScenarioPromotionResult:
             source_path=_optional_path(payload.get("source_path")),
             target_path=_optional_path(payload.get("target_path")),
             promotion_result_path=_optional_path(payload.get("promotion_result_path")),
+            diagnostics=[GenerationDiagnostic.from_dict(item) for item in payload.get("diagnostics", [])],
+        )
+
+
+@dataclass(slots=True)
+class ScenarioPromotionBatchResult:
+    run_id: str
+    status: StepStatus
+    requested_count: int = 0
+    promoted_count: int = 0
+    error_count: int = 0
+    target_dir: Path | None = None
+    promotion_result_path: Path | None = None
+    results: list[ScenarioPromotionResult] = field(default_factory=list)
+    diagnostics: list[GenerationDiagnostic] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = to_json_safe(asdict(self))
+        payload["status"] = self.status.value
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ScenarioPromotionBatchResult":
+        return cls(
+            run_id=str(payload["run_id"]),
+            status=StepStatus(str(payload["status"])),
+            requested_count=int(payload.get("requested_count", 0)),
+            promoted_count=int(payload.get("promoted_count", 0)),
+            error_count=int(payload.get("error_count", 0)),
+            target_dir=_optional_path(payload.get("target_dir")),
+            promotion_result_path=_optional_path(payload.get("promotion_result_path")),
+            results=[ScenarioPromotionResult.from_dict(item) for item in payload.get("results", [])],
             diagnostics=[GenerationDiagnostic.from_dict(item) for item in payload.get("diagnostics", [])],
         )
 

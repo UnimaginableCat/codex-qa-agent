@@ -194,10 +194,17 @@ Review and promotion:
   --draft-id draft-tc-001 `
   --workspace-root . `
   --target-dir scenarios/generated
+
+<project-venv-python> -m tools.generation.cli `
+  --promote-all-drafts `
+  --run-id <generation-run-id> `
+  --workspace-root . `
+  --target-dir scenarios/generated
 ```
 
 Promotion is explicit, never overwrites existing files, and writes `promotion-result.json` under the
 generation artifact bundle. When using the default `scenarios/generated` root, promoted drafts are
 written under a run-scoped subdirectory such as `scenarios/generated/<source>-<run_id>/` so
 separate generation runs do not collide. Promoted drafts receive a metadata header and are not
-executed.
+executed. Use `--promote-all-drafts` when the operator explicitly asks to convert the whole rendered
+set into scenario files rather than stopping at previews.

@@ -18,6 +18,7 @@ from tools.generation.enrichment.models import CoverageAssessmentResult, Enriche
 from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 from tools.generation.review.models import ScenarioPromotionResult
+from tools.generation.review.models import ScenarioPromotionBatchResult
 
 
 class GenerationArtifactStore(Protocol):
@@ -126,7 +127,7 @@ class GenerationArtifactStore(Protocol):
     def write_promotion_result(
         self,
         run_context: GenerationRunContext,
-        promotion_result: ScenarioPromotionResult,
+        promotion_result: ScenarioPromotionResult | ScenarioPromotionBatchResult,
     ) -> Path:
         """Persist scenario draft promotion outcome."""
         ...

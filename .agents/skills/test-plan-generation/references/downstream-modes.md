@@ -97,9 +97,17 @@ Promote:
   --draft-id draft-tc-001 `
   --workspace-root . `
   --target-dir scenarios/generated
+
+<venv-python> -m tools.generation.cli `
+  --promote-all-drafts `
+  --run-id <generation-run-id> `
+  --workspace-root . `
+  --target-dir scenarios/generated
 ```
 
-Promotion is explicit. Never auto-promote.
+Promotion is explicit. Never auto-promote after rendering unless the operator explicitly asked for
+scenario files. For requests like "convert all rendered drafts into scenarios", review first and
+then use `--promote-all-drafts` so the flow ends with promoted `.md` files rather than previews.
 
 ## Validation After Editing
 

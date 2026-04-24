@@ -30,8 +30,10 @@ from tools.generation.evidence.models import CodeFactsScope, TargetStack
 from tools.generation.review import (
     DraftEditTargetType,
     PatchTemplateCatalogService,
+    ScenarioDraftBatchPromotionService,
     ScenarioDraftPromotionService,
     ScenarioDraftReviewService,
+    ScenarioPromotionBatchRequest,
     ScenarioPromotionRequest,
     ScenarioRevalidationRequest,
     ScenarioRevalidationService,
@@ -56,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument("--validate-agent-plan", action="store_true", help="Validate an AgentTestPlanInput file without generation.")
     workflow.add_argument("--review-drafts", action="store_true", help="Review generated drafts for a run id.")
     workflow.add_argument("--promote-draft", action="store_true", help="Promote one selected draft into scenarios/.")
+    workflow.add_argument("--promote-all-drafts", action="store_true", help="Promote all drafts from one run into scenarios/.")
     workflow.add_argument("--list-patch-templates", action="store_true", help="List deterministic draft edit templates.")
     workflow.add_argument("--show-patch-template", action="store_true", help="Show one draft edit template by target type.")
     workflow.add_argument("--validate-scenario", action="store_true", help="Validate one scenario file without execution.")
@@ -359,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = run_validate_agent_plan(args)
         elif args.review_drafts:
             payload = run_review(args)
-        elif args.promote_draft:
+        elif args.promote_draft or args.promote_all_drafts:
             payload = run_promotion(args)
         elif args.list_patch_templates:
             payload = run_list_patch_templates(args)
@@ -392,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         else "review"
         if args.review_drafts
         else "promotion"
-        if args.promote_draft
+        if args.promote_draft or args.promote_all_drafts
         else "template"
         if args.list_patch_templates or args.show_patch_template
         else "revalidation"
@@ -486,6 +489,28 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
     diagnostics = _promotion_adapter_diagnostics(args)
     if diagnostics:
         raise GenerationCliInputError(diagnostics)
+    if args.promote_all_drafts:
+        result = ScenarioDraftBatchPromotionService().promote(
+            ScenarioPromotionBatchRequest(
+                run_id=str(args.run_id),
+                workspace_root=Path(args.workspace_root),
+                target_dir=Path(args.target_dir),
+                allow_invalid=args.allow_invalid,
+            )
+        )
+        return to_json_safe(
+            {
+                "status": result.status.value,
+                "run_id": result.run_id,
+                "requested_count": result.requested_count,
+                "promoted_count": result.promoted_count,
+                "error_count": result.error_count,
+                "target_dir": result.target_dir,
+                "promotion_result_path": result.promotion_result_path,
+                "results": [item.to_dict() for item in result.results],
+                "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
+            }
+        )
     result = ScenarioDraftPromotionService().promote(
         ScenarioPromotionRequest(
             run_id=str(args.run_id),
@@ -803,7 +828,7 @@ def _promotion_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationD
                 severity=DiagnosticSeverity.ERROR,
             )
         )
-    if not args.draft_id:
+    if args.promote_draft and not args.draft_id:
         diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_promotion_requires_draft_id",
@@ -859,6 +884,9 @@ def _print_payload(payload: dict[str, Any], *, output_format: str = "json", work
         return
     if output_format == "text" and workflow == "review":
         print(_render_review_text(payload))
+        return
+    if output_format == "text" and workflow == "promotion":
+        print(_render_promotion_text(payload))
         return
     if output_format == "text" and workflow == "template":
         print(_render_template_text(payload))
@@ -1143,6 +1171,45 @@ def _render_template_text(payload: dict[str, Any]) -> str:
         lines.append(
             f"- {template['template_id']} [{template['section_name']}] {template['target_type']}: {template['title']}"
         )
+    return "\n".join(lines).rstrip()
+
+
+def _render_promotion_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Status: {payload['status']}",
+        f"Run ID: {payload.get('run_id', '')}",
+    ]
+    if "draft_id" in payload:
+        lines.extend(
+            [
+                f"Draft ID: {payload.get('draft_id', '')}",
+                f"Source: {payload.get('source_path') or ''}",
+                f"Target: {payload.get('target_path') or ''}",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"Requested: {payload.get('requested_count', 0)}",
+                f"Promoted: {payload.get('promoted_count', 0)}",
+                f"Errors: {payload.get('error_count', 0)}",
+                f"Target dir: {payload.get('target_dir') or ''}",
+            ]
+        )
+        results = payload.get("results") or []
+        if results:
+            lines.append("Results:")
+            for item in results:
+                lines.append(
+                    f"  - {item.get('draft_id', '')}: {item.get('status', '')} -> {item.get('target_path') or ''}"
+                )
+    diagnostics = payload.get("diagnostics") or []
+    if diagnostics:
+        lines.append("Diagnostics:")
+        for diagnostic in diagnostics:
+            lines.append(f"  - {diagnostic.get('code', '')}: {diagnostic.get('message', '')}")
+    if payload.get("promotion_result_path"):
+        lines.append(f"Promotion result: {payload.get('promotion_result_path')}")
     return "\n".join(lines).rstrip()
 
 

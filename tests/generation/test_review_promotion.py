@@ -14,7 +14,9 @@ from tools.generation import cli
 from tools.generation.review import (
     DraftEditTargetType,
     PatchTemplateCatalogService,
+    ScenarioDraftBatchPromotionService,
     ScenarioDraftPromotionService,
+    ScenarioPromotionBatchRequest,
     ScenarioDraftReviewService,
     ScenarioPromotionRequest,
 )
@@ -279,6 +281,27 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertEqual(first.target_path.parent.name, f"users-{first_payload['run_id'].lower()}")
         self.assertEqual(second.target_path.parent.name, f"users-{second_payload['run_id'].lower()}")
 
+    def test_batch_promotion_promotes_all_drafts_in_one_run(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _duplicate_first_draft(payload, draft_id="draft-tc-002", file_name="tc-002-create-user-2.md")
+
+            result = ScenarioDraftBatchPromotionService().promote(
+                ScenarioPromotionBatchRequest(
+                    run_id=payload["run_id"],
+                    workspace_root=root,
+                )
+            )
+
+            self.assertEqual(result.status.value, "PASS")
+            self.assertEqual(result.requested_count, 2)
+            self.assertEqual(result.promoted_count, 2)
+            self.assertEqual(result.error_count, 0)
+            self.assertEqual(len(result.results), 2)
+            self.assertTrue(all(item.target_path and item.target_path.exists() for item in result.results))
+            self.assertTrue(result.promotion_result_path.exists())
+
     def test_cli_review_and_promote_commands(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -334,6 +357,32 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             self.assertTrue(Path(promote_payload["target_path"]).exists())
             self.assertTrue(str(promote_payload["target_path"]).endswith("users-draft-tc-001.md"))
             self.assertIn("scenarios\\promoted\\users-draft-tc-001.md", str(promote_payload["target_path"]))
+
+    def test_cli_promote_all_drafts_command(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _duplicate_first_draft(payload, draft_id="draft-tc-002", file_name="tc-002-create-user-2.md")
+
+            promote_stdout = io.StringIO()
+            with redirect_stdout(promote_stdout):
+                promote_code = cli.main(
+                    [
+                        "--promote-all-drafts",
+                        "--run-id",
+                        payload["run_id"],
+                        "--workspace-root",
+                        str(root),
+                    ]
+                )
+            promote_payload = json.loads(promote_stdout.getvalue())
+
+            self.assertEqual(promote_code, 0)
+            self.assertEqual(promote_payload["requested_count"], 2)
+            self.assertEqual(promote_payload["promoted_count"], 2)
+            self.assertEqual(promote_payload["error_count"], 0)
+            self.assertEqual(len(promote_payload["results"]), 2)
+            self.assertTrue(all(Path(item["target_path"]).exists() for item in promote_payload["results"]))
 
     def test_cli_review_output_surfaces_partial_draft_gaps(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -560,6 +609,33 @@ def _set_case_gaps(render_result_path: Path, case_gaps: list[dict[str, object]])
     payload = json.loads(render_result_path.read_text(encoding="utf-8"))
     payload["draft_set"]["drafts"][0]["metadata"]["case_gaps"] = case_gaps
     render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _duplicate_first_draft(payload: dict[str, object], *, draft_id: str, file_name: str) -> None:
+    render_result_path = Path(payload["artifact_paths"]["scenario_render_result"])
+    draft_dir = Path(payload["artifact_paths"]["scenario_drafts_dir"])
+    render_payload = json.loads(render_result_path.read_text(encoding="utf-8"))
+
+    original_draft = dict(render_payload["draft_set"]["drafts"][0])
+    original_validation = dict(render_payload["validation_results"][0])
+    original_file = draft_dir / Path(original_draft["relative_path"]).name
+    duplicated_file = draft_dir / file_name
+    duplicated_file.write_text(original_file.read_text(encoding="utf-8"), encoding="utf-8")
+
+    duplicated_draft = dict(original_draft)
+    duplicated_draft["draft_id"] = draft_id
+    duplicated_draft["case_id"] = draft_id.replace("draft-", "")
+    duplicated_draft["title"] = f"{original_draft['title']} duplicate"
+    duplicated_draft["relative_path"] = str(Path("scenario-drafts") / file_name).replace("\\", "/")
+
+    duplicated_validation = dict(original_validation)
+    duplicated_validation["draft_id"] = draft_id
+    duplicated_validation["case_id"] = duplicated_draft["case_id"]
+    duplicated_validation["path"] = str(duplicated_file)
+
+    render_payload["draft_set"]["drafts"].append(duplicated_draft)
+    render_payload["validation_results"].append(duplicated_validation)
+    render_result_path.write_text(json.dumps(render_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

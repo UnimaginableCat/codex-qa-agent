@@ -47,6 +47,8 @@ from .models import (
     ScenarioDraftParseStatus,
     ScenarioDraftReviewItem,
     ScenarioDraftReviewSet,
+    ScenarioPromotionBatchRequest,
+    ScenarioPromotionBatchResult,
     ScenarioPromotionRequest,
     ScenarioPromotionResult,
     ScenarioPreflightStatus,
@@ -260,6 +262,122 @@ class ScenarioDraftPromotionService:
             status=status,
             source_path=source_path,
             target_path=target_path,
+            diagnostics=diagnostics,
+        )
+        promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)
+        result.promotion_result_path = promotion_result_path
+        self.artifact_store.write_promotion_result(run_context, result)
+        return result
+
+
+@dataclass(slots=True)
+class ScenarioDraftBatchPromotionService:
+    """Promote multiple drafts from one generation run into scenarios/."""
+
+    promotion_service: ScenarioDraftPromotionService = field(default_factory=ScenarioDraftPromotionService)
+    artifact_store: FileGenerationArtifactStore = field(default_factory=FileGenerationArtifactStore)
+
+    def promote(self, request: ScenarioPromotionBatchRequest) -> ScenarioPromotionBatchResult:
+        diagnostics: list[GenerationDiagnostic] = []
+        try:
+            run_context = _load_run_context(request.workspace_root, request.run_id)
+            render_result = _load_render_result(run_context)
+        except Exception as exc:  # noqa: BLE001
+            return ScenarioPromotionBatchResult(
+                run_id=request.run_id,
+                status=StepStatus.ERROR,
+                diagnostics=[
+                    GenerationDiagnostic(
+                        code="scenario_promotion_artifacts_unavailable",
+                        message=f"Could not load generation draft artifacts: {exc}",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=request.run_id,
+                    )
+                ],
+            )
+
+        draft_ids = request.draft_ids or [draft.draft_id for draft in render_result.draft_set.drafts]
+        if not draft_ids:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="scenario_promotion_empty_draft_set",
+                    message="No scenario drafts were found for this generation run.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=request.run_id,
+                )
+            )
+            return self._finalize(
+                run_context,
+                request,
+                StepStatus.ERROR,
+                diagnostics=diagnostics,
+                results=[],
+            )
+
+        results = [
+            self.promotion_service.promote(
+                ScenarioPromotionRequest(
+                    run_id=request.run_id,
+                    draft_id=draft_id,
+                    workspace_root=request.workspace_root,
+                    target_dir=request.target_dir,
+                    allow_invalid=request.allow_invalid,
+                )
+            )
+            for draft_id in draft_ids
+        ]
+        promoted_count = sum(1 for item in results if item.status == StepStatus.PASS)
+        error_count = sum(1 for item in results if item.status == StepStatus.ERROR)
+        status = StepStatus.ERROR if error_count else StepStatus.PASS
+        diagnostics.extend(
+            diagnostic
+            for item in results
+            for diagnostic in item.diagnostics
+        )
+        try:
+            target_dir = _promotion_target_dir(_resolve_target_dir(request.workspace_root, request.target_dir), run_context)
+        except ValueError as exc:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="scenario_promotion_invalid_target_dir",
+                    message=str(exc),
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(request.target_dir),
+                )
+            )
+            target_dir = None
+            status = StepStatus.ERROR
+        return self._finalize(
+            run_context,
+            request,
+            status,
+            diagnostics=diagnostics,
+            results=results,
+            target_dir=target_dir,
+            promoted_count=promoted_count,
+            error_count=error_count,
+        )
+
+    def _finalize(
+        self,
+        run_context: GenerationRunContext,
+        request: ScenarioPromotionBatchRequest,
+        status: StepStatus,
+        *,
+        diagnostics: list[GenerationDiagnostic],
+        results: list[ScenarioPromotionResult],
+        target_dir: Path | None = None,
+        promoted_count: int = 0,
+        error_count: int = 0,
+    ) -> ScenarioPromotionBatchResult:
+        result = ScenarioPromotionBatchResult(
+            run_id=request.run_id,
+            status=status,
+            requested_count=len(request.draft_ids) if request.draft_ids else len(results),
+            promoted_count=promoted_count,
+            error_count=error_count,
+            target_dir=target_dir,
+            results=results,
             diagnostics=diagnostics,
         )
         promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)

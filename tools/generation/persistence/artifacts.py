@@ -23,7 +23,7 @@ from tools.generation.domain.models import (
 from tools.generation.enrichment.models import CoverageAssessmentResult, EnrichedTestPlanResult
 from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
-from tools.generation.review.models import ScenarioPromotionResult
+from tools.generation.review.models import ScenarioPromotionBatchResult, ScenarioPromotionResult
 
 GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
 BUNDLE_LAYOUT_VERSION = 6
@@ -242,7 +242,7 @@ class FileGenerationArtifactStore:
     def write_promotion_result(
         self,
         run_context: GenerationRunContext,
-        promotion_result: ScenarioPromotionResult,
+        promotion_result: ScenarioPromotionResult | ScenarioPromotionBatchResult,
     ) -> Path:
         target_path = _bundle_file_path(run_context, PROMOTION_RESULT_FILENAME)
         _write_json_file(target_path, promotion_result.to_dict())
