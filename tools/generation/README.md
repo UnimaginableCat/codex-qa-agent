@@ -54,6 +54,10 @@ prose -> prose normalizer -> NormalizedTestPlan
 Both paths use the same downstream evidence, enrichment, rendering, review, promotion, and
 validation services.
 
+For true end-to-end coverage inside one case, use `workflow_steps[]` on `AgentPlannedTestCaseInput`.
+This allows one canonical test case to render into multiple runnable API/DB scenario steps instead
+of collapsing the workflow into a single endpoint call.
+
 Authoring helper workflow:
 
 ```text

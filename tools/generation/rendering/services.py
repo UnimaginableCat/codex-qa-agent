@@ -15,6 +15,7 @@ from tools.generation.domain.models import (
     GenerationRunContext,
     NormalizedTestPlan,
     PlannedTestCase,
+    PlannedWorkflowStep,
     RouteSupportHint,
 )
 from tools.scenario_runner.parser import MarkdownScenarioParser
@@ -81,6 +82,87 @@ class DraftScenarioRenderer:
         diagnostics: list[GenerationDiagnostic] = []
 
         for test_case in plan.test_cases:
+            if test_case.workflow_steps:
+                workflow_support = _workflow_route_binding(test_case)
+                if workflow_support is None or not _workflow_steps_renderable(test_case):
+                    check = UnsupportedCheck(
+                        case_id=test_case.case_id,
+                        reason_code="workflow_step_incomplete",
+                        message="Workflow scenario draft rendering requires complete api/db workflow_steps.",
+                        details={"workflow_step_count": len(test_case.workflow_steps)},
+                    )
+                    unsupported_checks.append(check)
+                    deferred_items.append(
+                        DeferredScenarioItem(
+                            case_id=test_case.case_id,
+                            title=test_case.title,
+                            reason_code="unsupported_for_preview",
+                            message="Planned workflow case was deferred from scenario draft rendering.",
+                            unsupported_checks=[check],
+                        )
+                    )
+                    diagnostics.append(
+                        GenerationDiagnostic(
+                            code="scenario_draft_deferred",
+                            message="Planned workflow case lacks complete structured workflow step details for draft rendering.",
+                            severity=DiagnosticSeverity.WARNING,
+                            source_ref=test_case.case_id,
+                            details={"reason_code": check.reason_code},
+                        )
+                    )
+                    continue
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="rendering_based_on_workflow_steps",
+                        message="Scenario draft rendering used structured workflow_steps as the execution source.",
+                        severity=DiagnosticSeverity.INFO,
+                        source_ref=test_case.case_id,
+                        details={"workflow_step_count": len(test_case.workflow_steps)},
+                    )
+                )
+                draft_id = f"draft-{test_case.case_id}"
+                title = f"{plan.title} - {test_case.title}".strip(" -")
+                relative_path = Path("scenario-drafts") / f"{_slugify(test_case.case_id + '-' + test_case.title)}.md"
+                drafts.append(
+                    ScenarioDraft(
+                        draft_id=draft_id,
+                        case_id=test_case.case_id,
+                        title=title,
+                        markdown=self._render_workflow_markdown(plan, test_case, title),
+                        relative_path=relative_path,
+                        source_refs=list(test_case.source_refs),
+                        metadata={
+                            "renderer": "draft-scenario-renderer-v1",
+                            "preview_only": True,
+                            "route_binding": workflow_support,
+                            "workflow_route_bindings": _workflow_route_bindings(test_case),
+                            "workflow_step_count": len(test_case.workflow_steps),
+                            "case_support": _draft_case_support(test_case, workflow_support),
+                            "auth_strategy_required": any(
+                                step.requires_auth_strategy for step in test_case.workflow_steps
+                            ) or test_case.requires_auth_strategy,
+                            "auth_strategy_present": any(
+                                step.auth_strategy or _has_auth_header_signal(step.request_headers)
+                                for step in test_case.workflow_steps
+                            ) or bool(test_case.auth_strategy) or _has_auth_header_signal(test_case.request_headers),
+                            "request_body_required": any(
+                                step.requires_request_body for step in test_case.workflow_steps
+                            ) or test_case.requires_request_body,
+                            "request_body_present": any(
+                                step.request_body is not None for step in test_case.workflow_steps
+                            ) or test_case.request_body is not None,
+                            "db_verification_required": any(
+                                step.step_type.strip().lower() == "db" for step in test_case.workflow_steps
+                            ) or test_case.requires_db_verification,
+                            "db_verification_present": any(
+                                step.step_type.strip().lower() == "db" and step.sql.strip()
+                                for step in test_case.workflow_steps
+                            ) or test_case.db_verification is not None,
+                            "case_gaps": [gap.to_dict() for gap in test_case.gaps],
+                        },
+                    )
+                )
+                continue
             support = _supported_api_hint(test_case)
             if support is None:
                 reason_code = _unsupported_reason_code(test_case)
@@ -351,6 +433,76 @@ class DraftScenarioRenderer:
         )
         return "\n".join(lines)
 
+    def _render_workflow_markdown(
+        self,
+        plan: NormalizedTestPlan,
+        test_case: PlannedTestCase,
+        title: str,
+    ) -> str:
+        project_name = Path(plan.project).name or _slugify(plan.project)
+        typed_gap_notes = _typed_gap_notes(test_case)
+        typed_gap_summary = _typed_gap_summary_lines(test_case)
+        lines = [
+            f"# Scenario: {_escape_line(title)}",
+            "",
+            "## Project",
+            plan.project,
+            "",
+            "## Environment",
+            self.environment_template.format(project_name=project_name),
+            "",
+            "## Goal",
+            _escape_block(test_case.objective or test_case.title),
+            "",
+            "## Preconditions",
+        ]
+        preconditions = test_case.preconditions or [
+            "API base URL, auth, and required data are configured before execution."
+        ]
+        lines.extend(f"- {_escape_line(item)}" for item in preconditions)
+        lines.extend(
+            [
+                "",
+                "## Notes",
+                "Generated workflow draft preview only. Do not execute without operator review.",
+                f"Workflow step count: {len(test_case.workflow_steps)}.",
+            ]
+        )
+        for outcome in test_case.observable_outcomes:
+            lines.append(f"Observable outcome: {outcome}")
+        for question in test_case.open_questions:
+            lines.append(f"Open question: {question}")
+        for assumption in test_case.assumptions:
+            lines.append(f"Assumption: {assumption}")
+        lines.extend(_escape_line(item) for item in typed_gap_notes)
+        lines.extend(["", "## Steps", ""])
+
+        for step_number, workflow_step in enumerate(test_case.workflow_steps, start=1):
+            lines.extend(_render_workflow_step_block(step_number, workflow_step, test_case))
+            lines.append("")
+
+        lines.extend(
+            [
+                "## Final expectations",
+                "- Draft parses successfully as scenario markdown.",
+            ]
+        )
+        final_expectations = test_case.expected_results or [
+            "Operator reviews workflow assertions and environment data before execution."
+        ]
+        lines.extend(f"- {_escape_line(item)}" for item in final_expectations)
+        lines.extend(
+            [
+                "",
+                "## Report output",
+                f"artifacts/agent/{project_name}-{_slugify(test_case.case_id)}-draft-report.md",
+                "Summary:",
+                *(_escape_line(item) for item in typed_gap_summary),
+                "",
+            ]
+        )
+        return "\n".join(lines)
+
 
 def _supported_api_hint(test_case: PlannedTestCase) -> dict[str, Any] | None:
     route_hint = _route_hint_support(test_case)
@@ -520,6 +672,117 @@ def _unsupported_reason_message(reason_code: str) -> str:
 
 def _path_shape(path: str) -> str:
     return "item" if re.search(r"\{[^}]+\}", path) else "collection"
+
+
+def _workflow_steps_renderable(test_case: PlannedTestCase) -> bool:
+    if not test_case.workflow_steps:
+        return False
+    for workflow_step in test_case.workflow_steps:
+        step_kind = workflow_step.step_type.strip().lower()
+        if step_kind == "api":
+            route = workflow_step.route
+            if route is None or not route.http_method.strip() or not route.endpoint_path.strip():
+                return False
+        elif step_kind == "db":
+            if not workflow_step.sql.strip():
+                return False
+        else:
+            return False
+    return True
+
+
+def _workflow_route_binding(test_case: PlannedTestCase) -> dict[str, Any] | None:
+    for workflow_step in test_case.workflow_steps:
+        if workflow_step.step_type.strip().lower() != "api" or workflow_step.route is None:
+            continue
+        endpoint_path = workflow_step.route.endpoint_path.strip()
+        http_method = workflow_step.route.http_method.strip().upper()
+        if not endpoint_path or not http_method:
+            continue
+        return {
+            "endpoint_path": endpoint_path,
+            "http_method": http_method,
+            "route_source": "workflow_steps",
+            "readiness": "workflow_authored",
+            "path_shape": workflow_step.route.path_kind or _path_shape(endpoint_path),
+        }
+    return None
+
+
+def _workflow_route_bindings(test_case: PlannedTestCase) -> list[dict[str, Any]]:
+    bindings: list[dict[str, Any]] = []
+    for workflow_step in test_case.workflow_steps:
+        if workflow_step.step_type.strip().lower() != "api" or workflow_step.route is None:
+            continue
+        endpoint_path = workflow_step.route.endpoint_path.strip()
+        http_method = workflow_step.route.http_method.strip().upper()
+        if not endpoint_path or not http_method:
+            continue
+        bindings.append(
+            {
+                "endpoint_path": endpoint_path,
+                "http_method": http_method,
+                "route_source": "workflow_steps",
+                "readiness": "workflow_authored",
+                "path_shape": workflow_step.route.path_kind or _path_shape(endpoint_path),
+                "title": workflow_step.title,
+            }
+        )
+    return bindings
+
+
+def _render_workflow_step_block(
+    step_number: int,
+    workflow_step: PlannedWorkflowStep,
+    test_case: PlannedTestCase,
+) -> list[str]:
+    title = workflow_step.title.strip() or f"Workflow step {step_number}"
+    step_kind = workflow_step.step_type.strip().lower()
+    if step_kind == "api":
+        route = workflow_step.route
+        assert route is not None
+        lines = [
+            f"### Step {step_number}",
+            "Type: api",
+            f"Name: {_escape_line(title)}",
+            f"Method: {route.http_method.strip().upper()}",
+            f"Path: {route.endpoint_path.strip()}",
+        ]
+        if workflow_step.request_headers:
+            lines.extend(["Headers:", "```json", _json_block(workflow_step.request_headers), "```"])
+        if workflow_step.request_params:
+            lines.extend(["Params:", "```json", _json_block(workflow_step.request_params), "```"])
+        if workflow_step.request_body is not None:
+            lines.extend(["Body:", "```json", _json_block(workflow_step.request_body), "```"])
+        if workflow_step.capture:
+            lines.extend(["Capture:", *(f"- {_escape_line(item)}" for item in workflow_step.capture)])
+        if workflow_step.expected_outcomes:
+            lines.append("Expected:")
+            lines.extend(f"- {_escape_line(item)}" for item in workflow_step.expected_outcomes)
+        elif test_case.expected_results:
+            lines.append("Expected:")
+            lines.extend(f"- {_escape_line(item)}" for item in test_case.expected_results)
+        return lines
+
+    lines = [
+        f"### Step {step_number}",
+        "Type: db",
+        f"Name: {_escape_line(title)}",
+        "SQL:",
+        "```sql",
+        workflow_step.sql.strip(),
+        "```",
+        "Params:",
+        "```json",
+        _json_block(workflow_step.params),
+        "```",
+    ]
+    if workflow_step.capture:
+        lines.extend(["Capture:", *(f"- {_escape_line(item)}" for item in workflow_step.capture)])
+    if workflow_step.expected_outcomes:
+        lines.append("Expected:")
+        lines.extend(f"- {_escape_line(item)}" for item in workflow_step.expected_outcomes)
+    return lines
 
 
 def _case_support_readiness(test_case: PlannedTestCase) -> str:

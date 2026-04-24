@@ -23,6 +23,7 @@ from tools.generation.domain.models import (
     NormalizedTestPlan,
     PlannedRouteIntent,
     SourceInputFormat,
+    PlannedWorkflowStep,
 )
 from tools.generation.evidence.models import CodeFactsScope, TargetStack
 
@@ -109,7 +110,17 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
         self.assertEqual(result.normalized_plan.title, "Internal user session API")
         self.assertEqual(len(result.normalized_plan.test_cases), 2)
         self.assertEqual(result.normalized_plan.test_cases[0].case_id, "tc-001")
-        self.assertEqual(result.normalized_plan.test_cases[0].steps[0], "Call the authenticate endpoint with valid credentials.")
+        self.assertGreaterEqual(len(result.normalized_plan.test_cases[0].steps), 3)
+        self.assertIn(
+            "Call the authenticate endpoint with valid credentials.",
+            result.normalized_plan.test_cases[0].steps,
+        )
+        self.assertTrue(
+            any(step.startswith("Prepare POST /api/internal/v1/user-sessions/authenticate") for step in result.normalized_plan.test_cases[0].steps)
+        )
+        self.assertTrue(
+            any("Verify the expected outcomes" in step for step in result.normalized_plan.test_cases[0].steps)
+        )
         self.assertEqual(
             result.normalized_plan.test_cases[0].planned_route.endpoint_path,
             "/api/internal/v1/user-sessions/authenticate",
@@ -122,6 +133,10 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
         self.assertEqual(source_payload["metadata"]["normalizer"], "agent-plan-adapter-v1")
         self.assertTrue(
             any(link.relation == "agent_plan_case_to_test_case" for link in result.traceability_map.links)
+        )
+        self.assertEqual(
+            result.normalized_plan.test_cases[0].metadata["step_outline_version"],
+            "planned-execution-outline-v1",
         )
 
     def test_use_case_propagates_blocking_diagnostics(self) -> None:
@@ -207,6 +222,30 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
         self.assertEqual(result.final_status, StepStatus.PASS)
         self.assertEqual(result.artifact_paths, {})
         self.assertEqual(len(result.normalized_plan.test_cases), 2)
+
+    def test_use_case_expands_prose_case_into_execution_outline(self) -> None:
+        with TemporaryDirectory() as tmp:
+            result = GenerateTestPlanUseCase().execute(
+                GenerateTestPlanRequest(
+                    source_input=GenerationSourceInput(
+                        source_id="users",
+                        project="code/demo",
+                        content="Verify create user",
+                    ),
+                    workspace_root=Path(tmp),
+                    options=GenerateTestPlanOptions(persist_artifacts=False),
+                )
+            )
+
+        self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertGreaterEqual(len(result.normalized_plan.test_cases[0].steps), 2)
+        self.assertTrue(
+            any("Verify the expected outcomes" in step for step in result.normalized_plan.test_cases[0].steps)
+        )
+        self.assertEqual(
+            result.normalized_plan.test_cases[0].metadata["step_outline_version"],
+            "planned-execution-outline-v1",
+        )
 
     def test_use_case_returns_evidence_bundle_when_code_facts_are_enabled(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -505,6 +544,77 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
         self.assertIsNotNone(result.scenario_render_result)
         self.assertEqual(len(result.scenario_render_result.draft_set.drafts), 1)
         self.assertEqual(result.scenario_render_result.validation_results[0].parse_valid, True)
+
+    def test_agent_plan_workflow_steps_render_multi_step_draft(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agent_plan = AgentTestPlanInput(
+                source_id="internal-user-session-workflow",
+                project="code/demo",
+                title="Internal user session workflow",
+                planned_test_cases=[
+                    AgentPlannedTestCaseInput(
+                        title="Authenticate, fetch, and revoke session",
+                        objective="Verify the session lifecycle end-to-end.",
+                        kind="workflow",
+                        workflow_steps=[
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Authenticate session",
+                                route=PlannedRouteIntent(
+                                    http_method="POST",
+                                    endpoint_path="/api/internal/v1/user-sessions/authenticate",
+                                ),
+                                expected_outcomes=["HTTP 200", "response JSON exists"],
+                                capture=["response.json.sessionId -> session_id"],
+                            ),
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Get session",
+                                route=PlannedRouteIntent(
+                                    http_method="GET",
+                                    endpoint_path="/api/internal/v1/user-sessions/{{session_id}}",
+                                ),
+                                expected_outcomes=["HTTP 200"],
+                            ),
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Revoke session",
+                                route=PlannedRouteIntent(
+                                    http_method="POST",
+                                    endpoint_path="/api/internal/v1/user-sessions/{{session_id}}/revoke",
+                                ),
+                                expected_outcomes=["HTTP 204"],
+                            ),
+                        ],
+                    )
+                ],
+            )
+
+            result = GenerateTestPlanUseCase().execute(
+                GenerateTestPlanRequest(
+                    source_input=GenerationSourceInput(
+                        source_id=agent_plan.source_id,
+                        project=agent_plan.project,
+                        input_format=SourceInputFormat.STRUCTURED,
+                        name=agent_plan.title,
+                    ),
+                    input_mode=GenerationInputMode.AGENT_PLAN,
+                    agent_plan=agent_plan,
+                    workspace_root=root,
+                    options=GenerateTestPlanOptions(render_scenario_drafts=True),
+                )
+            )
+
+        self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertEqual(len(result.normalized_plan.test_cases[0].workflow_steps), 3)
+        self.assertGreaterEqual(len(result.normalized_plan.test_cases[0].steps), 3)
+        self.assertIsNotNone(result.scenario_render_result)
+        draft = result.scenario_render_result.draft_set.drafts[0]
+        self.assertIn("### Step 1", draft.markdown)
+        self.assertIn("### Step 2", draft.markdown)
+        self.assertIn("### Step 3", draft.markdown)
+        self.assertIn("Path: /api/internal/v1/user-sessions/{{session_id}}/revoke", draft.markdown)
 
     def test_use_case_skips_enrichment_without_evidence_collection(self) -> None:
         with TemporaryDirectory() as tmp:

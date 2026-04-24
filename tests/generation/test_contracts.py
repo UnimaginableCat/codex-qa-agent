@@ -21,6 +21,7 @@ from tools.generation.domain.models import (
     PlannedCaseGap,
     PlannedRouteIntent,
     PlannedTestCase,
+    PlannedWorkflowStep,
     ProseTestCaseDraft,
     RouteSupportHint,
     SourceInputFormat,
@@ -44,6 +45,27 @@ class GenerationContractTests(unittest.TestCase):
                     case_id="auth-session",
                     preconditions=["Operator provides valid credentials."],
                     actions=["Call authenticate endpoint."],
+                    workflow_steps=[
+                        PlannedWorkflowStep(
+                            step_type="api",
+                            title="Authenticate session",
+                            route=PlannedRouteIntent(
+                                http_method="POST",
+                                endpoint_path="/api/internal/v1/user-sessions/authenticate",
+                            ),
+                            expected_outcomes=["HTTP 200"],
+                            capture=["response.json.sessionId -> session_id"],
+                        ),
+                        PlannedWorkflowStep(
+                            step_type="api",
+                            title="Get session by id",
+                            route=PlannedRouteIntent(
+                                http_method="GET",
+                                endpoint_path="/api/internal/v1/user-sessions/{{session_id}}",
+                            ),
+                            expected_outcomes=["HTTP 200"],
+                        ),
+                    ],
                     expected_outcomes=["Session token is returned."],
                     priority="high",
                     tags=["session"],
@@ -73,6 +95,8 @@ class GenerationContractTests(unittest.TestCase):
         self.assertEqual(restored.source_id, "sessions-agent-plan")
         self.assertEqual(restored.planned_test_cases[0].case_id, "auth-session")
         self.assertEqual(restored.planned_test_cases[0].actions, ["Call authenticate endpoint."])
+        self.assertEqual(len(restored.planned_test_cases[0].workflow_steps), 2)
+        self.assertEqual(restored.planned_test_cases[0].workflow_steps[0].capture, ["response.json.sessionId -> session_id"])
         self.assertEqual(restored.planned_test_cases[0].route.http_method, "POST")
         self.assertEqual(restored.planned_test_cases[0].gaps[0].category, GapCategory.AUTH_STRATEGY)
         self.assertEqual(

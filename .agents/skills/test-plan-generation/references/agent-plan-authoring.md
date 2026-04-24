@@ -70,6 +70,7 @@ Each case should contain:
 - optional `observable_outcomes[]`
 - `expected_outcomes[]`
 - optional `capture[]`
+- optional `workflow_steps[]`
 - `priority`
 - `tags[]`
 - `unresolved_items[]`
@@ -84,6 +85,10 @@ Each case should contain:
 - optional `requires_db_verification`
 - optional `assumptions[]`
 - optional `metadata`
+
+`workflow_steps[]` is the preferred shape for true end-to-end or lifecycle scenarios inside one
+test case. Each step may be `api` or `db` and can carry its own route/request/capture/expected
+contract. Use it when one case must span multiple controller operations.
 
 ## Validation Rules
 
@@ -113,12 +118,18 @@ Status behavior:
 Write only what the agent can justify.
 
 - Keep `actions[]` at planning level, not runner-step level.
+- Do not collapse materially different setup, execution, and verification actions into one line just to stay compact.
+- When a case is truly cross-endpoint or lifecycle-based, use `workflow_steps[]` instead of trying to encode the whole flow in one request-level case.
 - For API/DB cases, use `observable_outcomes[]` for human-readable behavior and `expected_outcomes[]` for runner-compatible assertion DSL.
 - Use `capture[]` only when later scenario steps or DB verification need captured values.
 - Put uncertain details into `unresolved_items[]` or `open_questions[]`.
 - Use `assumptions[]` only for stable assumptions the plan depends on.
 - Do not hide primary planning fields inside `metadata`.
 - Do not ask the user to prescribe the JSON structure unless a true ambiguity remains.
+
+During generation, the planner now expands thin authored actions into a compact execution outline in
+`NormalizedTestPlan.test_cases[].steps`. Treat that outline as normalized planning output, not as a
+reason to author only one vague action per case.
 
 For API-heavy plans, prefer authoring cases that are already grounded enough for:
 

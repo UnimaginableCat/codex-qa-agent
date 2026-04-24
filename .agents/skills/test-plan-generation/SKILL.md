@@ -87,6 +87,7 @@ inventory.
 - Prefer core buckets first: happy path, validation, not found/ownership, and only the state-specific negative cases that matter externally.
 - Keep the first plan compact. A good default is roughly `8-10` strong cases unless the user explicitly asked for exhaustive coverage.
 - If multiple internal branches lead to the same observable API behavior, merge them into one case instead of splitting them.
+- When the request is about a full workflow or full controller functionality, prefer at least one true end-to-end case with `workflow_steps[]` instead of only single-endpoint cases.
 - For `kind=api` and `kind=db`, treat `expected_outcomes[]` as runner-compatible expectation DSL, not free-form prose.
 - Put high-level behavior into `observable_outcomes[]` and use `expected_outcomes[]` only for executable assertions the downstream scenario renderer can preserve.
 

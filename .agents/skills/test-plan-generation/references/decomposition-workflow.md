@@ -113,6 +113,12 @@ Good case pattern:
 - `observable_outcomes[]` keep the human-readable behavior
 - `expected_outcomes[]` stay executable and scenario-compatible for API/DB cases
 
+For full workflow coverage, prefer a second pattern:
+
+- one case proves the end-to-end lifecycle
+- `workflow_steps[]` encode the concrete multi-step API/DB path inside that single case
+- single-endpoint cases remain for isolated validation/not-found buckets
+
 Examples:
 
 - `Authenticate session happy path`
@@ -128,6 +134,7 @@ While expanding cases:
 - prefer observable differences over internal cause differences
 - avoid field-by-field DTO assertions unless those fields are central to the public contract
 - avoid vague API expectations like "entity is returned successfully" when the downstream assertion DSL is already known
+- do not model a full user journey as three disconnected single-endpoint happy-path cases when one e2e workflow case would better prove the behavior
 
 ## Step 5 - Add Assumptions And Open Questions
 

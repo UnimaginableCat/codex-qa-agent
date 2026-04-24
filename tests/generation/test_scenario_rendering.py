@@ -16,6 +16,7 @@ from tools.generation.domain.models import (
     PlannedCaseGap,
     PlannedRouteIntent,
     PlannedTestCase,
+    PlannedWorkflowStep,
     RouteSupportHint,
 )
 from tools.generation.persistence.artifacts import (
@@ -260,6 +261,57 @@ class ScenarioRenderingTests(unittest.TestCase):
         )
 
         self.assertEqual(len(render_result.draft_set.drafts), 1)
+
+    def test_renderer_renders_multi_step_workflow_case(self) -> None:
+        render_result = DraftScenarioRenderer().render(
+            _plan(
+                [
+                    PlannedTestCase(
+                        case_id="tc-001",
+                        title="Authenticate and revoke session",
+                        objective="Verify the full session lifecycle.",
+                        workflow_steps=[
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Authenticate session",
+                                route=PlannedRouteIntent(
+                                    http_method="POST",
+                                    endpoint_path="/api/sessions/authenticate",
+                                ),
+                                expected_outcomes=["HTTP 200"],
+                                capture=["response.json.sessionId -> session_id"],
+                            ),
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Get session",
+                                route=PlannedRouteIntent(
+                                    http_method="GET",
+                                    endpoint_path="/api/sessions/{{session_id}}",
+                                ),
+                                expected_outcomes=["HTTP 200"],
+                            ),
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Revoke session",
+                                route=PlannedRouteIntent(
+                                    http_method="POST",
+                                    endpoint_path="/api/sessions/{{session_id}}/revoke",
+                                ),
+                                expected_outcomes=["HTTP 204"],
+                            ),
+                        ],
+                    )
+                ]
+            )
+        )
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("### Step 1", draft.markdown)
+        self.assertIn("### Step 2", draft.markdown)
+        self.assertIn("### Step 3", draft.markdown)
+        self.assertIn("Path: /api/sessions/{{session_id}}/revoke", draft.markdown)
+        self.assertEqual(draft.metadata["workflow_step_count"], 3)
 
     def test_preview_service_persists_route_hint_based_drafts_and_parse_results(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -103,6 +103,52 @@ class PlannedDbVerification:
 
 
 @dataclass(slots=True)
+class PlannedWorkflowStep:
+    """Typed workflow step inside one planned end-to-end test case."""
+
+    step_type: str = "api"
+    title: str = ""
+    route: PlannedRouteIntent | None = None
+    request_headers: dict[str, Any] = field(default_factory=dict)
+    request_params: dict[str, Any] = field(default_factory=dict)
+    request_body: Any = None
+    requires_request_body: bool = False
+    auth_strategy: list[str] = field(default_factory=list)
+    requires_auth_strategy: bool = False
+    sql: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+    capture: list[str] = field(default_factory=list)
+    expected_outcomes: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "PlannedWorkflowStep":
+        return cls(
+            step_type=str(payload.get("step_type", "api")),
+            title=str(payload.get("title", "")),
+            route=(
+                None
+                if payload.get("route") is None
+                else PlannedRouteIntent.from_dict(dict(payload.get("route") or {}))
+            ),
+            request_headers=dict(payload.get("request_headers") or {}),
+            request_params=dict(payload.get("request_params") or {}),
+            request_body=payload.get("request_body"),
+            requires_request_body=bool(payload.get("requires_request_body", False)),
+            auth_strategy=[str(item) for item in payload.get("auth_strategy", [])],
+            requires_auth_strategy=bool(payload.get("requires_auth_strategy", False)),
+            sql=str(payload.get("sql", "")),
+            params=dict(payload.get("params") or {}),
+            capture=[str(item) for item in payload.get("capture", [])],
+            expected_outcomes=[str(item) for item in payload.get("expected_outcomes", [])],
+            metadata=dict(payload.get("metadata") or {}),
+        )
+
+
+@dataclass(slots=True)
 class RouteSupportHint:
     """Typed route support projected from evidence or other deterministic sources."""
 
@@ -171,6 +217,7 @@ class AgentPlannedTestCaseInput:
     observable_outcomes: list[str] = field(default_factory=list)
     expected_outcomes: list[str] = field(default_factory=list)
     capture: list[str] = field(default_factory=list)
+    workflow_steps: list[PlannedWorkflowStep] = field(default_factory=list)
     requires_db_verification: bool = False
     priority: str = "normal"
     tags: list[str] = field(default_factory=list)
@@ -202,6 +249,7 @@ class AgentPlannedTestCaseInput:
             observable_outcomes=[str(item) for item in payload.get("observable_outcomes", [])],
             expected_outcomes=[str(item) for item in payload.get("expected_outcomes", [])],
             capture=[str(item) for item in payload.get("capture", [])],
+            workflow_steps=[PlannedWorkflowStep.from_dict(item) for item in payload.get("workflow_steps", [])],
             requires_db_verification=bool(payload.get("requires_db_verification", False)),
             priority=str(payload.get("priority", "normal")),
             tags=[str(item) for item in payload.get("tags", [])],
@@ -308,6 +356,7 @@ class PlannedTestCase:
     observable_outcomes: list[str] = field(default_factory=list)
     expected_results: list[str] = field(default_factory=list)
     capture: list[str] = field(default_factory=list)
+    workflow_steps: list[PlannedWorkflowStep] = field(default_factory=list)
     requires_db_verification: bool = False
     priority: str = "normal"
     assumptions: list[str] = field(default_factory=list)
@@ -340,6 +389,7 @@ class PlannedTestCase:
             observable_outcomes=[str(item) for item in payload.get("observable_outcomes", [])],
             expected_results=[str(item) for item in payload.get("expected_results", [])],
             capture=[str(item) for item in payload.get("capture", [])],
+            workflow_steps=[PlannedWorkflowStep.from_dict(item) for item in payload.get("workflow_steps", [])],
             requires_db_verification=bool(payload.get("requires_db_verification", False)),
             priority=str(payload.get("priority", "normal")),
             assumptions=[str(item) for item in payload.get("assumptions", [])],

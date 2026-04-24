@@ -161,6 +161,53 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
         self.assertIn("agent_plan_evidence_scope_paths_not_list", codes)
         self.assertIn("agent_plan_evidence_scope_invalid_stack_hint", codes)
 
+    def test_validate_file_accepts_multi_step_workflow_case(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "sessions",
+                        "project": "code/demo",
+                        "title": "Sessions workflow",
+                        "planned_test_cases": [
+                            {
+                                "title": "Authenticate and revoke session workflow",
+                                "objective": "Verify the full session lifecycle.",
+                                "kind": "workflow",
+                                "workflow_steps": [
+                                    {
+                                        "step_type": "api",
+                                        "title": "Authenticate session",
+                                        "route": {
+                                            "http_method": "POST",
+                                            "endpoint_path": "/api/sessions/authenticate",
+                                        },
+                                        "expected_outcomes": ["HTTP 200"],
+                                        "capture": ["response.json.sessionId -> session_id"],
+                                    },
+                                    {
+                                        "step_type": "api",
+                                        "title": "Revoke session",
+                                        "route": {
+                                            "http_method": "POST",
+                                            "endpoint_path": "/api/sessions/{{session_id}}/revoke",
+                                        },
+                                        "expected_outcomes": ["HTTP 204"],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+
 
 if __name__ == "__main__":
     unittest.main()

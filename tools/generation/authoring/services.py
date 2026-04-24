@@ -18,6 +18,7 @@ from tools.generation.domain.models import (
     PlannedCaseGap,
     PlannedDbVerification,
     PlannedRouteIntent,
+    PlannedWorkflowStep,
 )
 from tools.generation.evidence.models import TargetStack
 from tools.scenario_runner.domain.models import ApiStepDefinition, DbStepDefinition, ScenarioStep, ScenarioStepType
@@ -62,6 +63,13 @@ AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_case_invalid_capture_contract",
     "agent_plan_case_request_body_required",
     "agent_plan_case_auth_strategy_required",
+    "agent_plan_workflow_step_invalid_expectation_contract",
+    "agent_plan_workflow_step_invalid_capture_contract",
+    "agent_plan_workflow_step_request_body_required",
+    "agent_plan_workflow_step_auth_strategy_required",
+    "agent_plan_workflow_step_route_required",
+    "agent_plan_workflow_step_missing_sql",
+    "agent_plan_workflow_step_invalid_sql",
 }
 
 
@@ -152,6 +160,27 @@ class AgentPlanAuthoringService:
                             "`status` = `ACTIVE`",
                         ],
                     ),
+                    workflow_steps=[
+                        PlannedWorkflowStep(
+                            step_type="api",
+                            title="Optional e2e step: authenticate or create prerequisite state.",
+                            route=PlannedRouteIntent(
+                                http_method="POST",
+                                endpoint_path="/replace/workflow/start",
+                            ),
+                            expected_outcomes=["HTTP 200", "response JSON exists"],
+                            capture=["response.json.id -> workflow_entity_id"],
+                        ),
+                        PlannedWorkflowStep(
+                            step_type="api",
+                            title="Optional e2e step: verify the next operation in the same workflow.",
+                            route=PlannedRouteIntent(
+                                http_method="GET",
+                                endpoint_path="/replace/workflow/{{workflow_entity_id}}",
+                            ),
+                            expected_outcomes=["HTTP 200", "response JSON exists"],
+                        ),
+                    ],
                     metadata={"notes": "Optional freeform case metadata."},
                 )
             ],
@@ -370,21 +399,27 @@ def _validate_case_expectation_contract(
     case_index: int,
 ) -> list[GenerationDiagnostic]:
     kind = case_input.kind.strip().lower()
-    if kind not in {"api", "db"}:
-        return []
-    if not case_input.expected_outcomes:
-        return [
+    diagnostics: list[GenerationDiagnostic] = []
+    if kind in {"api", "db"} and not case_input.expected_outcomes and not _workflow_steps_have_expectations(case_input):
+        diagnostics.append(
             GenerationDiagnostic(
                 code="agent_plan_case_missing_expected_outcomes",
-                message="API and DB planned cases must include deterministic expected_outcomes using runner-supported syntax.",
+                message="API and DB planned cases must include deterministic expected_outcomes using runner-supported syntax, either at case level or in workflow_steps.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=case_ref,
                 details={"case_index": case_index, "kind": kind},
             )
-        ]
+        )
+    if kind not in {"api", "db"} and not case_input.workflow_steps:
+        return diagnostics
+    if kind in {"api", "db"} and not case_input.expected_outcomes:
+        diagnostics.extend(_validate_workflow_step_expectation_contract(case_input, case_ref, case_index))
+        return diagnostics
+    if kind not in {"api", "db"}:
+        diagnostics.extend(_validate_workflow_step_expectation_contract(case_input, case_ref, case_index))
+        return diagnostics
 
     validator = ScenarioStepValidator()
-    diagnostics: list[GenerationDiagnostic] = []
     for contract_diagnostic in validator.inspect_contract(_case_contract_probe(case_input, case_index)):
         if contract_diagnostic.supported:
             continue
@@ -404,6 +439,7 @@ def _validate_case_expectation_contract(
                 },
             )
         )
+    diagnostics.extend(_validate_workflow_step_expectation_contract(case_input, case_ref, case_index))
     return diagnostics
 
 
@@ -464,6 +500,7 @@ def _validate_case_capture_contract(
                 },
             )
         )
+    diagnostics.extend(_validate_workflow_step_capture_contract(case_input, case_ref, case_index))
     return diagnostics
 
 
@@ -472,6 +509,120 @@ def _capture_rule_is_valid(capture_rule: str) -> bool:
         return False
     source_expression, variable_name = (part.strip() for part in capture_rule.split("->", 1))
     return bool(source_expression and variable_name)
+
+
+def _workflow_steps_have_expectations(case_input: AgentPlannedTestCaseInput) -> bool:
+    return any(step.expected_outcomes for step in case_input.workflow_steps)
+
+
+def _validate_workflow_step_expectation_contract(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    validator = ScenarioStepValidator()
+    diagnostics: list[GenerationDiagnostic] = []
+    for step_index, workflow_step in enumerate(case_input.workflow_steps, start=1):
+        step_kind = workflow_step.step_type.strip().lower()
+        if step_kind not in {"api", "db"}:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_workflow_step_invalid_type",
+                    message="workflow_steps step_type must be 'api' or 'db'.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=case_ref,
+                    details={"case_index": case_index, "step_index": step_index, "step_type": workflow_step.step_type},
+                )
+            )
+            continue
+        if not workflow_step.expected_outcomes:
+            continue
+        for contract_diagnostic in validator.inspect_contract(
+            _workflow_step_contract_probe(case_input, workflow_step, case_index, step_index)
+        ):
+            if contract_diagnostic.supported:
+                continue
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_workflow_step_invalid_expectation_contract",
+                    message=_expectation_contract_error_message(step_kind, contract_diagnostic.rule),
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=case_ref,
+                    details={
+                        "case_index": case_index,
+                        "step_index": step_index,
+                        "kind": step_kind,
+                        "rule": contract_diagnostic.rule,
+                        "step_type": contract_diagnostic.step_type.value,
+                        "hint": _expectation_contract_hint(step_kind),
+                        "supported_examples": API_EXPECTATION_EXAMPLES if step_kind == "api" else DB_EXPECTATION_EXAMPLES,
+                    },
+                )
+            )
+    return diagnostics
+
+
+def _workflow_step_contract_probe(
+    case_input: AgentPlannedTestCaseInput,
+    workflow_step: PlannedWorkflowStep,
+    case_index: int,
+    step_index: int,
+) -> ScenarioStep:
+    step_id = case_input.case_id.strip() or f"case-contract-{case_index:03d}-step-{step_index:02d}"
+    title = workflow_step.title.strip() or f"Workflow step {step_index}"
+    if workflow_step.step_type.strip().lower() == "api":
+        route = workflow_step.route or PlannedRouteIntent(http_method="GET", endpoint_path="/__placeholder__")
+        return ScenarioStep(
+            step_id=step_id,
+            step_number=step_index,
+            title=title,
+            step_type=ScenarioStepType.API,
+            api=ApiStepDefinition(
+                name=title,
+                method=route.http_method.strip().upper() or "GET",
+                path=route.endpoint_path.strip() or "/__placeholder__",
+                expected=list(workflow_step.expected_outcomes),
+            ),
+        )
+    return ScenarioStep(
+        step_id=step_id,
+        step_number=step_index,
+        title=title,
+        step_type=ScenarioStepType.DB,
+        db=DbStepDefinition(
+            name=title,
+            sql=workflow_step.sql.strip() or "SELECT 1",
+            expected=list(workflow_step.expected_outcomes),
+        ),
+    )
+
+
+def _validate_workflow_step_capture_contract(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    for step_index, workflow_step in enumerate(case_input.workflow_steps, start=1):
+        for capture_rule in workflow_step.capture:
+            if _capture_rule_is_valid(capture_rule):
+                continue
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_workflow_step_invalid_capture_contract",
+                    message="Workflow step capture rule must use '<source> -> <variable_name>' syntax.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=case_ref,
+                    details={
+                        "case_index": case_index,
+                        "step_index": step_index,
+                        "rule": capture_rule,
+                        "hint": "Use '<source> -> <variable_name>' syntax.",
+                        "supported_examples": CAPTURE_RULE_EXAMPLES,
+                    },
+                )
+            )
+    return diagnostics
 
 
 def _has_auth_header_signal(headers: dict[str, Any]) -> bool:
@@ -490,11 +641,12 @@ def _validate_case_auth_contract(
     case_index: int,
 ) -> list[GenerationDiagnostic]:
     if case_input.kind.strip().lower() != "api":
-        return []
+        return _validate_workflow_step_auth_contract(case_input, case_ref, case_index)
+    diagnostics: list[GenerationDiagnostic] = []
     if case_input.requires_auth_strategy and not (
         case_input.auth_strategy or _has_auth_header_signal(case_input.request_headers)
     ):
-        return [
+        diagnostics.append(
             GenerationDiagnostic(
                 code="agent_plan_case_auth_strategy_required",
                 message="Case requires auth strategy, but no auth_strategy or auth-like request header was authored.",
@@ -502,8 +654,9 @@ def _validate_case_auth_contract(
                 source_ref=case_ref,
                 details={"case_index": case_index},
             )
-        ]
-    return []
+        )
+    diagnostics.extend(_validate_workflow_step_auth_contract(case_input, case_ref, case_index))
+    return diagnostics
 
 
 def _validate_case_request_contract(
@@ -511,10 +664,9 @@ def _validate_case_request_contract(
     case_ref: str,
     case_index: int,
 ) -> list[GenerationDiagnostic]:
-    if case_input.kind.strip().lower() != "api":
-        return []
-    if case_input.requires_request_body and case_input.request_body is None:
-        return [
+    diagnostics: list[GenerationDiagnostic] = []
+    if case_input.kind.strip().lower() == "api" and case_input.requires_request_body and case_input.request_body is None:
+        diagnostics.append(
             GenerationDiagnostic(
                 code="agent_plan_case_request_body_required",
                 message="Case requires a request body, but request_body was not authored.",
@@ -522,8 +674,89 @@ def _validate_case_request_contract(
                 source_ref=case_ref,
                 details={"case_index": case_index},
             )
-        ]
-    return []
+        )
+    diagnostics.extend(_validate_workflow_step_request_contract(case_input, case_ref, case_index))
+    return diagnostics
+
+
+def _validate_workflow_step_auth_contract(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    for step_index, workflow_step in enumerate(case_input.workflow_steps, start=1):
+        if workflow_step.step_type.strip().lower() != "api":
+            continue
+        if workflow_step.requires_auth_strategy and not (
+            workflow_step.auth_strategy or _has_auth_header_signal(workflow_step.request_headers)
+        ):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_workflow_step_auth_strategy_required",
+                    message="Workflow API step requires auth strategy, but no auth_strategy or auth-like request header was authored.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=case_ref,
+                    details={"case_index": case_index, "step_index": step_index},
+                )
+            )
+    return diagnostics
+
+
+def _validate_workflow_step_request_contract(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    for step_index, workflow_step in enumerate(case_input.workflow_steps, start=1):
+        step_kind = workflow_step.step_type.strip().lower()
+        if step_kind == "api" and workflow_step.requires_request_body and workflow_step.request_body is None:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_workflow_step_request_body_required",
+                    message="Workflow API step requires a request body, but request_body was not authored.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=case_ref,
+                    details={"case_index": case_index, "step_index": step_index},
+                )
+            )
+        if step_kind == "db" and not workflow_step.sql.strip():
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_workflow_step_missing_sql",
+                    message="Workflow DB step must include a read-only SQL query.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=case_ref,
+                    details={"case_index": case_index, "step_index": step_index},
+                )
+            )
+        elif step_kind == "db":
+            try:
+                ReadOnlySqlValidator(SqlNormalizer()).validate(workflow_step.sql)
+            except Exception as exc:  # noqa: BLE001
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_workflow_step_invalid_sql",
+                        message=f"Workflow DB step SQL failed read-only validation: {exc}",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=case_ref,
+                        details={"case_index": case_index, "step_index": step_index},
+                    )
+                )
+        if step_kind == "api":
+            route = workflow_step.route
+            if route is None or not route.http_method.strip() or not route.endpoint_path.strip():
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_workflow_step_route_required",
+                        message="Workflow API step must include route.http_method and route.endpoint_path.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=case_ref,
+                        details={"case_index": case_index, "step_index": step_index},
+                    )
+                )
+    return diagnostics
 
 
 def _validate_case_db_verification(
@@ -683,6 +916,7 @@ def _validate_agent_plan_payload_shape(
                 "observable_outcomes",
                 "expected_outcomes",
                 "capture",
+                "workflow_steps",
                 "tags",
                 "unresolved_items",
                 "gaps",
@@ -755,6 +989,67 @@ def _validate_agent_plan_payload_shape(
                         details={"case_index": index},
                     )
                 )
+            workflow_steps = item.get("workflow_steps")
+            if isinstance(workflow_steps, list):
+                for step_index, workflow_step in enumerate(workflow_steps, start=1):
+                    if not isinstance(workflow_step, dict):
+                        diagnostics.append(
+                            GenerationDiagnostic(
+                                code="agent_plan_workflow_step_not_object",
+                                message="Each workflow_steps entry must be a JSON object.",
+                                severity=DiagnosticSeverity.ERROR,
+                                source_ref=source_ref,
+                                details={"case_index": index, "step_index": step_index},
+                            )
+                        )
+                        continue
+                    for field_name in ("auth_strategy", "capture", "expected_outcomes"):
+                        value = workflow_step.get(field_name)
+                        if value is not None and not isinstance(value, list):
+                            diagnostics.append(
+                                GenerationDiagnostic(
+                                    code="agent_plan_workflow_step_field_not_list",
+                                    message=f"workflow_steps field '{field_name}' must be a JSON array.",
+                                    severity=DiagnosticSeverity.ERROR,
+                                    source_ref=source_ref,
+                                    details={"case_index": index, "step_index": step_index, "field": field_name},
+                                )
+                            )
+                    for field_name in ("request_headers", "request_params", "params", "metadata"):
+                        value = workflow_step.get(field_name)
+                        if value is not None and not isinstance(value, dict):
+                            diagnostics.append(
+                                GenerationDiagnostic(
+                                    code="agent_plan_workflow_step_field_not_object",
+                                    message=f"workflow_steps field '{field_name}' must be a JSON object when provided.",
+                                    severity=DiagnosticSeverity.ERROR,
+                                    source_ref=source_ref,
+                                    details={"case_index": index, "step_index": step_index, "field": field_name},
+                                )
+                            )
+                    for field_name in ("requires_request_body", "requires_auth_strategy"):
+                        value = workflow_step.get(field_name)
+                        if value is not None and not isinstance(value, bool):
+                            diagnostics.append(
+                                GenerationDiagnostic(
+                                    code="agent_plan_workflow_step_field_not_bool",
+                                    message=f"workflow_steps field '{field_name}' must be a boolean when provided.",
+                                    severity=DiagnosticSeverity.ERROR,
+                                    source_ref=source_ref,
+                                    details={"case_index": index, "step_index": step_index, "field": field_name},
+                                )
+                            )
+                    step_route = workflow_step.get("route")
+                    if step_route is not None and not isinstance(step_route, dict):
+                        diagnostics.append(
+                            GenerationDiagnostic(
+                                code="agent_plan_workflow_step_route_not_object",
+                                message="workflow_steps route must be a JSON object when provided.",
+                                severity=DiagnosticSeverity.ERROR,
+                                source_ref=source_ref,
+                                details={"case_index": index, "step_index": step_index},
+                            )
+                        )
             raw_requires_db_verification = item.get("requires_db_verification")
             if raw_requires_db_verification is not None and not isinstance(raw_requires_db_verification, bool):
                 diagnostics.append(
