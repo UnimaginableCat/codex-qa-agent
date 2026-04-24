@@ -47,6 +47,7 @@ Do not expect the user to restate these decisions in the prompt.
 - Authoring: `AgentTestPlanInput` and `AgentPlannedTestCaseInput`.
 - Generation: `GenerateTestPlanUseCase` produces `NormalizedTestPlan`.
 - Evidence: explicit scoped code facts only; never broad repository discovery.
+- Coverage assessment: when code facts are collected, authored API cases are compared against extracted endpoint facts.
 - Enrichment: optional evidence-to-plan updates; do not treat them as runnable scenarios.
 - Rendering/review/validation: downstream phases after plan generation.
 - CLI: thin adapter over service contracts. Do not invent generation semantics in the agent.
@@ -60,6 +61,7 @@ only as fallback.
 - Validate structured plan: `<venv-python> -m tools.generation.cli --validate-agent-plan --agent-plan-file <plan.json> --output-format text`
 - Generate from structured plan: `<venv-python> -m tools.generation.cli --agent-plan-file <plan.json> --workspace-root .`
 - Generate with evidence/enrichment: `<venv-python> -m tools.generation.cli --agent-plan-file <plan.json> --workspace-root . --project-path code/<project> --collect-code-facts --enrich --evidence-scope-path <path>`
+- Generate with strict coverage guardrail: `<venv-python> -m tools.generation.cli --agent-plan-file <plan.json> --workspace-root . --project-path code/<project> --collect-code-facts --strict-coverage --evidence-scope-path <path> --output-format text`
 
 Use prose only when the user explicitly wants bootstrap from prose or the agent cannot yet author a
 useful structured plan:
@@ -71,7 +73,7 @@ useful structured plan:
 - Use `agent_plan` unless the request is too vague or the user explicitly wants prose bootstrap.
 - Decompose first for controller, feature, lifecycle, workflow, validation, or API-surface requests.
 - Validate structured input before generation when the agent authored or edited JSON.
-- Use evidence only when the user asked for it or the next requested phase clearly depends on scoped code facts.
+- Use evidence when the user asked for it, when route/fact grounding is needed, or when coverage alignment must be checked against real endpoint facts.
 - Ask for explicit evidence scope only when evidence/enrichment is actually needed.
 - Stop at `NormalizedTestPlan` unless the user asked for downstream phases.
 
@@ -85,7 +87,8 @@ inventory.
 - Prefer core buckets first: happy path, validation, not found/ownership, and only the state-specific negative cases that matter externally.
 - Keep the first plan compact. A good default is roughly `8-10` strong cases unless the user explicitly asked for exhaustive coverage.
 - If multiple internal branches lead to the same observable API behavior, merge them into one case instead of splitting them.
-- Keep `expected_outcomes` at the observable contract level. Do not fill the initial plan with implementation-only details that do not improve testability or rendering.
+- For `kind=api` and `kind=db`, treat `expected_outcomes[]` as runner-compatible expectation DSL, not free-form prose.
+- Put high-level behavior into `observable_outcomes[]` and use `expected_outcomes[]` only for executable assertions the downstream scenario renderer can preserve.
 
 For requests like "cover full XController functionality", the agent should default to:
 
@@ -114,6 +117,7 @@ Before generation, the agent should quickly check that the plan is:
 - `observable`: focused on externally visible behavior
 - `non-duplicative`: near-duplicate cases merged
 - `render-friendly`: cases still map cleanly toward endpoint/method-oriented drafts
+- `scenario-aligned`: API/DB expectations and captures are already compatible with downstream scenario syntax
 - `explicit-unknowns`: unresolved details kept in assumptions/open questions/unresolved items instead of disguised as facts
 
 If the plan fails this gate, reduce or reshape the decomposition before calling generation.
@@ -127,8 +131,9 @@ If the plan fails this gate, reduce or reshape the decomposition before calling 
 5. Fill planned test cases, assumptions, and open questions.
 6. Validate the structured plan before generation.
 7. Run generation from `--agent-plan-file`.
-8. Add explicit evidence scope only when the next requested phase needs code facts.
-9. Continue to enrichment/rendering/review only if the user asked for those phases.
+8. Add explicit evidence scope when the next requested phase needs code facts or authored coverage must be checked against extracted endpoint facts.
+9. If code facts were collected, inspect `coverage_assessment` before draft rendering and treat uncovered endpoint facts as plan gaps, not as a drafting problem.
+10. Continue to enrichment/rendering/review only if the user asked for those phases.
 
 # Decomposition Rule
 
@@ -157,6 +162,9 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 Treat `normalized-plan.json` as the canonical generated plan artifact. Do not treat draft markdown,
 review output, or validation output as the canonical plan.
 
+When evidence is collected, also expect `coverage-assessment.json`. Treat it as the canonical
+authored-plan-vs-endpoint-facts coverage view for that run.
+
 # When More Detail Is Needed
 
 Read these references only when needed:
@@ -174,6 +182,8 @@ Read these references only when needed:
 - Do not collect code facts without explicit scoped paths.
 - Do not infer `project_path`, `CodeFactsScope`, or `stack_hint` from vague prose alone.
 - Do not perform repository-wide discovery.
+- Do not use free-form narrative `expected_outcomes[]` for API/DB cases when downstream scenario syntax is already known.
+- Do not ignore uncovered endpoint facts after collecting evidence; either tighten the scope, add the missing case, or use `--strict-coverage` when the user wants blocking behavior.
 - Do not call LLMs or external APIs from local generation services.
 - Do not treat generated draft markdown as executable or reviewed scenarios.
 - Do not auto-promote drafts or overwrite existing scenario files.

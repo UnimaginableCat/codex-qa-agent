@@ -54,10 +54,21 @@ Each case should contain:
 - `kind`
 - `preconditions[]`
 - `actions[]`
+- optional `observable_outcomes[]`
 - `expected_outcomes[]`
+- optional `capture[]`
 - `priority`
 - `tags[]`
 - `unresolved_items[]`
+- optional `route`
+- optional `request_headers`
+- optional `request_params`
+- optional `request_body`
+- optional `requires_request_body`
+- optional `auth_strategy[]`
+- optional `requires_auth_strategy`
+- optional `db_verification`
+- optional `requires_db_verification`
 - optional `assumptions[]`
 - optional `metadata`
 
@@ -72,6 +83,11 @@ Validation checks:
 - each case has `title`
 - each case has `objective`
 - list/object fields use supported JSON shapes
+- API/DB `expected_outcomes[]` use supported scenario expectation syntax rather than free-form narrative
+- `capture[]` uses supported capture syntax when present
+- `requires_request_body=true` requires `request_body`
+- `requires_auth_strategy=true` requires explicit auth strategy or authored auth headers
+- `requires_db_verification=true` requires explicit `db_verification`
 
 Status behavior:
 
@@ -84,11 +100,22 @@ Status behavior:
 Write only what the agent can justify.
 
 - Keep `actions[]` at planning level, not runner-step level.
-- Use `expected_outcomes[]` for testable outcomes, not implementation guesses.
+- For API/DB cases, use `observable_outcomes[]` for human-readable behavior and `expected_outcomes[]` for runner-compatible assertion DSL.
+- Use `capture[]` only when later scenario steps or DB verification need captured values.
 - Put uncertain details into `unresolved_items[]` or `open_questions[]`.
 - Use `assumptions[]` only for stable assumptions the plan depends on.
 - Do not hide primary planning fields inside `metadata`.
 - Do not ask the user to prescribe the JSON structure unless a true ambiguity remains.
+
+For API-heavy plans, prefer authoring cases that are already grounded enough for:
+
+- request structure
+- auth strategy
+- executable expectations
+- capture needs
+- optional DB verification
+
+This reduces drift between the authored plan and downstream scenario drafts.
 
 ## When To Add `evidence_scope`
 

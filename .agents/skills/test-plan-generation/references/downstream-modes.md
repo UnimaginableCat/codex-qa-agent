@@ -12,6 +12,13 @@ They are not default behavior for a short generation request. The agent should s
 
 Use evidence/enrichment only when you need code-derived route or interface facts.
 
+When code facts are collected, generation also computes a coverage assessment:
+
+- authored API cases covered by extracted endpoint facts
+- extracted endpoint facts covered by authored API cases
+- broad/overlapping matches
+- deterministic missing-case suggestions for uncovered endpoint facts
+
 Requirements:
 
 - explicit `project_path`
@@ -31,6 +38,22 @@ Example:
 ```
 
 Do not use evidence collection as implicit repository discovery.
+
+If the operator wants generation to block on uncovered endpoint facts or uncovered authored API
+cases, add `--strict-coverage`.
+
+Example:
+
+```powershell
+<venv-python> -m tools.generation.cli `
+  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --workspace-root . `
+  --project-path code/demo `
+  --collect-code-facts `
+  --strict-coverage `
+  --evidence-scope-path app/api/users.py `
+  --output-format text
+```
 
 ## Draft Rendering
 
@@ -61,6 +84,9 @@ Review:
   --run-id <generation-run-id> `
   --workspace-root .
 ```
+
+Review output may now include `coverage_missing_case_suggestion` diagnostics when a collected
+endpoint fact has no authored case. Treat these as authoring follow-ups before promotion.
 
 Promote:
 
@@ -115,6 +141,8 @@ After generation:
 
 - stop at `NormalizedTestPlan` unless the user asked for more
 - add evidence only when scoped code facts matter
+- inspect `coverage-assessment.json` when evidence was collected
+- use missing-case suggestions to repair the authored plan before draft polish when coverage is incomplete
 - render drafts only when preview markdown is needed
 - review/promote only when the operator wants scenario files
 - validate only after manual editing or readiness checks
