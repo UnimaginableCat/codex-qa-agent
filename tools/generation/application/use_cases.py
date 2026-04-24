@@ -163,6 +163,7 @@ class GenerateTestPlanUseCase:
         if request.options.persist_artifacts:
             artifact_paths.update(
                 {
+                    "bundle": run_context.artifact_dir,
                     "context": self.artifact_store.write_context(run_context),
                     **(
                         {}

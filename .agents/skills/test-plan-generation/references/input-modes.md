@@ -81,7 +81,7 @@ Structured plan:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root .
 ```
 
@@ -89,7 +89,7 @@ Structured plan with coverage grounding:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -101,7 +101,7 @@ Structured plan with blocking coverage guardrail:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -128,3 +128,5 @@ Prose fallback:
 - Do not fall back to prose just because route/auth/assertion details are still missing; use `agent_plan` plus scoped evidence when the request is otherwise decomposable.
 - Do not treat legacy `artifacts/agent/input` paths as the request storage root. The canonical run
   bundle lives under `artifacts/agent/generation/<source>-<run_id>/`.
+- Do not open an arbitrary old plan file for a fresh request. Start with a new bundle unless the
+  user explicitly wants to continue an existing bundle.

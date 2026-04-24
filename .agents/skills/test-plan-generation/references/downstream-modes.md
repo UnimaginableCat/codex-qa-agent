@@ -29,7 +29,7 @@ Example:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -46,7 +46,7 @@ Example:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -63,7 +63,7 @@ Example:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `

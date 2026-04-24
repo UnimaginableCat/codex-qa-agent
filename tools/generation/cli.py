@@ -36,6 +36,11 @@ from tools.generation.review import (
     ScenarioRevalidationRequest,
     ScenarioRevalidationService,
 )
+from tools.generation.orchestration.context import initialize_generation_run_context
+from tools.generation.persistence import (
+    FileGenerationArtifactStore,
+    managed_generation_artifacts_root_for_path,
+)
 
 LEGACY_AGENT_PLAN_ROOT = ("artifacts", "agent", "input")
 MANAGED_AGENT_PLAN_ROOT = ("artifacts", "agent", "generation")
@@ -68,7 +73,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project", help="Project identifier stored in generation contracts.")
     parser.add_argument("--name", default="", help="Optional human-readable source name.")
     parser.add_argument("--goal", default="", help="Optional goal used when scaffolding an agent plan template.")
-    parser.add_argument("--output", help="Output path for --init-agent-plan.")
+    parser.add_argument(
+        "--output",
+        help="Managed generation root hint for --init-agent-plan. The CLI creates a canonical bundle and writes agent-plan.json inside it.",
+    )
     parser.add_argument("--workspace-root", default=".", help="Workspace root for artifact persistence.")
     parser.add_argument(
         "--output-format",
@@ -216,51 +224,46 @@ def run_init_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
         raise GenerationCliInputError(diagnostics)
     authoring_service = AgentPlanAuthoringService()
     requested_output_path = Path(args.output)
-    try:
-        output_path = authoring_service.resolve_template_output_path(requested_output_path)
-    except FileExistsError:
+    artifacts_root_dir = managed_generation_artifacts_root_for_path(requested_output_path)
+    if artifacts_root_dir is None:
         raise GenerationCliInputError(
             [
                 GenerationDiagnostic(
-                    code="adapter_init_agent_plan_output_exists",
-                    message="Agent plan scaffold output already exists. Choose a new file path.",
+                    code="adapter_init_agent_plan_requires_managed_root",
+                    message="Agent plan scaffold must be written under artifacts/agent/generation.",
                     severity=DiagnosticSeverity.ERROR,
                     source_ref=str(requested_output_path),
                 )
             ]
-        ) from None
-    template = authoring_service.write_template(
-        output_path,
+        )
+    workspace_root = artifacts_root_dir.parent.parent.parent
+    template = authoring_service.build_template(
         source_id=args.source_id or "",
         project=args.project or "",
         title=args.name or "",
         goal=args.goal or "",
     )
-    payload_diagnostics: list[dict[str, Any]] = []
-    message = "Agent-authored plan template scaffolded."
-    if output_path != requested_output_path:
-        payload_diagnostics.append(
-            GenerationDiagnostic(
-                code="agent_plan_scaffold_output_redirected",
-                message="Requested scaffold output already existed, so a managed isolated output directory was used.",
-                severity=DiagnosticSeverity.WARNING,
-                source_ref=str(output_path),
-                details={
-                    "requested_output_path": str(requested_output_path),
-                    "resolved_output_path": str(output_path),
-                },
-            ).to_dict()
-        )
-        message = "Agent-authored plan template scaffolded in an isolated output directory."
+    source_input = GenerationSourceInput(
+        source_id=template.source_id,
+        project=template.project,
+        input_format=SourceInputFormat.STRUCTURED,
+        name=template.title,
+        content=json.dumps(template.to_dict(), ensure_ascii=False),
+    )
+    run_context = initialize_generation_run_context(source_input, workspace_root=workspace_root)
+    artifact_store = FileGenerationArtifactStore()
+    artifact_store.write_context(run_context)
+    output_path = artifact_store.write_agent_plan(run_context, template)
     return to_json_safe(
         {
             "status": StepStatus.PASS.value,
-            "message": message,
+            "message": "Agent-authored plan bundle scaffolded.",
+            "bundle_dir": run_context.artifact_dir,
             "output_path": output_path,
             "requested_output_path": requested_output_path,
             "template_version": template.metadata.get("template_version", ""),
             "input_mode": GenerationInputMode.AGENT_PLAN.value,
-            "diagnostics": payload_diagnostics,
+            "diagnostics": [],
             "template": template.to_dict(),
         }
     )
@@ -297,6 +300,8 @@ def summarize_result(result: Any) -> dict[str, Any]:
             "run_id": result.run_context.run_id,
             "source_id": result.run_context.source_id,
             "project": result.run_context.project,
+            "bundle_dir": result.run_context.artifact_dir,
+            "agent_plan_path": result.artifact_paths.get("agent_plan"),
             "input_mode": result.details.get("input_mode", "prose"),
             "test_case_count": len(result.normalized_plan.test_cases),
             "code_facts": result.details.get("code_facts", "not_requested"),
@@ -871,6 +876,8 @@ def _render_generation_text(payload: dict[str, Any]) -> str:
         f"Run ID: {payload.get('run_id', '')}",
         f"Source ID: {payload.get('source_id', '')}",
         f"Project: {payload.get('project', '')}",
+        f"Bundle: {payload.get('bundle_dir', '')}",
+        f"Agent plan: {payload.get('agent_plan_path') or 'not_applicable'}",
         f"Input mode: {payload.get('input_mode', '')}",
         f"Cases: {payload.get('test_case_count', 0)}",
         f"Code facts: {payload.get('code_facts', 'not_requested')}",
@@ -957,6 +964,8 @@ def _render_generation_text(payload: dict[str, Any]) -> str:
     artifact_paths = payload.get("artifact_paths") or {}
     if artifact_paths:
         lines.append("Artifacts:")
+        if artifact_paths.get("bundle"):
+            lines.append(f"  - bundle: {artifact_paths['bundle']}")
         if artifact_paths.get("agent_plan"):
             lines.append(f"  - agent_plan: {artifact_paths['agent_plan']}")
         if artifact_paths.get("normalized_plan"):
@@ -985,6 +994,7 @@ def _render_authoring_text(payload: dict[str, Any]) -> str:
     if payload.get("output_path"):
         lines.extend(
             [
+                f"Bundle: {payload.get('bundle_dir', '')}",
                 f"Output: {payload['output_path']}",
                 f"Template version: {payload.get('template_version', '')}",
                 f"Input mode: {payload.get('input_mode', '')}",

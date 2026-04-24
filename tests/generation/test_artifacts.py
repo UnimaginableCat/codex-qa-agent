@@ -26,10 +26,8 @@ from tools.generation.persistence.artifacts import (
     ENRICHED_PLAN_FILENAME,
     ENRICHMENT_RESULT_FILENAME,
     EVIDENCE_BUNDLE_FILENAME,
-    EVIDENCE_RUN_STATE_FILENAME,
     FileGenerationArtifactStore,
     GENERATION_ARTIFACTS_DIRNAME,
-    GENERATION_RUNS_DIRNAME,
     MANIFEST_FILENAME,
     NORMALIZED_SOURCE_FILENAME,
     NORMALIZED_PLAN_FILENAME,
@@ -55,11 +53,10 @@ from tools.generation.rendering.models import ScenarioDraft, ScenarioDraftSet, S
 
 
 class GenerationArtifactStoreTests(unittest.TestCase):
-    def test_store_writes_generation_bundle_and_run_state(self) -> None:
+    def test_store_writes_generation_bundle_only(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             context = _context(root)
-            context.run_state_dir.mkdir(parents=True)
             context.artifact_dir.mkdir(parents=True)
             store = FileGenerationArtifactStore()
 
@@ -184,14 +181,13 @@ class GenerationArtifactStoreTests(unittest.TestCase):
 
             manifest = json.loads((context.artifact_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
 
-            self.assertTrue((context.run_state_dir / CONTEXT_FILENAME).exists())
-            self.assertTrue((context.run_state_dir / SUMMARY_FILENAME).exists())
+            self.assertTrue((context.artifact_dir / CONTEXT_FILENAME).exists())
+            self.assertTrue((context.artifact_dir / SUMMARY_FILENAME).exists())
             self.assertTrue((context.artifact_dir / SOURCE_INPUT_FILENAME).exists())
             self.assertTrue((context.artifact_dir / NORMALIZED_SOURCE_FILENAME).exists())
             self.assertTrue((context.artifact_dir / NORMALIZED_PLAN_FILENAME).exists())
             self.assertTrue((context.artifact_dir / TRACEABILITY_MAP_FILENAME).exists())
             self.assertTrue((context.artifact_dir / DIAGNOSTICS_FILENAME).exists())
-            self.assertTrue((context.run_state_dir / EVIDENCE_RUN_STATE_FILENAME).exists())
             self.assertTrue((context.artifact_dir / EVIDENCE_BUNDLE_FILENAME).exists())
             self.assertTrue((context.artifact_dir / ENRICHED_PLAN_FILENAME).exists())
             self.assertTrue((context.artifact_dir / ENRICHMENT_RESULT_FILENAME).exists())
@@ -202,7 +198,7 @@ class GenerationArtifactStoreTests(unittest.TestCase):
             self.assertTrue((context.artifact_dir / SCENARIO_PARSE_RESULTS_FILENAME).exists())
             self.assertTrue((context.artifact_dir / UNSUPPORTED_CHECKS_FILENAME).exists())
             self.assertTrue((context.artifact_dir / DEFERRED_ITEMS_FILENAME).exists())
-            self.assertEqual(manifest["layout_version"], 1)
+            self.assertEqual(manifest["layout_version"], 6)
             self.assertEqual(
                 manifest["bundle"]["source_input_path"],
                 str(context.artifact_dir / SOURCE_INPUT_FILENAME),
@@ -214,10 +210,6 @@ class GenerationArtifactStoreTests(unittest.TestCase):
             self.assertEqual(
                 manifest["bundle"]["evidence_bundle_path"],
                 str(context.artifact_dir / EVIDENCE_BUNDLE_FILENAME),
-            )
-            self.assertEqual(
-                manifest["run_state"]["evidence_path"],
-                str(context.run_state_dir / EVIDENCE_RUN_STATE_FILENAME),
             )
             self.assertEqual(
                 manifest["bundle"]["enrichment_result_path"],
@@ -244,8 +236,6 @@ def _context(root: Path) -> GenerationRunContext:
         workspace_root=root,
         source_id="src-1",
         project="code/demo",
-        runs_root_dir=root / GENERATION_RUNS_DIRNAME,
-        run_state_dir=root / GENERATION_RUNS_DIRNAME / "gen-1",
         artifacts_root_dir=root / GENERATION_ARTIFACTS_DIRNAME,
         artifact_dir=root / GENERATION_ARTIFACTS_DIRNAME / "src-1-gen-1",
         started_at="2026-04-23T08:00:00+00:00",

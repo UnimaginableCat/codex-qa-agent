@@ -17,7 +17,7 @@ ask for scaffold/validate steps.
 ```powershell
 <venv-python> -m tools.generation.cli `
   --init-agent-plan `
-  --output artifacts/agent/generation/users-api-plan.json `
+  --output artifacts/agent/generation `
   --source-id users-api `
   --project code/demo `
   --name "Users API" `
@@ -29,7 +29,7 @@ ask for scaffold/validate steps.
 ```powershell
 <venv-python> -m tools.generation.cli `
   --validate-agent-plan `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --output-format text
 ```
 

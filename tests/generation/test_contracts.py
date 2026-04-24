@@ -214,8 +214,6 @@ class GenerationContractTests(unittest.TestCase):
             workspace_root=Path("D:/workspace"),
             source_id="src-1",
             project="code/demo",
-            runs_root_dir=Path("D:/workspace/.codex-qa/generation/runs"),
-            run_state_dir=Path("D:/workspace/.codex-qa/generation/runs/gen-1"),
             artifacts_root_dir=Path("D:/workspace/artifacts/agent/generation"),
             artifact_dir=Path("D:/workspace/artifacts/agent/generation/src-1-gen-1"),
             started_at="2026-04-23T08:00:00+00:00",
@@ -223,7 +221,6 @@ class GenerationContractTests(unittest.TestCase):
 
         restored = GenerationRunContext.from_dict(json.loads(json.dumps(context.to_dict())))
 
-        self.assertEqual(restored.run_state_dir, context.run_state_dir)
         self.assertEqual(restored.artifact_dir, context.artifact_dir)
 
 

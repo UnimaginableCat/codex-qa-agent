@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from tools.generation.domain.models import GenerationRunContext, GenerationSourceInput
 from tools.generation.persistence.artifacts import (
+    load_generation_run_context_from_bundle_file,
     create_generation_artifact_directory,
     ensure_generation_workspace_directories,
     slugify_artifact_name,
@@ -23,6 +24,10 @@ def initialize_generation_run_context(
     source_input: GenerationSourceInput,
     workspace_root: Path | None = None,
 ) -> GenerationRunContext:
+    if source_input.source_path is not None:
+        existing_context = load_generation_run_context_from_bundle_file(source_input.source_path.resolve())
+        if existing_context is not None:
+            return existing_context
     resolved_workspace_root = (workspace_root or Path.cwd()).resolve()
     run_id = create_generation_run_id()
     directories = ensure_generation_workspace_directories(resolved_workspace_root)

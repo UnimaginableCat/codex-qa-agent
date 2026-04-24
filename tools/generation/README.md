@@ -68,7 +68,7 @@ CLI scaffold:
 ```powershell
 <project-venv-python> -m tools.generation.cli `
   --init-agent-plan `
-  --output artifacts/agent/generation/users-api-plan.json `
+  --output artifacts/agent/generation `
   --source-id users-api `
   --project code/demo `
   --name "Users API" `
@@ -80,7 +80,7 @@ CLI validate-only:
 ```powershell
 <project-venv-python> -m tools.generation.cli `
   --validate-agent-plan `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --output-format text
 ```
 
@@ -88,11 +88,10 @@ The scaffolded template is deterministic and section-complete for Phase 1 author
 deterministic and checks required top-level fields, case presence, required case fields, malformed
 JSON, and unsupported payload shape before full generation runs.
 
-When scaffold output is requested under the managed `artifacts/agent/generation/` tree and the exact
-file already exists, the CLI writes the new scaffold into a separate sibling directory such as
-`artifacts/agent/generation/users-api-plan-001/users-api-plan.json` instead of failing on the
-collision. Custom output paths outside the managed generation tree remain strict and are never
-overwritten.
+`--init-agent-plan` now creates a fresh canonical request bundle under
+`artifacts/agent/generation/<source>-<run_id>/` and writes the scaffold directly to
+`agent-plan.json` inside that bundle. Treat the returned bundle path as the primary result of the
+request, not the raw `--output` hint.
 
 After generation, the authored input is persisted inside the canonical request bundle as
 `agent-plan.json`. Treat that bundle copy as the canonical request artifact.
@@ -121,7 +120,7 @@ Agent-facing adapter:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -133,7 +132,7 @@ Java/Spring controller scope uses the same flow, optionally with an explicit sta
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -163,7 +162,7 @@ Draft scenario rendering preview:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `

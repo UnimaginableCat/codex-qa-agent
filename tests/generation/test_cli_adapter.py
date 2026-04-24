@@ -14,10 +14,10 @@ from tools.generation import cli
 
 
 class GenerationCliAdapterTests(unittest.TestCase):
-    def test_init_agent_plan_scaffolds_template_file(self) -> None:
+    def test_init_agent_plan_scaffolds_template_bundle(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
-            output_path = root / "artifacts" / "agent" / "input" / "users-api-plan.json"
+            output_root = root / "artifacts" / "agent" / "generation"
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -25,7 +25,7 @@ class GenerationCliAdapterTests(unittest.TestCase):
                     [
                         "--init-agent-plan",
                         "--output",
-                        str(output_path),
+                        str(output_root),
                         "--source-id",
                         "users-api",
                         "--project",
@@ -37,30 +37,33 @@ class GenerationCliAdapterTests(unittest.TestCase):
                     ]
                 )
             payload = json.loads(stdout.getvalue())
+            output_path = Path(payload["output_path"])
             written_payload = json.loads(output_path.read_text(encoding="utf-8"))
+            context_payload = json.loads((Path(payload["bundle_dir"]) / "context.json").read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(payload["input_mode"], "agent_plan")
+        self.assertEqual(output_path.name, "agent-plan.json")
+        self.assertEqual(output_path.parent, Path(payload["bundle_dir"]))
         self.assertEqual(written_payload["source_id"], "users-api")
         self.assertEqual(written_payload["project"], "code/demo")
         self.assertEqual(written_payload["title"], "Users API")
+        self.assertEqual(context_payload["artifact_dir"], str(output_path.parent))
         self.assertIn("planned_test_cases", written_payload)
 
-    def test_init_agent_plan_redirects_existing_managed_output_into_separate_folder(self) -> None:
+    def test_init_agent_plan_creates_distinct_bundle_per_request(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
-            output_path = root / "artifacts" / "agent" / "input" / "users-api-plan.json"
-            output_path.parent.mkdir(parents=True)
-            output_path.write_text("existing", encoding="utf-8")
+            output_root = root / "artifacts" / "agent" / "generation"
 
-            stdout = io.StringIO()
-            with redirect_stdout(stdout):
-                exit_code = cli.main(
+            first_stdout = io.StringIO()
+            with redirect_stdout(first_stdout):
+                first_exit_code = cli.main(
                     [
                         "--init-agent-plan",
                         "--output",
-                        str(output_path),
+                        str(output_root),
                         "--source-id",
                         "users-api",
                         "--project",
@@ -69,29 +72,37 @@ class GenerationCliAdapterTests(unittest.TestCase):
                         "Users API",
                     ]
                 )
-            payload = json.loads(stdout.getvalue())
-            redirected_path = Path(payload["output_path"])
+            first_payload = json.loads(first_stdout.getvalue())
 
-            self.assertTrue(redirected_path.exists())
-            self.assertEqual(redirected_path.parent.name, "users-api-plan-001")
-            self.assertEqual(output_path.read_text(encoding="utf-8"), "existing")
+            second_stdout = io.StringIO()
+            with redirect_stdout(second_stdout):
+                second_exit_code = cli.main(
+                    [
+                        "--init-agent-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                    ]
+                )
+            second_payload = json.loads(second_stdout.getvalue())
+            first_exists = Path(first_payload["output_path"]).exists()
+            second_exists = Path(second_payload["output_path"]).exists()
 
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["status"], "PASS")
-        self.assertEqual(Path(payload["requested_output_path"]), output_path)
-        self.assertNotEqual(redirected_path, output_path)
-        self.assertTrue(
-            any(
-                diagnostic["code"] == "agent_plan_scaffold_output_redirected"
-                for diagnostic in payload["diagnostics"]
-            )
-        )
+        self.assertEqual(first_exit_code, 0)
+        self.assertEqual(second_exit_code, 0)
+        self.assertNotEqual(first_payload["bundle_dir"], second_payload["bundle_dir"])
+        self.assertTrue(first_exists)
+        self.assertTrue(second_exists)
 
-    def test_init_agent_plan_keeps_error_for_existing_custom_output_path(self) -> None:
+    def test_init_agent_plan_requires_managed_root(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             output_path = root / "custom-plan.json"
-            output_path.write_text("existing", encoding="utf-8")
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -114,7 +125,7 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ERROR")
         self.assertTrue(
             any(
-                diagnostic["code"] == "adapter_init_agent_plan_output_exists"
+                diagnostic["code"] == "adapter_init_agent_plan_requires_managed_root"
                 for diagnostic in payload["diagnostics"]
             )
         )
@@ -198,7 +209,27 @@ class GenerationCliAdapterTests(unittest.TestCase):
     def test_agent_plan_file_generates_plan_without_prose_scanning(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
-            agent_plan_path = root / "agent-plan.json"
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                init_exit_code = cli.main(
+                    [
+                        "--init-agent-plan",
+                        "--output",
+                        str(root / "artifacts" / "agent" / "generation"),
+                        "--source-id",
+                        "sessions-agent-plan",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Internal user sessions",
+                        "--goal",
+                        "Cover session lifecycle behavior.",
+                    ]
+                )
+            init_payload = json.loads(init_stdout.getvalue())
+            self.assertEqual(init_exit_code, 0)
+            agent_plan_path = Path(init_payload["output_path"])
+            bundle_dir = Path(init_payload["bundle_dir"])
             agent_plan_path.write_text(
                 json.dumps(
                     {
@@ -243,6 +274,7 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(payload["input_mode"], "agent_plan")
         self.assertEqual(payload["source_id"], "sessions-agent-plan")
+        self.assertEqual(Path(payload["bundle_dir"]), bundle_dir)
         self.assertEqual(payload["test_case_count"], 2)
 
     def test_plan_only_mode_generates_plan_and_artifacts(self) -> None:

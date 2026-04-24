@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.common.errors import ToolingError
+from tools.common.io import read_json_file
 from tools.common.io import write_text_file
 from tools.generation.domain.models import (
     AgentTestPlanInput,
@@ -25,6 +26,7 @@ from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderRe
 from tools.generation.review.models import ScenarioPromotionResult
 
 GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
+BUNDLE_LAYOUT_VERSION = 6
 CONTEXT_FILENAME = "context.json"
 AGENT_PLAN_FILENAME = "agent-plan.json"
 SOURCE_INPUT_FILENAME = "source-input.json"
@@ -273,6 +275,32 @@ def create_generation_artifact_directory(artifacts_root_dir: Path, artifact_dir_
     return artifact_dir
 
 
+def managed_generation_artifacts_root_for_path(path: Path) -> Path | None:
+    parts = path.parts
+    normalized_parts = tuple(part.lower() for part in parts)
+    root_parts = tuple(part.lower() for part in GENERATION_ARTIFACTS_DIRNAME.parts)
+    width = len(root_parts)
+    for index in range(len(normalized_parts) - width + 1):
+        if normalized_parts[index:index + width] != root_parts:
+            continue
+        prefix = Path(*parts[:index]) if index else Path()
+        return prefix / GENERATION_ARTIFACTS_DIRNAME
+    return None
+
+
+def load_generation_run_context_from_bundle_file(path: Path) -> GenerationRunContext | None:
+    if path.name != AGENT_PLAN_FILENAME:
+        return None
+    artifacts_root_dir = managed_generation_artifacts_root_for_path(path)
+    if artifacts_root_dir is None:
+        return None
+    context_path = path.parent / CONTEXT_FILENAME
+    if not context_path.exists():
+        return None
+    payload = read_json_file(context_path, "Generation run context")
+    return GenerationRunContext.from_dict(dict(payload))
+
+
 def slugify_artifact_name(value: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-._")
     return normalized.lower() or "generation-source"
@@ -324,7 +352,7 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
         "workspace_root": str(run_context.workspace_root),
         "bundle_dir": str(run_context.artifact_dir),
         "artifact_dir": str(run_context.artifact_dir),
-        "layout_version": 5,
+        "layout_version": BUNDLE_LAYOUT_VERSION,
         "bundle": {
             "manifest_path": str(target_path),
             "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),

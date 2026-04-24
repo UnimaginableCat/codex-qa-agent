@@ -57,11 +57,11 @@ Do not expect the user to restate these decisions in the prompt.
 Use the target project/workspace venv interpreter first. If no suitable venv exists, use `py -3.14`
 only as fallback.
 
-- Scaffold structured plan: `<venv-python> -m tools.generation.cli --init-agent-plan --output <plan.json> --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
-- Validate structured plan: `<venv-python> -m tools.generation.cli --validate-agent-plan --agent-plan-file <plan.json> --output-format text`
-- Generate from structured plan: `<venv-python> -m tools.generation.cli --agent-plan-file <plan.json> --workspace-root .`
-- Generate with evidence/enrichment: `<venv-python> -m tools.generation.cli --agent-plan-file <plan.json> --workspace-root . --project-path code/<project> --collect-code-facts --enrich --evidence-scope-path <path>`
-- Generate with strict coverage guardrail: `<venv-python> -m tools.generation.cli --agent-plan-file <plan.json> --workspace-root . --project-path code/<project> --collect-code-facts --strict-coverage --evidence-scope-path <path> --output-format text`
+- Scaffold structured plan: `<venv-python> -m tools.generation.cli --init-agent-plan --output artifacts/agent/generation --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
+- Validate structured plan: `<venv-python> -m tools.generation.cli --validate-agent-plan --agent-plan-file <bundle>/agent-plan.json --output-format text`
+- Generate from structured plan: `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root .`
+- Generate with evidence/enrichment: `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root . --project-path code/<project> --collect-code-facts --enrich --evidence-scope-path <path>`
+- Generate with strict coverage guardrail: `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root . --project-path code/<project> --collect-code-facts --strict-coverage --evidence-scope-path <path> --output-format text`
 
 Use prose only when the user explicitly wants bootstrap from prose or the agent cannot yet author a
 useful structured plan:
@@ -161,6 +161,10 @@ artifacts/agent/generation/<source_slug>-<run_id>/
 Treat this bundle as the single source of truth for that request. It contains the persisted
 `agent-plan.json`, `context.json`, `normalized-plan.json`, diagnostics, optional evidence, and any
 downstream draft/review artifacts for the same run.
+
+For a new request, do not start from an old plan file in an arbitrary folder. Create a fresh
+bundle with `--init-agent-plan`, work on that bundle's `agent-plan.json`, and only reuse an older
+bundle when the user explicitly asks to continue that exact request.
 
 Treat `normalized-plan.json` as the canonical generated plan artifact. Do not treat draft markdown,
 review output, or validation output as the canonical plan.

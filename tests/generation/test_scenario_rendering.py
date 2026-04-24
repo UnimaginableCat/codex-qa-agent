@@ -20,7 +20,6 @@ from tools.generation.domain.models import (
 )
 from tools.generation.persistence.artifacts import (
     GENERATION_ARTIFACTS_DIRNAME,
-    GENERATION_RUNS_DIRNAME,
     FileGenerationArtifactStore,
 )
 from tools.generation.rendering import (
@@ -266,7 +265,6 @@ class ScenarioRenderingTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             context = _context(root)
-            context.run_state_dir.mkdir(parents=True)
             context.artifact_dir.mkdir(parents=True)
             store = FileGenerationArtifactStore()
 
@@ -285,7 +283,6 @@ class ScenarioRenderingTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             context = _context(root)
-            context.run_state_dir.mkdir(parents=True)
             context.artifact_dir.mkdir(parents=True)
             store = FileGenerationArtifactStore()
 
@@ -383,8 +380,6 @@ def _context(root: Path) -> GenerationRunContext:
         workspace_root=root,
         source_id="src-1",
         project="code/demo",
-        runs_root_dir=root / GENERATION_RUNS_DIRNAME,
-        run_state_dir=root / GENERATION_RUNS_DIRNAME / "gen-1",
         artifacts_root_dir=root / GENERATION_ARTIFACTS_DIRNAME,
         artifact_dir=root / GENERATION_ARTIFACTS_DIRNAME / "src-1-gen-1",
         started_at="2026-04-23T08:00:00+00:00",
