@@ -971,7 +971,17 @@ def _render_authoring_text(payload: dict[str, Any]) -> str:
         lines.append("Diagnostics:")
         for diagnostic in diagnostics:
             lines.append(f"  - {diagnostic.get('code', '')}: {diagnostic.get('message', '')}")
-            suggested_case = (diagnostic.get("details") or {}).get("suggested_case") or {}
+            details = diagnostic.get("details") or {}
+            if details.get("rule"):
+                lines.append(f"    Rule: {details.get('rule', '')}")
+            if details.get("hint"):
+                lines.append(f"    Hint: {details.get('hint', '')}")
+            examples = details.get("supported_examples") or []
+            if examples:
+                lines.append("    Examples:")
+                for example in examples[:6]:
+                    lines.append(f"      - {example}")
+            suggested_case = details.get("suggested_case") or {}
             if suggested_case.get("title"):
                 lines.append(
                     f"    Suggest: {suggested_case.get('title', '')} [{suggested_case.get('http_method', '')} {suggested_case.get('endpoint_path', '')}]"

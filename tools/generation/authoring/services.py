@@ -28,6 +28,27 @@ from .models import AgentPlanLoadResult, AgentPlanValidationResult
 
 AGENT_PLAN_TEMPLATE_VERSION = "agent-plan-template-v1"
 MANAGED_AGENT_INPUT_ROOT = ("artifacts", "agent", "input")
+API_EXPECTATION_EXAMPLES = [
+    "HTTP 200",
+    "HTTP 200 or HTTP 201",
+    "response JSON exists",
+    "response JSON is an array",
+    "response contains `id`",
+    "response `status` = `AUTHENTICATED`",
+    "response `createdAt` is not null",
+]
+DB_EXPECTATION_EXAMPLES = [
+    "one row exists",
+    "`status` = `ACTIVE`",
+    "`revoked_at` is null",
+    "`created_at` is not null",
+    "`email` starts with `autotest.`",
+]
+CAPTURE_RULE_EXAMPLES = [
+    "response.json.id -> created_id",
+    "response.json.principal.sessionId -> session_id",
+    "db.first_row.id -> persisted_id",
+]
 AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_missing",
     "agent_plan_missing_source_id",
@@ -78,7 +99,15 @@ class AgentPlanAuthoringService:
             open_questions=[
                 "Replace with unresolved operator-facing questions."
             ],
-            metadata={"template_version": AGENT_PLAN_TEMPLATE_VERSION},
+            metadata={
+                "template_version": AGENT_PLAN_TEMPLATE_VERSION,
+                "authoring_hints": {
+                    "api_expected_outcomes_examples": API_EXPECTATION_EXAMPLES,
+                    "db_expected_outcomes_examples": DB_EXPECTATION_EXAMPLES,
+                    "capture_rule_syntax": "<source> -> <variable_name>",
+                    "capture_rule_examples": CAPTURE_RULE_EXAMPLES,
+                },
+            },
             planned_test_cases=[
                 AgentPlannedTestCaseInput(
                     title="Replace with case title",
@@ -362,7 +391,7 @@ def _validate_case_expectation_contract(
         diagnostics.append(
             GenerationDiagnostic(
                 code="agent_plan_case_invalid_expectation_contract",
-                message=contract_diagnostic.detail,
+                message=_expectation_contract_error_message(kind, contract_diagnostic.rule),
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=case_ref,
                 details={
@@ -370,6 +399,8 @@ def _validate_case_expectation_contract(
                     "kind": kind,
                     "rule": contract_diagnostic.rule,
                     "step_type": contract_diagnostic.step_type.value,
+                    "hint": _expectation_contract_hint(kind),
+                    "supported_examples": API_EXPECTATION_EXAMPLES if kind == "api" else DB_EXPECTATION_EXAMPLES,
                 },
             )
         )
@@ -422,10 +453,15 @@ def _validate_case_capture_contract(
         diagnostics.append(
             GenerationDiagnostic(
                 code="agent_plan_case_invalid_capture_contract",
-                message="Capture rule must use '<source> -> <variable_name>' syntax.",
+                message="Capture rule must use '<source> -> <variable_name>' syntax, for example 'response.json.id -> created_id'.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=case_ref,
-                details={"case_index": case_index, "rule": capture_rule},
+                details={
+                    "case_index": case_index,
+                    "rule": capture_rule,
+                    "hint": "Use '<source> -> <variable_name>' syntax.",
+                    "supported_examples": CAPTURE_RULE_EXAMPLES,
+                },
             )
         )
     return diagnostics
@@ -565,10 +601,15 @@ def _validate_case_db_verification(
             diagnostics.append(
                 GenerationDiagnostic(
                     code="agent_plan_case_db_verification_invalid_expectation_contract",
-                    message=contract_diagnostic.detail,
+                    message=_expectation_contract_error_message("db", contract_diagnostic.rule),
                     severity=DiagnosticSeverity.ERROR,
                     source_ref=case_ref,
-                    details={"case_index": case_index, "rule": contract_diagnostic.rule},
+                    details={
+                        "case_index": case_index,
+                        "rule": contract_diagnostic.rule,
+                        "hint": _expectation_contract_hint("db"),
+                        "supported_examples": DB_EXPECTATION_EXAMPLES,
+                    },
                 )
             )
 
@@ -578,10 +619,15 @@ def _validate_case_db_verification(
         diagnostics.append(
             GenerationDiagnostic(
                 code="agent_plan_case_db_verification_invalid_capture_contract",
-                message="DB verification capture rule must use '<source> -> <variable_name>' syntax.",
+                message="DB verification capture rule must use '<source> -> <variable_name>' syntax, for example 'db.first_row.id -> persisted_id'.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=case_ref,
-                details={"case_index": case_index, "rule": capture_rule},
+                details={
+                    "case_index": case_index,
+                    "rule": capture_rule,
+                    "hint": "Use '<source> -> <variable_name>' syntax.",
+                    "supported_examples": CAPTURE_RULE_EXAMPLES,
+                },
             )
         )
     return diagnostics
@@ -861,9 +907,34 @@ def _build_validation_message(
     if status == StepStatus.PASS:
         return "Agent-authored plan input is valid."
     if status == StepStatus.BLOCKED:
-        return "Agent-authored plan input is structurally present but blocked by missing required fields."
+        if any(
+            diagnostic.code in {
+                "agent_plan_case_invalid_expectation_contract",
+                "agent_plan_case_db_verification_invalid_expectation_contract",
+                "agent_plan_case_invalid_capture_contract",
+                "agent_plan_case_db_verification_invalid_capture_contract",
+            }
+            for diagnostic in diagnostics
+        ):
+            return "Agent-authored plan input is blocked by unsupported expectation or capture DSL; see diagnostics for supported examples."
+        return "Agent-authored plan input is structurally present but blocked by missing required fields or contract issues."
     error_count = sum(1 for diagnostic in diagnostics if diagnostic.severity == DiagnosticSeverity.ERROR)
     return f"Agent-authored plan input validation failed with {error_count} error(s)."
+
+
+def _expectation_contract_hint(kind: str) -> str:
+    if kind == "db":
+        return "Use deterministic DB expectation syntax like 'one row exists' or '`status` = `ACTIVE`'."
+    return (
+        "Use deterministic API expectation syntax like 'HTTP 404', 'response JSON exists', "
+        "or 'response `status` = `AUTHENTICATED`'."
+    )
+
+
+def _expectation_contract_error_message(kind: str, rule: str) -> str:
+    normalized_rule = rule.rstrip()
+    separator = "" if normalized_rule.endswith((".", "!", "?")) else "."
+    return f"Unsupported {kind.upper()} expectation rule: {normalized_rule}{separator} {_expectation_contract_hint(kind)}"
 
 
 def _is_managed_agent_input_path(output_path: Path) -> bool:
