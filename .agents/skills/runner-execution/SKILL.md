@@ -62,7 +62,7 @@ Also apply this mandatory environment rule: use the project/workspace venv for t
 3. Resolve the project/workspace venv interpreter and verify Python 3.14+.
 4. Execute the runner CLI first; use guided mode unless the user explicitly requested auto/non-interactive mode.
 5. Parse runner JSON output.
-6. Read runner artifacts after execution: at minimum `.codex-qa/runs/<run-id>/summary.json` and `artifacts/agent/<scenario-slug>-<run-id>/report.md` when they exist.
+6. Read runner artifacts after execution: at minimum `.codex-qa/runs/<run-id>/summary.json` and `artifacts/agent/scenario-runs/<run-id>/report.md` when they exist.
 7. If guided output has a real pause/decision point, report `operator_state`, `available_actions`, and `pause_state_path` instead of inventing a choice.
 8. If the run is terminal without a pause-state, report the terminal status and continuation/termination semantics without asking for an operator action.
 9. Resume only when the user selected or explicitly authorized an action.

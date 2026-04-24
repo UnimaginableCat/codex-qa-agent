@@ -187,7 +187,7 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
     @staticmethod
     def _run_context(root: Path) -> RunContext:
         run_state_dir = root / ".codex-qa" / "runs" / "test-run"
-        artifact_dir = root / "artifacts" / "agent" / "api-error-mapping-test-run"
+        artifact_dir = root / "artifacts" / "agent" / "scenario-runs" / "api-error-mapping-test-run"
         return RunContext(
             run_id="test-run",
             workspace_root=root,
@@ -198,7 +198,7 @@ class ScenarioRunnerApiErrorMappingTests(unittest.TestCase):
             compiled_plan_path=root / ".codex-qa" / "parsed-plans" / "plan.json",
             runs_root_dir=root / ".codex-qa" / "runs",
             run_state_dir=run_state_dir,
-            artifacts_root_dir=root / "artifacts" / "agent",
+            artifacts_root_dir=root / "artifacts" / "agent" / "scenario-runs",
             artifact_dir=artifact_dir,
             started_at="2026-04-21T00:00:00+00:00",
         )

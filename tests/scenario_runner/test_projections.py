@@ -204,8 +204,8 @@ def _run_context(root: Path) -> RunContext:
         compiled_plan_path=root / ".codex-qa" / "parsed-plans" / "projection-demo.json",
         runs_root_dir=root / ".codex-qa" / "runs",
         run_state_dir=root / ".codex-qa" / "runs" / "run-123",
-        artifacts_root_dir=root / "artifacts" / "agent",
-        artifact_dir=root / "artifacts" / "agent" / "projection-demo-run-123",
+        artifacts_root_dir=root / "artifacts" / "agent" / "scenario-runs",
+        artifact_dir=root / "artifacts" / "agent" / "scenario-runs" / "projection-demo-run-123",
         started_at="2026-04-22T10:00:00+00:00",
         variables={"run_id": "run-123", "project": "code/demo-project"},
         step_results=[

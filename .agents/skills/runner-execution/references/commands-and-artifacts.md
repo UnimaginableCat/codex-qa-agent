@@ -48,15 +48,15 @@ Inspect `operator_state` before deciding next action. Important fields:
 Minimum:
 
 - `.codex-qa/runs/<run-id>/summary.json`
-- `artifacts/agent/<scenario-slug>-<run-id>/report.md`
+- `artifacts/agent/scenario-runs/<run-id>/report.md`
 
 When relevant:
 
 - `.codex-qa/runs/<run-id>/pause-state.json`
 - `.codex-qa/runs/<run-id>/journal.jsonl`
-- `artifacts/agent/<scenario-slug>-<run-id>/manifest.json`
-- `artifacts/agent/<scenario-slug>-<run-id>/steps/<step-id>/input.json`
-- `artifacts/agent/<scenario-slug>-<run-id>/steps/<step-id>/raw-result.json`
+- `artifacts/agent/scenario-runs/<run-id>/manifest.json`
+- `artifacts/agent/scenario-runs/<run-id>/steps/<step-id>/input.json`
+- `artifacts/agent/scenario-runs/<run-id>/steps/<step-id>/raw-result.json`
 
 Inspect these files as generated evidence. Do not edit `summary.json`, `report.md`, `journal.jsonl`, `pause-state.json`, manifests, or raw step artifacts unless the user explicitly asks to repair artifacts.
 

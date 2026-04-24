@@ -328,7 +328,7 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
     @staticmethod
     def _run_context_with_network_debug(root: Path) -> RunContext:
         run_state_dir = root / ".codex-qa" / "runs" / "test-run"
-        artifact_dir = root / "artifacts" / "agent" / "test-run"
+        artifact_dir = root / "artifacts" / "agent" / "scenario-runs" / "test-run"
         run_state_dir.mkdir(parents=True)
         artifact_dir.mkdir(parents=True)
         return RunContext(
@@ -341,7 +341,7 @@ class ScenarioRunnerFinalizationTests(unittest.TestCase):
             compiled_plan_path=root / ".codex-qa" / "parsed-plans" / "demo-scenario.json",
             runs_root_dir=root / ".codex-qa" / "runs",
             run_state_dir=run_state_dir,
-            artifacts_root_dir=root / "artifacts" / "agent",
+            artifacts_root_dir=root / "artifacts" / "agent" / "scenario-runs",
             artifact_dir=artifact_dir,
             started_at="2026-04-21T00:00:00+00:00",
             step_results=[

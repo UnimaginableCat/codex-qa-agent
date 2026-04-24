@@ -315,7 +315,7 @@ def _guided_template_for_issue(issue: ExecutionIssue) -> _GuidedTemplate | None:
                     "fix_output_directory",
                     GuidedActionType.REVIEW_CONFIGURATION,
                     "Fix output directory access",
-                    "Restore write access to .codex-qa/ and artifacts/agent before rerunning.",
+                    "Restore write access to .codex-qa/ and artifacts/agent/scenario-runs before rerunning.",
                     recommended=True,
                 ),
             ),

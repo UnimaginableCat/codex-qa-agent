@@ -17,7 +17,7 @@ from ..runtime.redaction import redact_sensitive_data
 
 PARSED_PLANS_DIRNAME = Path(".codex-qa/parsed-plans")
 RUNS_DIRNAME = Path(".codex-qa/runs")
-ARTIFACTS_DIRNAME = Path("artifacts/agent")
+ARTIFACTS_DIRNAME = Path("artifacts/agent/scenario-runs")
 CONTEXT_FILENAME = "context.json"
 SUMMARY_FILENAME = "summary.json"
 JOURNAL_FILENAME = "journal.jsonl"
@@ -256,7 +256,7 @@ def ensure_artifact_output_path(path: Path, artifacts_root_dir: Path) -> Path:
     resolved_path = path.resolve()
 
     if resolved_artifacts_root not in resolved_path.parents and resolved_path != resolved_artifacts_root:
-        raise ArtifactPolicyError("Artifact outputs must be written under artifacts/agent")
+        raise ArtifactPolicyError("Artifact outputs must be written under artifacts/agent/scenario-runs")
 
     if resolved_path.suffix.lower() in FORBIDDEN_ARTIFACT_SUFFIXES:
         raise ArtifactPolicyError(
