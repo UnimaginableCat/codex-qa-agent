@@ -15,6 +15,49 @@ The canonical output remains `NormalizedTestPlan`. Optional downstream stages su
 collection, enrichment, draft rendering, review, and validation stay separate from the initial
 authoring step.
 
+This is a multi-mode skill. It covers one continuous artifact lifecycle:
+
+```text
+request -> agent plan -> normalized plan -> drafts -> review -> promoted scenarios -> validation
+```
+
+Do not split this lifecycle into separate skills unless the downstream work becomes operationally
+independent from generation.
+
+# Operating Modes
+
+Choose one primary mode per request. Reuse the same canonical generation bundle unless the user
+explicitly asks to start over.
+
+- `generate`: create or update `agent-plan.json`, validate it, and produce `normalized-plan.json`.
+- `evidence`: collect scoped code facts, run coverage assessment, and optionally enrich the plan.
+- `render`: render markdown draft scenarios from the generated plan.
+- `promote`: review rendered drafts and promote selected or all drafts into `scenarios/generated`.
+- `validate`: validate promoted scenario markdown after editing or readiness checks.
+
+Treat these as downstream phases of one skill, not separate tools with separate semantics.
+
+# Mode Selection Rule
+
+Map the user's wording to the minimum mode that satisfies the request.
+
+- Requests like `test plan`, `cover controller`, `сгенерируй план`, `full functionality` -> `generate`.
+- Requests like `привяжи к реальным endpoint-ам`, `собери code facts`, `coverage` -> `evidence`.
+- Requests like `переведи в drafts`, `render scenarios`, `сделай markdown preview` -> `render`.
+- Requests like `переведи в сценарии`, `promote drafts`, `сделай scenario files`, `promote all` -> `promote`.
+- Requests like `проверь сценарии`, `validate scenario`, `compile/preflight` -> `validate`.
+
+If the user asks for a later mode and the required earlier artifacts do not exist, run only the
+minimum prerequisite phases first.
+
+Examples:
+
+- `Сделай test plan для controller X` -> stop after `generate`.
+- `Теперь привяжи к реальным endpoint-ам` -> continue with `evidence`.
+- `Теперь переведи в draft сценарии` -> continue with `render`.
+- `Теперь давай переводить их все в сценарии` -> continue with `review` + `promote`.
+- `Проверь promoted сценарии` -> continue with `validate`.
+
 # Default Interpretation
 
 Assume the user will usually provide only:
@@ -42,6 +85,9 @@ the agent should, by default:
 
 Do not expect the user to restate these decisions in the prompt.
 
+For a bare generation request, stop after `NormalizedTestPlan`.
+Do not continue into render/review/promotion unless the user asked for downstream phases.
+
 # Architecture Boundaries
 
 - Authoring: `AgentTestPlanInput` and `AgentPlannedTestCaseInput`.
@@ -57,16 +103,25 @@ Do not expect the user to restate these decisions in the prompt.
 Use the target project/workspace venv interpreter first. If no suitable venv exists, use `py -3.14`
 only as fallback.
 
+- Generate mode:
 - Scaffold structured plan: `<venv-python> -m tools.generation.cli --init-agent-plan --output artifacts/agent/generation --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
 - Validate structured plan: `<venv-python> -m tools.generation.cli --validate-agent-plan --agent-plan-file <bundle>/agent-plan.json --output-format text`
 - Generate from structured plan: `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root .`
+- Evidence mode:
 - Generate with evidence/enrichment: `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root . --project-path code/<project> --collect-code-facts --enrich --evidence-scope-path <path>`
 - Generate with strict coverage guardrail: `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root . --project-path code/<project> --collect-code-facts --strict-coverage --evidence-scope-path <path> --output-format text`
+- Generate fallback mode:
 
 Use prose only when the user explicitly wants bootstrap from prose or the agent cannot yet author a
 useful structured plan:
 
 - Prose fallback: `<venv-python> -m tools.generation.cli --source-id <id> --project code/<project> --prose "<text>" --workspace-root .`
+
+- Render mode: `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root . --project-path code/<project> --collect-code-facts --enrich --render-drafts --evidence-scope-path <path>`
+- Review mode: `<venv-python> -m tools.generation.cli --review-drafts --run-id <generation-run-id> --workspace-root .`
+- Promote one mode: `<venv-python> -m tools.generation.cli --promote-draft --run-id <generation-run-id> --draft-id <draft-id> --workspace-root . --target-dir scenarios/generated`
+- Promote all mode: `<venv-python> -m tools.generation.cli --promote-all-drafts --run-id <generation-run-id> --workspace-root . --target-dir scenarios/generated`
+- Validate mode: `<venv-python> -m tools.generation.cli --validate-scenario --path scenarios/generated/<file>.md --output-format text`
 
 # Default Decisions
 
@@ -76,6 +131,10 @@ useful structured plan:
 - Use evidence when the user asked for it, when route/fact grounding is needed, or when coverage alignment must be checked against real endpoint facts.
 - Ask for explicit evidence scope only when evidence/enrichment is actually needed.
 - Stop at `NormalizedTestPlan` unless the user asked for downstream phases.
+- When the user asks for scenario markdown previews, stop after `render`.
+- When the user asks for real scenario files, continue through `review` and then `promote`.
+- When the user asks to convert the whole rendered set, prefer `--promote-all-drafts` over shell loops.
+- When the user asks only for validation/readiness, do not re-generate unless required artifacts are missing.
 
 # Decomposition Defaults
 
@@ -127,15 +186,64 @@ If the plan fails this gate, reduce or reshape the decomposition before calling 
 # Primary Workflow
 
 1. Identify the target project and requested feature/controller scope.
-2. Decide whether the request is decomposable enough for `agent_plan`. Default to yes for controller/feature/API requests.
-3. Decompose into a structured `AgentTestPlanInput`.
-4. Scaffold a starter JSON when needed.
-5. Fill planned test cases, assumptions, and open questions.
-6. Validate the structured plan before generation.
-7. Run generation from `--agent-plan-file`.
-8. Add explicit evidence scope when the next requested phase needs code facts or authored coverage must be checked against extracted endpoint facts.
-9. If code facts were collected, inspect `coverage_assessment` before draft rendering and treat uncovered endpoint facts as plan gaps, not as a drafting problem.
-10. Continue to enrichment/rendering/review only if the user asked for those phases.
+2. Select the minimum required mode from `generate`, `evidence`, `render`, `promote`, `validate`.
+3. Decide whether the request is decomposable enough for `agent_plan`. Default to yes for controller/feature/API requests.
+4. Decompose into a structured `AgentTestPlanInput` when generation is required.
+5. Scaffold a starter JSON when needed.
+6. Fill planned test cases, assumptions, and open questions.
+7. Validate the structured plan before generation.
+8. Run generation from `--agent-plan-file` when generation is required.
+9. Add explicit evidence scope when the selected mode needs code facts or authored coverage must be checked against extracted endpoint facts.
+10. If code facts were collected, inspect `coverage_assessment` before draft rendering and treat uncovered endpoint facts as plan gaps, not as a drafting problem.
+11. Continue only through the last mode the user asked for; do not overshoot into later phases by default.
+
+# Mode Playbooks
+
+## Generate
+
+Use for new planning requests.
+
+1. Create a fresh canonical bundle.
+2. Author `agent-plan.json`.
+3. Validate the plan.
+4. Generate `normalized-plan.json`.
+5. Stop unless the user asked for more.
+
+## Evidence
+
+Use when route grounding or coverage alignment is needed.
+
+1. Reuse the active bundle.
+2. Collect code facts only from explicit scoped paths.
+3. Inspect `coverage-assessment.json`.
+4. Repair missing authored cases before blaming rendering quality.
+
+## Render
+
+Use when the user wants markdown draft scenarios.
+
+1. Ensure a generated plan exists.
+2. Ensure evidence scope exists when route facts are needed.
+3. Render drafts.
+4. Read parse/review artifacts.
+5. Stop at drafts unless the user asked for scenario files.
+
+## Promote
+
+Use when the user wants real scenario files under `scenarios/generated`.
+
+1. Ensure rendered drafts exist.
+2. Review drafts first.
+3. Promote one draft with `--promote-draft` when the user selected a specific item.
+4. Promote the full rendered set with `--promote-all-drafts` when the user asked for all scenarios.
+5. Report promoted paths and residual gaps honestly.
+
+## Validate
+
+Use after manual editing or before execution handoff.
+
+1. Validate promoted scenario files with parser/compile/preflight as requested.
+2. Report readiness, remaining gaps, and whether the file still reflects a generated draft lineage.
 
 # Decomposition Rule
 
@@ -174,6 +282,19 @@ review output, or validation output as the canonical plan.
 When evidence is collected, also expect `coverage-assessment.json`. Treat it as the canonical
 authored-plan-vs-endpoint-facts coverage view for that run.
 
+When render mode was used, also expect:
+
+- `scenario-drafts/`
+- `scenario-render-result.json`
+- `scenario-parse-results.json`
+
+When promote mode was used, also expect:
+
+- `promotion-result.json`
+
+Promoted scenario files under `scenarios/generated/...` are downstream outputs, not the canonical
+plan artifact.
+
 # When More Detail Is Needed
 
 Read these references only when needed:
@@ -198,4 +319,7 @@ Read these references only when needed:
 - Do not auto-promote after a generation-only request or overwrite existing scenario files.
 - When the user explicitly asks for scenario files for the whole rendered set, continue through review
   and use `--promote-all-drafts` instead of stopping at draft previews.
+- Do not create shell loops for batch promotion when the CLI already exposes `--promote-all-drafts`.
+- Do not invent a new bundle when the user is clearly continuing the same generation run.
+- Do not continue from `render` to `promote` unless the user asked for scenario files rather than previews.
 - Do not store canonical planning fields only in `metadata`.

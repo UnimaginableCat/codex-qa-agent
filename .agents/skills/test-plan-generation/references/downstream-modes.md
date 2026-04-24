@@ -8,6 +8,27 @@ with the primary job of this skill, which is to produce a good `NormalizedTestPl
 They are not default behavior for a short generation request. The agent should stop at
 `NormalizedTestPlan` unless the user explicitly asked for more.
 
+Treat this reference as the downstream half of the multi-mode `test-plan-generation` skill:
+
+- `evidence`
+- `render`
+- `promote`
+- `validate`
+
+If the user only asked for plan generation, do not use this reference as a reason to continue into
+later phases.
+
+## Entry Conditions
+
+Use the minimum downstream phase that matches the request:
+
+- `evidence`: the user wants route grounding, code facts, or coverage alignment.
+- `render`: the user wants markdown draft scenarios or previews.
+- `promote`: the user wants actual scenario files under `scenarios/generated`.
+- `validate`: the user wants parser, compile, or preflight checks on scenario markdown.
+
+If the requested phase depends on missing artifacts, run only the minimum prerequisite phases first.
+
 ## Evidence And Enrichment
 
 Use evidence/enrichment only when you need code-derived route or interface facts.
@@ -74,7 +95,12 @@ Example:
 
 Drafts are previews only. They are not execution-ready by default.
 
+If the user says `drafts`, `preview`, or `markdown scenarios`, stop here unless they also asked for
+promotion.
+
 ## Review And Promotion
+
+Use this phase when the operator wants actual scenario files rather than previews.
 
 Review:
 
@@ -108,6 +134,11 @@ Promote:
 Promotion is explicit. Never auto-promote after rendering unless the operator explicitly asked for
 scenario files. For requests like "convert all rendered drafts into scenarios", review first and
 then use `--promote-all-drafts` so the flow ends with promoted `.md` files rather than previews.
+
+Decision rule:
+
+- one selected draft -> `--promote-draft`
+- whole rendered set -> `--promote-all-drafts`
 
 ## Validation After Editing
 
