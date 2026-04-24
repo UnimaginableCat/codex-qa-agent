@@ -304,6 +304,138 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
             any(diagnostic.code == "agent_plan_workflow_db_verification_required" for diagnostic in result.diagnostics)
         )
 
+    def test_validate_file_blocks_api_case_without_route_or_workflow(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api-shape.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users",
+                        "project": "code/demo",
+                        "title": "Users API",
+                        "planned_test_cases": [
+                            {
+                                "title": "Get user",
+                                "objective": "Verify user lookup.",
+                                "kind": "api",
+                                "expected_outcomes": ["HTTP 200", "response JSON exists"],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(diagnostic.code == "agent_plan_case_route_or_workflow_required" for diagnostic in result.diagnostics)
+        )
+
+    def test_validate_file_blocks_workflow_case_without_steps(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow-shape.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users",
+                        "project": "code/demo",
+                        "title": "Users workflow",
+                        "planned_test_cases": [
+                            {
+                                "title": "User lifecycle",
+                                "objective": "Verify lifecycle transitions.",
+                                "kind": "workflow",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(diagnostic.code == "agent_plan_workflow_case_steps_required" for diagnostic in result.diagnostics)
+        )
+
+    def test_validate_file_blocks_db_case_without_db_verification_or_db_step(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "db-shape.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users",
+                        "project": "code/demo",
+                        "title": "Users schema",
+                        "planned_test_cases": [
+                            {
+                                "title": "Verify users schema",
+                                "objective": "Verify schema shape.",
+                                "kind": "db",
+                                "expected_outcomes": ["one row exists"],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "agent_plan_db_case_verification_or_workflow_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_file_blocks_mutating_api_case_without_case_level_db_verification(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api-mutation.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users",
+                        "project": "code/demo",
+                        "title": "Create user",
+                        "planned_test_cases": [
+                            {
+                                "title": "Create user persists row",
+                                "objective": "Verify create user success.",
+                                "kind": "api",
+                                "route": {
+                                    "http_method": "POST",
+                                    "endpoint_path": "/api/users",
+                                },
+                                "request_headers": {"Content-Type": "application/json"},
+                                "request_body": {"email": "user@example.com"},
+                                "requires_request_body": True,
+                                "expected_outcomes": ["HTTP 201", "response JSON exists"],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "agent_plan_case_mutating_api_db_verification_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

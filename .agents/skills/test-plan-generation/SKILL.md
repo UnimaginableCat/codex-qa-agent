@@ -70,10 +70,20 @@ for later phases.
 
 - Keep the first plan compact. A good default is roughly `8-10` strong cases unless the user explicitly asked for exhaustive coverage.
 - Prefer operation-first coverage over branch-by-branch code inventory.
+- Treat `generate` as authoring an execution-oriented plan, not a coverage-only outline that will be fixed by hand later.
+- For broad requests such as "cover the whole controller" or "full functionality", keep the requested scope but author incrementally inside `generate`: start with `1-2` representative seed cases, make them structurally executable, validate the plan, and only then expand the remaining cases.
 - When the request is about a full workflow or full controller functionality, prefer at least one true end-to-end case with `workflow_steps[]`.
 - For successful state-changing workflow cases, include persisted-state verification with `db_verification` or a `db` workflow step.
 - For `kind=api` and `kind=db`, treat `expected_outcomes[]` as runner-compatible expectation DSL, not free-form prose.
+- When an expected value depends on normalization or transformation, author a derived/template/captured variable for the post-transform value and assert against that. Do not reuse raw input placeholders in normalized expectations.
+- Split independent negative or validation variants into separate executable cases or explicit `workflow_steps[]`. Do not compress multiple invalid requests into one prose-only case.
 - Put high-level behavior into `observable_outcomes[]` and use `expected_outcomes[]` only for executable assertions.
+
+## Quality Gates
+
+- `validate-agent-plan` is the minimum gate, not the only gate.
+- If later phases are requested, treat render/review/compile warnings as authoring defects to fix back in `agent-plan.json`, not as acceptable follow-up manual cleanup.
+- Do not continue expanding a full-controller plan after the first seed cases if those cases still show DSL, workflow-shape, capture, or DB-verification problems.
 
 # Rendering Rule
 
@@ -82,6 +92,7 @@ Draft rendering is authored-route-first:
 - single-endpoint API cases should define `route`
 - workflow cases should define complete `workflow_steps[]`
 - rendering should not invent missing route, auth, payload, or DB details
+- if render/review shows missing assertions, captures, or DB checks for a case intended for execution, return to `agent-plan.json` and fix the source plan before promotion
 
 # Guardrails
 

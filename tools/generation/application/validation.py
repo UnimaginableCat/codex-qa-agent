@@ -19,6 +19,10 @@ BLOCKING_DIAGNOSTIC_CODES = {
     "agent_plan_no_cases",
     "agent_plan_case_missing_title",
     "agent_plan_case_missing_objective",
+    "agent_plan_case_route_or_workflow_required",
+    "agent_plan_workflow_case_steps_required",
+    "agent_plan_db_case_verification_or_workflow_required",
+    "agent_plan_case_mutating_api_db_verification_required",
     "no_test_cases_detected",
 }
 

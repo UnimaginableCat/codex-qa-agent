@@ -59,6 +59,10 @@ AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_no_cases",
     "agent_plan_case_missing_title",
     "agent_plan_case_missing_objective",
+    "agent_plan_case_route_or_workflow_required",
+    "agent_plan_workflow_case_steps_required",
+    "agent_plan_db_case_verification_or_workflow_required",
+    "agent_plan_case_mutating_api_db_verification_required",
     "agent_plan_case_missing_expected_outcomes",
     "agent_plan_case_invalid_expectation_contract",
     "agent_plan_case_invalid_capture_contract",
@@ -387,11 +391,73 @@ def validate_agent_plan_input(
                         details={"case_index": index},
                     )
                 )
+        diagnostics.extend(_validate_case_execution_shape(case_input, case_ref, index))
         diagnostics.extend(_validate_case_expectation_contract(case_input, case_ref, index))
         diagnostics.extend(_validate_case_capture_contract(case_input, case_ref, index))
         diagnostics.extend(_validate_case_auth_contract(case_input, case_ref, index))
         diagnostics.extend(_validate_case_request_contract(case_input, case_ref, index))
         diagnostics.extend(_validate_case_db_verification(case_input, case_ref, index))
+    return diagnostics
+
+
+def _validate_case_execution_shape(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    kind = case_input.kind.strip().lower()
+    diagnostics: list[GenerationDiagnostic] = []
+    has_route = case_input.route is not None
+    has_workflow = bool(case_input.workflow_steps)
+    has_case_db_verification = case_input.db_verification is not None
+    has_db_workflow = _workflow_has_authored_db_step(case_input)
+
+    if kind == "api" and not has_route and not has_workflow:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_case_route_or_workflow_required",
+                message=(
+                    "API planned case must author either a concrete route or executable workflow_steps. "
+                    "Do not leave runnable API coverage in a prose-only state."
+                ),
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index, "kind": kind},
+            )
+        )
+    if kind == "workflow" and not has_workflow:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_workflow_case_steps_required",
+                message="Workflow planned case must include executable workflow_steps.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index, "kind": kind},
+            )
+        )
+    if kind == "db" and not has_case_db_verification and not has_db_workflow:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_db_case_verification_or_workflow_required",
+                message="DB planned case must author db_verification or a db workflow_step.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index, "kind": kind},
+            )
+        )
+    if _case_requires_persisted_state_verification(case_input) and not has_case_db_verification:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_case_mutating_api_db_verification_required",
+                message=(
+                    "Single-endpoint API case includes a successful mutating request but no persisted-state DB verification. "
+                    "Author db_verification so the case is execution-ready."
+                ),
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index, "kind": kind},
+            )
+        )
     return diagnostics
 
 
@@ -900,6 +966,15 @@ def _workflow_requires_persisted_state_verification(case_input: AgentPlannedTest
         ):
             return True
     return False
+
+
+def _case_requires_persisted_state_verification(case_input: AgentPlannedTestCaseInput) -> bool:
+    if case_input.kind.strip().lower() != "api" or case_input.route is None:
+        return False
+    method = case_input.route.http_method.strip().upper()
+    if method not in MUTATING_HTTP_METHODS:
+        return False
+    return _expectations_indicate_success(case_input.expected_outcomes)
 
 
 def _workflow_has_authored_db_step(case_input: AgentPlannedTestCaseInput) -> bool:

@@ -4,10 +4,12 @@
 
 1. Scaffold a starter JSON.
 2. Fill top-level plan fields.
-3. Expand `planned_test_cases[]`.
-4. Add assumptions and open questions explicitly.
-5. Validate before generation.
-6. Run generation with `--agent-plan-file`.
+3. Author `1-2` representative seed cases first.
+4. Validate before scaling the rest of `planned_test_cases[]`.
+5. Expand the remaining cases only after the seed cases are structurally executable.
+6. Add assumptions and open questions explicitly.
+7. Validate before generation.
+8. Run generation with `--agent-plan-file`.
 
 ## Scaffold
 
@@ -90,5 +92,22 @@ Each case should contain:
 - For successful mutating workflows, include persisted-state verification.
 - Use `observable_outcomes[]` for human-readable behavior and `expected_outcomes[]` for runner-compatible assertions.
 - For DB steps, prefer direct row-shape assertions like `one row exists` / `no rows exist` before falling back to aggregate SQL.
+- Treat `agent-plan.json` as execution-ready source material. Do not rely on later render/review phases to hand-fix core DSL or workflow-shape issues.
+- For normalized outputs, separate raw input variables from expected output variables. Example: keep a mixed-case email input variable and a lower-cased expected email variable instead of asserting normalized output against the raw input placeholder.
+- Do not use raw placeholders in expectations when the API is expected to trim, lowercase, derive, or otherwise transform the submitted value.
+- Split distinct invalid variants into separate cases or explicit workflow steps so each request remains executable and independently assertable.
+- If a case is intended for downstream execution, do not leave it in a prose-only state after validation; add the concrete `route` or full `workflow_steps[]`, request details, captures, and DB verification that the runner will need.
 - Put uncertain details into `unresolved_items[]` or `open_questions[]`.
 - Do not hide primary planning fields inside `metadata`.
+
+## Seed-Case Gate
+
+Before expanding a broad controller or feature request into the full case set, make sure the first `1-2` authored cases already satisfy all of the following:
+
+- deterministic `expected_outcomes[]` using supported DSL
+- complete `route` or `workflow_steps[]`
+- required `capture[]` rules when later steps depend on earlier values
+- persisted-state verification for successful mutating workflows
+- normalization-aware expected values
+
+If those gates are not met, fix the seed cases first instead of adding more cases.

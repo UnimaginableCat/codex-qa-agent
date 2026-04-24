@@ -19,6 +19,7 @@ Transform a broad feature/controller request into a high-quality `AgentTestPlanI
 - Prefer operation-first coverage over branch-by-branch code inventory.
 - Merge internal branches that collapse to the same observable API behavior.
 - Keep authored `expected_outcomes[]` compatible with downstream scenario syntax.
+- For broad controller requests, do not author all executable detail in one pass. First prove the shape on `1-2` representative seed cases, then expand the full scope.
 
 ## Step Guidance
 
@@ -65,6 +66,13 @@ Good case pattern:
 - `observable_outcomes[]` stay human-readable
 - `expected_outcomes[]` stay executable
 
+Execution-first pattern:
+
+- pick a small seed set that exercises the main request shapes first, for example one single-endpoint happy path and one mutating workflow
+- make those seed cases fully executable before expanding the rest
+- if a field is normalized or transformed by the system, model both input and expected output explicitly with separate variables
+- avoid prose bundles like "send several invalid payloads" unless they are rendered as separate executable workflow steps
+
 For full workflows:
 
 - use one case with `workflow_steps[]`
@@ -87,3 +95,4 @@ Prefer adding:
 - `request_body` / `requires_request_body` when request shape matters
 - `auth_strategy[]` / `requires_auth_strategy` when auth is not implicit
 - `db_verification` / `requires_db_verification` when persisted state is part of the contract
+- derived/template variables when expectations depend on normalized output values rather than raw request values
