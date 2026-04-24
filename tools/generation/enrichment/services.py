@@ -26,6 +26,10 @@ from tools.generation.evidence.models import (
 from .models import (
     AppliedEvidenceLink,
     CaseEnrichment,
+    CoverageCaseAssessment,
+    CoverageFactAssessment,
+    CoverageAssessmentResult,
+    CoverageSuggestedCase,
     EnrichedTestPlanResult,
     TestCaseReadiness,
     UnappliedEvidenceReason,
@@ -317,6 +321,177 @@ class EvidenceToPlanEnricher:
 
 
 @dataclass(slots=True)
+class TestPlanCoverageAnalyzer:
+    """Project explicit code facts into a simple authored-plan coverage view."""
+
+    min_match_score: int = 3
+
+    def assess(
+        self,
+        plan: NormalizedTestPlan,
+        evidence_bundle: GenerationEvidenceBundle,
+    ) -> CoverageAssessmentResult:
+        api_cases = [case for case in plan.test_cases if _is_api_case(case)]
+        strong_facts = [
+            fact
+            for fact in evidence_bundle.facts
+            if fact.fact_type == "api_endpoint" and fact.confidence != EvidenceConfidence.WEAK_INFERENCE
+        ]
+        weak_fact_ids = [
+            fact.fact_id
+            for fact in evidence_bundle.facts
+            if fact.fact_type == "api_endpoint" and fact.confidence == EvidenceConfidence.WEAK_INFERENCE
+        ]
+
+        covered_case_ids: list[str] = []
+        uncovered_case_ids: list[str] = []
+        covered_fact_ids: set[str] = set()
+        ambiguous_case_ids: list[str] = []
+        duplicated_fact_ids: list[str] = []
+        case_assessments: list[CoverageCaseAssessment] = []
+        fact_assessments: list[CoverageFactAssessment] = []
+        diagnostics: list[GenerationDiagnostic] = []
+        fact_to_case_ids: dict[str, list[str]] = {fact.fact_id: [] for fact in strong_facts}
+
+        for test_case in api_cases:
+            candidates = [
+                candidate
+                for candidate in (_match_candidate(test_case, fact) for fact in strong_facts)
+                if candidate.score >= self.min_match_score and _coverage_candidate_supported(test_case, candidate)
+            ]
+            if not candidates:
+                uncovered_case_ids.append(test_case.case_id)
+                case_assessments.append(
+                    CoverageCaseAssessment(
+                        case_id=test_case.case_id,
+                        title=test_case.title,
+                        status="uncovered",
+                        planned_http_method=(
+                            ""
+                            if test_case.planned_route is None
+                            else test_case.planned_route.http_method
+                        ),
+                        planned_endpoint_path=(
+                            ""
+                            if test_case.planned_route is None
+                            else test_case.planned_route.endpoint_path
+                        ),
+                    )
+                )
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="api_case_not_covered_by_evidence",
+                        message="No extracted API endpoint fact matched this planned API case strongly enough.",
+                        severity=DiagnosticSeverity.WARNING,
+                        source_ref=test_case.case_id,
+                    )
+                )
+                continue
+            covered_case_ids.append(test_case.case_id)
+            matched_fact_ids = [candidate.fact.fact_id for candidate in candidates]
+            covered_fact_ids.update(matched_fact_ids)
+            for fact_id in matched_fact_ids:
+                fact_to_case_ids.setdefault(fact_id, [])
+                if test_case.case_id not in fact_to_case_ids[fact_id]:
+                    fact_to_case_ids[fact_id].append(test_case.case_id)
+            if len(matched_fact_ids) > 1:
+                ambiguous_case_ids.append(test_case.case_id)
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="api_case_matches_multiple_endpoint_facts",
+                        message="Planned API case matches multiple extracted endpoint facts and may be too broad.",
+                        severity=DiagnosticSeverity.WARNING,
+                        source_ref=test_case.case_id,
+                        details={"candidate_fact_ids": matched_fact_ids},
+                    )
+                )
+            case_assessments.append(
+                CoverageCaseAssessment(
+                    case_id=test_case.case_id,
+                    title=test_case.title,
+                    matched_fact_ids=matched_fact_ids,
+                    status="ambiguous" if len(matched_fact_ids) > 1 else "covered",
+                    planned_http_method=(
+                        ""
+                        if test_case.planned_route is None
+                        else test_case.planned_route.http_method
+                    ),
+                    planned_endpoint_path=(
+                        ""
+                        if test_case.planned_route is None
+                        else test_case.planned_route.endpoint_path
+                    ),
+                )
+            )
+
+        uncovered_fact_ids: list[str] = []
+        for fact in strong_facts:
+            matched_case_ids = fact_to_case_ids.get(fact.fact_id, [])
+            fact_assessments.append(
+                CoverageFactAssessment(
+                    fact_id=fact.fact_id,
+                    endpoint_path=str(fact.payload.get("endpoint_path") or ""),
+                    http_method=str(fact.payload.get("http_method") or "").upper(),
+                    handler_name=str(fact.payload.get("handler_name") or ""),
+                    controller_name=str(fact.payload.get("controller_name") or ""),
+                    matched_case_ids=matched_case_ids,
+                    status=(
+                        "uncovered"
+                        if not matched_case_ids
+                        else "duplicated"
+                        if len(matched_case_ids) > 1
+                        else "covered"
+                    ),
+                    suggested_case=None if matched_case_ids else _suggest_case_for_fact(fact),
+                )
+            )
+            if fact.fact_id in covered_fact_ids:
+                if len(matched_case_ids) > 1:
+                    duplicated_fact_ids.append(fact.fact_id)
+                    diagnostics.append(
+                        GenerationDiagnostic(
+                            code="api_endpoint_fact_matched_by_multiple_cases",
+                            message="Extracted API endpoint fact is covered by multiple planned cases and may indicate overlap.",
+                            severity=DiagnosticSeverity.WARNING,
+                            source_ref=fact.fact_id,
+                            details={"candidate_case_ids": matched_case_ids},
+                        )
+                    )
+                continue
+            uncovered_fact_ids.append(fact.fact_id)
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="api_endpoint_fact_not_covered_by_plan",
+                    message="Extracted API endpoint fact is not covered by any authored planned case.",
+                    severity=DiagnosticSeverity.WARNING,
+                    source_ref=fact.fact_id,
+                    details={
+                        "endpoint_path": str(fact.payload.get("endpoint_path") or ""),
+                        "http_method": str(fact.payload.get("http_method") or "").upper(),
+                        "handler_name": str(fact.payload.get("handler_name") or ""),
+                        "controller_name": str(fact.payload.get("controller_name") or ""),
+                        "suggested_case": _suggest_case_for_fact(fact).to_dict(),
+                    },
+                )
+            )
+
+        return CoverageAssessmentResult(
+            api_case_count=len(api_cases),
+            api_fact_count=len(strong_facts),
+            covered_case_ids=covered_case_ids,
+            uncovered_case_ids=uncovered_case_ids,
+            covered_fact_ids=sorted(covered_fact_ids),
+            uncovered_fact_ids=uncovered_fact_ids,
+            ambiguous_case_ids=ambiguous_case_ids,
+            duplicated_fact_ids=duplicated_fact_ids,
+            weak_fact_ids=weak_fact_ids,
+            case_assessments=case_assessments,
+            fact_assessments=fact_assessments,
+            diagnostics=diagnostics,
+        )
+
+
+@dataclass(slots=True)
 class MatchCandidate:
     fact: GenerationEvidenceFact
     score: int
@@ -345,6 +520,11 @@ def _build_applied_link(
         applied_fields={key: value for key, value in applied_fields.items() if value not in (None, "")},
         match_reasons=match_reasons,
     )
+
+
+def _is_api_case(test_case: PlannedTestCase) -> bool:
+    kind = str(test_case.metadata.get("kind") or "").strip().lower()
+    return kind == "api" or test_case.planned_route is not None
 
 
 def _apply_evidence_to_case(
@@ -522,6 +702,86 @@ def _planned_route_conflict(
         "evidence_http_method": fact_method,
         "evidence_endpoint_path": fact_path,
     }
+
+
+def _coverage_candidate_supported(
+    test_case: PlannedTestCase,
+    candidate: MatchCandidate,
+) -> bool:
+    fact = candidate.fact
+    if _planned_route_conflict(test_case, fact) is not None:
+        return False
+    if _method_conflict(test_case, fact):
+        return False
+    if any(
+        reason in {"planned_route_exact", "planned_route_family_match"}
+        for reason in candidate.match_reasons
+    ):
+        return True
+    return any(
+        reason.startswith("action_overlap:") or reason.startswith("http_method:")
+        for reason in candidate.match_reasons
+    )
+
+
+def _suggest_case_for_fact(fact: GenerationEvidenceFact) -> CoverageSuggestedCase:
+    method = str(fact.payload.get("http_method") or "").upper()
+    endpoint_path = str(fact.payload.get("endpoint_path") or "")
+    resource_label = _suggested_resource_label(fact)
+    return CoverageSuggestedCase(
+        title=_suggested_case_title(method, endpoint_path, resource_label),
+        objective=_suggested_case_objective(method, endpoint_path, resource_label),
+        http_method=method,
+        endpoint_path=endpoint_path,
+    )
+
+
+def _suggested_resource_label(fact: GenerationEvidenceFact) -> str:
+    segments = [
+        segment
+        for segment in str(fact.payload.get("endpoint_path") or "").strip("/").split("/")
+        if segment and not segment.startswith("{")
+    ]
+    ignored = {"api", "internal", "v1", "v2", "v3"}
+    candidates = [segment for segment in segments if segment.lower() not in ignored]
+    if candidates:
+        label = candidates[-1]
+    else:
+        handler_terms = _split_identifier(str(fact.payload.get("handler_name") or ""))
+        controller_terms = _split_identifier(str(fact.payload.get("controller_name") or ""))
+        combined = [term for term in sorted(handler_terms | controller_terms) if term not in ignored]
+        label = combined[0] if combined else "resource"
+    return label[:-1] if label.endswith("s") and len(label) > 3 else label
+
+
+def _suggested_case_title(method: str, endpoint_path: str, resource_label: str) -> str:
+    resource = resource_label.replace("-", " ")
+    if method == "GET" and _path_has_identifier(endpoint_path):
+        return f"Get {resource} by id happy path"
+    if method == "GET":
+        return f"List {resource}s happy path"
+    if method == "POST":
+        return f"Create {resource} happy path"
+    if method in {"PUT", "PATCH"}:
+        return f"Update {resource} happy path"
+    if method == "DELETE":
+        return f"Delete {resource} happy path"
+    return f"Cover {resource} endpoint behavior"
+
+
+def _suggested_case_objective(method: str, endpoint_path: str, resource_label: str) -> str:
+    resource = resource_label.replace("-", " ")
+    if method == "GET" and _path_has_identifier(endpoint_path):
+        return f"Verify an existing {resource} can be retrieved by identifier."
+    if method == "GET":
+        return f"Verify the {resource} collection can be listed successfully."
+    if method == "POST":
+        return f"Verify a new {resource} can be created with a valid request."
+    if method in {"PUT", "PATCH"}:
+        return f"Verify an existing {resource} can be updated with a valid request."
+    if method == "DELETE":
+        return f"Verify an existing {resource} can be deleted successfully."
+    return f"Verify the {resource} endpoint matches its externally visible contract."
 
 
 def _case_action_methods(test_case: PlannedTestCase) -> set[str]:

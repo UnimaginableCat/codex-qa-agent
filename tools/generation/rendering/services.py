@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any
 
@@ -132,6 +133,12 @@ class DraftScenarioRenderer:
                         "preview_only": True,
                         "route_binding": support,
                         "case_support": _draft_case_support(test_case, support),
+                        "auth_strategy_required": test_case.requires_auth_strategy,
+                        "auth_strategy_present": bool(test_case.auth_strategy) or _has_auth_header_signal(test_case.request_headers),
+                        "request_body_required": test_case.requires_request_body,
+                        "request_body_present": test_case.request_body is not None,
+                        "db_verification_required": test_case.requires_db_verification,
+                        "db_verification_present": test_case.db_verification is not None,
                         "case_gaps": [gap.to_dict() for gap in test_case.gaps],
                     },
                 )
@@ -159,28 +166,69 @@ class DraftScenarioRenderer:
         endpoint_path = str(support["endpoint_path"])
         route_source = str(support.get("route_source") or "evidence_hints")
         route_readiness = str(support.get("readiness") or "")
+        auth_strategy = list(test_case.auth_strategy)
+        requires_auth_strategy = test_case.requires_auth_strategy
+        request_headers = dict(test_case.request_headers)
+        request_params = dict(test_case.request_params)
+        request_body = test_case.request_body
+        requires_request_body = test_case.requires_request_body
+        capture_rules = list(test_case.capture)
+        db_verification = test_case.db_verification
+        requires_db_verification = test_case.requires_db_verification
         expected_results = test_case.expected_results or [
             "HTTP response is received and must be reviewed before execution."
         ]
+        observable_outcomes = list(test_case.observable_outcomes)
         typed_gap_notes = _typed_gap_notes(test_case)
         typed_gap_summary = _typed_gap_summary_lines(test_case)
         notes = [
             "Generated draft preview only. Do not execute without operator review.",
             "Route resolved for preview rendering.",
             f"Route source: {route_source}.",
-            "Request body not inferred.",
-            "Auth headers not inferred.",
-            "Assertions not generated.",
-            "No DB checks, captures, or concrete payloads were invented.",
+            (
+                "Request structure was authored upstream."
+                if request_headers or request_params or request_body is not None
+                else "Request body is required for this case but not authored yet."
+                if requires_request_body
+                else "Request body not inferred."
+            ),
+            (
+                "Auth strategy was authored upstream."
+                if auth_strategy or _has_auth_header_signal(request_headers)
+                else "Auth strategy is required for this case but not authored yet."
+                if requires_auth_strategy
+                else "Auth not required for this case."
+            ),
+            (
+                "Deterministic expected assertions were authored upstream."
+                if test_case.expected_results
+                else "Assertions not generated."
+            ),
+            (
+                "DB verification step was authored upstream."
+                if db_verification is not None
+                else "DB verification is required for this case but not authored yet."
+                if requires_db_verification
+                else "Capture rules were authored upstream."
+                if capture_rules
+                else "No DB checks, captures, or concrete payloads were invented."
+            ),
         ]
         if route_readiness:
             notes.append(f"Case readiness: {route_readiness}.")
+        notes.append(f"Auth strategy required: {'yes' if requires_auth_strategy else 'no'}.")
+        notes.append(f"Request body required: {'yes' if requires_request_body else 'no'}.")
+        notes.append(f"DB verification required: {'yes' if requires_db_verification else 'no'}.")
         if support.get("handler_name"):
             notes.append(f"Handler: {support['handler_name']}.")
         if support.get("controller_name"):
             notes.append(f"Controller: {support['controller_name']}.")
         if support.get("path_shape"):
             notes.append(f"Route shape: {support['path_shape']}.")
+        for outcome in observable_outcomes:
+            notes.append(f"Observable outcome: {outcome}")
+        for item in auth_strategy:
+            notes.append(f"Auth strategy: {item}")
         for question in test_case.open_questions:
             notes.append(f"Open question: {question}")
         for assumption in test_case.assumptions:
@@ -218,16 +266,81 @@ class DraftScenarioRenderer:
                 f"Name: {_escape_line(test_case.title)}",
                 f"Method: {method}",
                 f"Path: {endpoint_path}",
-                "Expected:",
             ]
         )
+        if request_headers:
+            lines.extend(
+                [
+                    "Headers:",
+                    "```json",
+                    _json_block(request_headers),
+                    "```",
+                ]
+            )
+        if request_params:
+            lines.extend(
+                [
+                    "Params:",
+                    "```json",
+                    _json_block(request_params),
+                    "```",
+                ]
+            )
+        if request_body is not None:
+            lines.extend(
+                [
+                    "Body:",
+                    "```json",
+                    _json_block(request_body),
+                    "```",
+                ]
+            )
+        if capture_rules:
+            lines.extend(
+                [
+                    "Capture:",
+                    *(f"- {_escape_line(item)}" for item in capture_rules),
+                ]
+            )
+        lines.append("Expected:")
         lines.extend(f"- {_escape_line(item)}" for item in expected_results)
+        if db_verification is not None:
+            db_name = db_verification.name.strip() or f"{test_case.title} persisted-state verification"
+            lines.extend(
+                [
+                    "",
+                    "### Step 2",
+                    "Type: db",
+                    f"Name: {_escape_line(db_name)}",
+                    "SQL:",
+                    "```sql",
+                    db_verification.sql.strip(),
+                    "```",
+                    "Params:",
+                    "```json",
+                    _json_block(db_verification.params),
+                    "```",
+                ]
+            )
+            if db_verification.capture:
+                lines.extend(
+                    [
+                        "Capture:",
+                        *(f"- {_escape_line(item)}" for item in db_verification.capture),
+                    ]
+                )
+            lines.append("Expected:")
+            lines.extend(f"- {_escape_line(item)}" for item in db_verification.expected_outcomes)
         lines.extend(
             [
                 "",
                 "## Final expectations",
                 "- Draft parses successfully as scenario markdown.",
-                "- Operator reviews missing payloads, headers, assertions, and environment data before execution.",
+                (
+                    "- Operator reviews missing payloads, headers, and environment data before execution."
+                    if test_case.expected_results
+                    else "- Operator reviews missing payloads, headers, assertions, and environment data before execution."
+                ),
                 "",
                 "## Report output",
                 f"artifacts/agent/{project_name}-{_slugify(test_case.case_id)}-draft-report.md",
@@ -356,7 +469,11 @@ def _render_diagnostics(test_case: PlannedTestCase, support: dict[str, Any]) -> 
     diagnostics.append(
         GenerationDiagnostic(
             code="rendered_with_partial_information",
-            message="Scenario draft was rendered without inferred payloads, auth, or assertions.",
+            message=(
+                "Scenario draft was rendered without inferred payloads or auth."
+                if test_case.expected_results
+                else "Scenario draft was rendered without inferred payloads, auth, or assertions."
+            ),
             severity=DiagnosticSeverity.INFO,
             source_ref=test_case.case_id,
         )
@@ -443,6 +560,20 @@ def _draft_case_support(test_case: PlannedTestCase, support: dict[str, Any]) -> 
         "readiness": str(support.get("readiness") or ""),
         "route_hints": [route_hint.to_dict()],
     }
+
+
+def _json_block(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def _has_auth_header_signal(headers: dict[str, Any]) -> bool:
+    for raw_name in headers:
+        name = str(raw_name).strip().lower()
+        if name == "authorization":
+            return True
+        if "token" in name or "api-key" in name or "apikey" in name or name == "cookie":
+            return True
+    return False
 
 
 def _typed_gap_notes(test_case: PlannedTestCase) -> list[str]:

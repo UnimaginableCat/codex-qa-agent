@@ -18,7 +18,7 @@ from tools.generation.domain.models import (
     NormalizedTestPlan,
     TraceabilityMap,
 )
-from tools.generation.enrichment.models import EnrichedTestPlanResult
+from tools.generation.enrichment.models import CoverageAssessmentResult, EnrichedTestPlanResult
 from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 from tools.generation.review.models import ScenarioPromotionResult
@@ -37,6 +37,7 @@ ENRICHED_PLAN_FILENAME = "enriched-plan.json"
 ENRICHMENT_RESULT_FILENAME = "enrichment-result.json"
 APPLIED_EVIDENCE_FILENAME = "applied-evidence.json"
 UNAPPLIED_EVIDENCE_FILENAME = "unapplied-evidence.json"
+COVERAGE_ASSESSMENT_FILENAME = "coverage-assessment.json"
 SCENARIO_DRAFTS_DIRNAME = "scenario-drafts"
 SCENARIO_RENDER_RESULT_FILENAME = "scenario-render-result.json"
 SCENARIO_PARSE_RESULTS_FILENAME = "scenario-parse-results.json"
@@ -180,6 +181,16 @@ class FileGenerationArtifactStore:
         self.write_manifest(run_context)
         return target_path
 
+    def write_coverage_assessment(
+        self,
+        run_context: GenerationRunContext,
+        coverage_assessment: CoverageAssessmentResult,
+    ) -> Path:
+        target_path = _bundle_file_path(run_context, COVERAGE_ASSESSMENT_FILENAME)
+        _write_json_file(target_path, coverage_assessment.to_dict())
+        self.write_manifest(run_context)
+        return target_path
+
     def write_scenario_drafts(
         self,
         run_context: GenerationRunContext,
@@ -317,7 +328,7 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
         "workspace_root": str(run_context.workspace_root),
         "run_state_dir": str(run_context.run_state_dir),
         "artifact_dir": str(run_context.artifact_dir),
-        "layout_version": 1,
+        "layout_version": 2,
         "bundle": {
             "manifest_path": str(target_path),
             "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),
@@ -331,6 +342,7 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
             "enrichment_result_path": str(run_context.artifact_dir / ENRICHMENT_RESULT_FILENAME),
             "applied_evidence_path": str(run_context.artifact_dir / APPLIED_EVIDENCE_FILENAME),
             "unapplied_evidence_path": str(run_context.artifact_dir / UNAPPLIED_EVIDENCE_FILENAME),
+            "coverage_assessment_path": str(run_context.artifact_dir / COVERAGE_ASSESSMENT_FILENAME),
             "scenario_drafts_dir": str(run_context.artifact_dir / SCENARIO_DRAFTS_DIRNAME),
             "scenario_render_result_path": str(run_context.artifact_dir / SCENARIO_RENDER_RESULT_FILENAME),
             "scenario_parse_results_path": str(run_context.artifact_dir / SCENARIO_PARSE_RESULTS_FILENAME),

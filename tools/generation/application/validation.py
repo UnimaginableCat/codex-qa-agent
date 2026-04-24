@@ -21,6 +21,9 @@ BLOCKING_DIAGNOSTIC_CODES = {
     "agent_plan_case_missing_objective",
     "enrichment_unsupported_current_phase",
     "no_test_cases_detected",
+    "strict_coverage_requires_evidence",
+    "coverage_guardrail_uncovered_cases",
+    "coverage_guardrail_uncovered_facts",
 }
 
 
@@ -43,6 +46,11 @@ def build_generation_message(status: StepStatus, diagnostics: list[GenerationDia
     warning_count = sum(
         1 for diagnostic in diagnostics if diagnostic.severity == DiagnosticSeverity.WARNING
     )
+    if any(
+        diagnostic.code in {"coverage_guardrail_uncovered_cases", "coverage_guardrail_uncovered_facts"}
+        for diagnostic in diagnostics
+    ):
+        return "Test-plan generation was blocked because authored coverage does not align with extracted endpoint facts."
     if status == StepStatus.BLOCKED:
         return "Test-plan generation was blocked by source input or generation policy issues."
     if status == StepStatus.ERROR:

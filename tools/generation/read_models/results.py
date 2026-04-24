@@ -16,6 +16,7 @@ from tools.generation.domain.models import (
     TraceabilityMap,
 )
 from tools.generation.enrichment.models import EnrichedTestPlanResult
+from tools.generation.enrichment.models import CoverageAssessmentResult
 from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioRenderResult
 
@@ -31,6 +32,7 @@ class GenerationRunResult:
     traceability_map: TraceabilityMap
     normalized_source: NormalizedProseSource | None = None
     evidence_bundle: GenerationEvidenceBundle | None = None
+    coverage_assessment: CoverageAssessmentResult | None = None
     enrichment_result: EnrichedTestPlanResult | None = None
     scenario_render_result: ScenarioRenderResult | None = None
     diagnostics: list[GenerationDiagnostic] = field(default_factory=list)

@@ -126,3 +126,121 @@ class EnrichedTestPlanResult:
                 TraceabilityLink.from_dict(item) for item in payload.get("traceability_links", [])
             ],
         )
+
+
+@dataclass(slots=True)
+class CoverageCaseAssessment:
+    case_id: str
+    title: str
+    matched_fact_ids: list[str] = field(default_factory=list)
+    status: str = "uncovered"
+    planned_http_method: str = ""
+    planned_endpoint_path: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "CoverageCaseAssessment":
+        return cls(
+            case_id=str(payload["case_id"]),
+            title=str(payload.get("title", "")),
+            matched_fact_ids=[str(item) for item in payload.get("matched_fact_ids", [])],
+            status=str(payload.get("status", "uncovered")),
+            planned_http_method=str(payload.get("planned_http_method", "")),
+            planned_endpoint_path=str(payload.get("planned_endpoint_path", "")),
+        )
+
+
+@dataclass(slots=True)
+class CoverageSuggestedCase:
+    title: str = ""
+    objective: str = ""
+    http_method: str = ""
+    endpoint_path: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "CoverageSuggestedCase":
+        return cls(
+            title=str(payload.get("title", "")),
+            objective=str(payload.get("objective", "")),
+            http_method=str(payload.get("http_method", "")),
+            endpoint_path=str(payload.get("endpoint_path", "")),
+        )
+
+
+@dataclass(slots=True)
+class CoverageFactAssessment:
+    fact_id: str
+    endpoint_path: str = ""
+    http_method: str = ""
+    handler_name: str = ""
+    controller_name: str = ""
+    matched_case_ids: list[str] = field(default_factory=list)
+    status: str = "uncovered"
+    suggested_case: CoverageSuggestedCase | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "CoverageFactAssessment":
+        return cls(
+            fact_id=str(payload["fact_id"]),
+            endpoint_path=str(payload.get("endpoint_path", "")),
+            http_method=str(payload.get("http_method", "")),
+            handler_name=str(payload.get("handler_name", "")),
+            controller_name=str(payload.get("controller_name", "")),
+            matched_case_ids=[str(item) for item in payload.get("matched_case_ids", [])],
+            status=str(payload.get("status", "uncovered")),
+            suggested_case=(
+                None
+                if payload.get("suggested_case") is None
+                else CoverageSuggestedCase.from_dict(dict(payload.get("suggested_case") or {}))
+            ),
+        )
+
+
+@dataclass(slots=True)
+class CoverageAssessmentResult:
+    api_case_count: int = 0
+    api_fact_count: int = 0
+    covered_case_ids: list[str] = field(default_factory=list)
+    uncovered_case_ids: list[str] = field(default_factory=list)
+    covered_fact_ids: list[str] = field(default_factory=list)
+    uncovered_fact_ids: list[str] = field(default_factory=list)
+    ambiguous_case_ids: list[str] = field(default_factory=list)
+    duplicated_fact_ids: list[str] = field(default_factory=list)
+    weak_fact_ids: list[str] = field(default_factory=list)
+    case_assessments: list[CoverageCaseAssessment] = field(default_factory=list)
+    fact_assessments: list[CoverageFactAssessment] = field(default_factory=list)
+    diagnostics: list[GenerationDiagnostic] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "CoverageAssessmentResult":
+        return cls(
+            api_case_count=int(payload.get("api_case_count", 0)),
+            api_fact_count=int(payload.get("api_fact_count", 0)),
+            covered_case_ids=[str(item) for item in payload.get("covered_case_ids", [])],
+            uncovered_case_ids=[str(item) for item in payload.get("uncovered_case_ids", [])],
+            covered_fact_ids=[str(item) for item in payload.get("covered_fact_ids", [])],
+            uncovered_fact_ids=[str(item) for item in payload.get("uncovered_fact_ids", [])],
+            ambiguous_case_ids=[str(item) for item in payload.get("ambiguous_case_ids", [])],
+            duplicated_fact_ids=[str(item) for item in payload.get("duplicated_fact_ids", [])],
+            weak_fact_ids=[str(item) for item in payload.get("weak_fact_ids", [])],
+            case_assessments=[
+                CoverageCaseAssessment.from_dict(item)
+                for item in payload.get("case_assessments", [])
+            ],
+            fact_assessments=[
+                CoverageFactAssessment.from_dict(item)
+                for item in payload.get("fact_assessments", [])
+            ],
+            diagnostics=[GenerationDiagnostic.from_dict(item) for item in payload.get("diagnostics", [])],
+        )

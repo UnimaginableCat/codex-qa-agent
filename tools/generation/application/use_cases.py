@@ -19,6 +19,8 @@ from tools.generation.domain.models import (
     TraceabilityMap,
 )
 from tools.generation.enrichment import EvidenceToPlanEnricher, TestPlanEnricher
+from tools.generation.enrichment.models import CoverageAssessmentResult
+from tools.generation.enrichment.services import TestPlanCoverageAnalyzer
 from tools.generation.evidence import (
     CodeFactsExtractionService,
     CodeFactsScope,
@@ -46,6 +48,7 @@ class GenerateTestPlanUseCase:
     artifact_store: GenerationArtifactStore = field(default_factory=FileGenerationArtifactStore)
     code_facts_extraction_service: CodeFactsExtractionService = field(default_factory=CodeFactsExtractionService)
     test_plan_enricher: TestPlanEnricher = field(default_factory=EvidenceToPlanEnricher)
+    coverage_analyzer: TestPlanCoverageAnalyzer = field(default_factory=TestPlanCoverageAnalyzer)
     scenario_draft_preview: ScenarioDraftPreviewService = field(default_factory=ScenarioDraftPreviewService)
 
     def execute(self, request: GenerateTestPlanRequest) -> GenerationRunResult:
@@ -101,6 +104,11 @@ class GenerateTestPlanUseCase:
                 normalized_plan,
             )
         evidence_bundle = self._collect_evidence(request) if request.options.collect_code_facts else None
+        coverage_assessment = None
+        if evidence_bundle is not None:
+            coverage_assessment = self.coverage_analyzer.assess(normalized_plan, evidence_bundle)
+            diagnostics.extend(coverage_assessment.diagnostics)
+            diagnostics.extend(_coverage_guardrail_diagnostics(request, coverage_assessment))
         enrichment_result = None
         if request.options.enrichment_enabled and evidence_bundle is not None:
             enrichment_result = self.test_plan_enricher.enrich(normalized_plan, evidence_bundle)
@@ -132,6 +140,7 @@ class GenerateTestPlanUseCase:
             traceability_map=traceability_map,
             normalized_source=normalized_source,
             evidence_bundle=evidence_bundle,
+            coverage_assessment=coverage_assessment,
             enrichment_result=enrichment_result,
             scenario_render_result=scenario_render_result,
             diagnostics=diagnostics,
@@ -144,6 +153,9 @@ class GenerateTestPlanUseCase:
                 "scenario_synthesis": "out_of_scope",
                 "enrichment": _enrichment_state(request, enrichment_result),
                 "code_facts": "collected" if evidence_bundle is not None else "not_requested",
+                "coverage": _coverage_state(coverage_assessment),
+                "coverage_summary": _coverage_summary(coverage_assessment),
+                "coverage_guardrail": _coverage_guardrail_state(request, coverage_assessment),
                 "scenario_rendering": _scenario_rendering_state(request, scenario_render_result),
             },
         )
@@ -175,6 +187,11 @@ class GenerateTestPlanUseCase:
                 artifact_paths["evidence"] = self.artifact_store.write_evidence_bundle(
                     run_context,
                     evidence_bundle,
+                )
+            if coverage_assessment is not None:
+                artifact_paths["coverage_assessment"] = self.artifact_store.write_coverage_assessment(
+                    run_context,
+                    coverage_assessment,
                 )
             if enrichment_result is not None:
                 artifact_paths["enriched_plan"] = self.artifact_store.write_enriched_plan(
@@ -246,6 +263,15 @@ class GenerateTestPlanUseCase:
                     source_ref=request.source_input.source_id,
                 )
             )
+        if request.options.strict_coverage and not request.options.collect_code_facts:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="strict_coverage_requires_evidence",
+                    message="Strict coverage guardrail requires collect_code_facts=True and an explicit evidence scope.",
+                    severity=DiagnosticSeverity.WARNING,
+                    source_ref=request.source_input.source_id,
+                )
+            )
         return diagnostics
 
     @staticmethod
@@ -274,6 +300,75 @@ def _scenario_rendering_state(request: GenerateTestPlanRequest, render_result: o
     if request.options.render_scenario_drafts:
         return "skipped_no_persistence"
     return "not_requested"
+
+
+def _coverage_state(coverage_assessment: CoverageAssessmentResult | None) -> str:
+    if coverage_assessment is None:
+        return "not_requested"
+    if coverage_assessment.uncovered_case_ids or coverage_assessment.uncovered_fact_ids:
+        return "gaps_detected"
+    if coverage_assessment.ambiguous_case_ids or coverage_assessment.duplicated_fact_ids:
+        return "overlaps_detected"
+    return "aligned"
+
+
+def _coverage_summary(coverage_assessment: CoverageAssessmentResult | None) -> dict[str, int] | str:
+    if coverage_assessment is None:
+        return "not_requested"
+    return {
+        "api_case_count": coverage_assessment.api_case_count,
+        "api_fact_count": coverage_assessment.api_fact_count,
+        "covered_case_count": len(coverage_assessment.covered_case_ids),
+        "uncovered_case_count": len(coverage_assessment.uncovered_case_ids),
+        "covered_fact_count": len(coverage_assessment.covered_fact_ids),
+        "uncovered_fact_count": len(coverage_assessment.uncovered_fact_ids),
+        "ambiguous_case_count": len(coverage_assessment.ambiguous_case_ids),
+        "duplicated_fact_count": len(coverage_assessment.duplicated_fact_ids),
+        "weak_fact_count": len(coverage_assessment.weak_fact_ids),
+    }
+
+
+def _coverage_guardrail_state(
+    request: GenerateTestPlanRequest,
+    coverage_assessment: CoverageAssessmentResult | None,
+) -> str:
+    if not request.options.strict_coverage:
+        return "not_requested"
+    if coverage_assessment is None:
+        return "requires_evidence"
+    if coverage_assessment.uncovered_case_ids or coverage_assessment.uncovered_fact_ids:
+        return "blocked"
+    return "satisfied"
+
+
+def _coverage_guardrail_diagnostics(
+    request: GenerateTestPlanRequest,
+    coverage_assessment: CoverageAssessmentResult | None,
+) -> list[GenerationDiagnostic]:
+    if not request.options.strict_coverage or coverage_assessment is None:
+        return []
+    diagnostics: list[GenerationDiagnostic] = []
+    if coverage_assessment.uncovered_case_ids:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="coverage_guardrail_uncovered_cases",
+                message="Strict coverage guardrail requires every authored API case to match at least one extracted endpoint fact.",
+                severity=DiagnosticSeverity.WARNING,
+                source_ref=request.source_input.source_id,
+                details={"uncovered_case_ids": coverage_assessment.uncovered_case_ids},
+            )
+        )
+    if coverage_assessment.uncovered_fact_ids:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="coverage_guardrail_uncovered_facts",
+                message="Strict coverage guardrail requires every extracted endpoint fact to be covered by at least one authored API case.",
+                severity=DiagnosticSeverity.WARNING,
+                source_ref=request.source_input.source_id,
+                details={"uncovered_fact_ids": coverage_assessment.uncovered_fact_ids},
+            )
+        )
+    return diagnostics
 
 
 def _generation_phase(request: GenerateTestPlanRequest) -> str:

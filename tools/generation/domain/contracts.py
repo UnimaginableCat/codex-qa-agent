@@ -13,7 +13,7 @@ from .models import (
     NormalizedTestPlan,
     TraceabilityMap,
 )
-from tools.generation.enrichment.models import EnrichedTestPlanResult
+from tools.generation.enrichment.models import CoverageAssessmentResult, EnrichedTestPlanResult
 from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 from tools.generation.review.models import ScenarioPromotionResult
@@ -88,6 +88,14 @@ class GenerationArtifactStore(Protocol):
         enrichment_result: EnrichedTestPlanResult,
     ) -> Path:
         """Persist enrichment result and applied/unapplied evidence projections."""
+        ...
+
+    def write_coverage_assessment(
+        self,
+        run_context: GenerationRunContext,
+        coverage_assessment: CoverageAssessmentResult,
+    ) -> Path:
+        """Persist authored-plan coverage assessment against extracted evidence facts."""
         ...
 
     def write_scenario_drafts(

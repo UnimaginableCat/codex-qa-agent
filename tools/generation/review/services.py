@@ -16,9 +16,11 @@ from tools.generation.domain.models import (
     PlannedCaseGap,
 )
 from tools.generation.persistence.artifacts import (
+    COVERAGE_ASSESSMENT_FILENAME,
     GENERATION_RUNS_DIRNAME,
     FileGenerationArtifactStore,
 )
+from tools.generation.enrichment.models import CoverageAssessmentResult
 from tools.generation.rendering.models import ScenarioDraft, ScenarioDraftValidationResult, ScenarioRenderResult
 
 from .models import (
@@ -88,6 +90,7 @@ class ScenarioDraftReviewService:
             for item in render_result.draft_set.deferred_items
         ]
         diagnostics: list[GenerationDiagnostic] = []
+        diagnostics.extend(_coverage_review_diagnostics(_load_coverage_assessment(run_context)))
         if not items:
             diagnostics.append(
                 GenerationDiagnostic(
@@ -737,6 +740,41 @@ def _load_render_result(run_context: GenerationRunContext) -> ScenarioRenderResu
     return ScenarioRenderResult.from_dict(dict(payload))
 
 
+def _load_coverage_assessment(run_context: GenerationRunContext) -> CoverageAssessmentResult | None:
+    coverage_path = run_context.artifact_dir / COVERAGE_ASSESSMENT_FILENAME
+    if not coverage_path.exists():
+        return None
+    payload = read_json_file(coverage_path, "Coverage assessment")
+    return CoverageAssessmentResult.from_dict(dict(payload))
+
+
+def _coverage_review_diagnostics(
+    coverage_assessment: CoverageAssessmentResult | None,
+) -> list[GenerationDiagnostic]:
+    if coverage_assessment is None:
+        return []
+    diagnostics: list[GenerationDiagnostic] = []
+    for fact in coverage_assessment.fact_assessments:
+        if fact.status != "uncovered" or fact.suggested_case is None:
+            continue
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="coverage_missing_case_suggestion",
+                message="Coverage assessment found an uncovered endpoint fact and suggests adding one authored API case.",
+                severity=DiagnosticSeverity.WARNING,
+                source_ref=fact.fact_id,
+                details={
+                    "endpoint_path": fact.endpoint_path,
+                    "http_method": fact.http_method,
+                    "handler_name": fact.handler_name,
+                    "controller_name": fact.controller_name,
+                    "suggested_case": fact.suggested_case.to_dict(),
+                },
+            )
+        )
+    return diagnostics
+
+
 def _build_review_item(
     run_context: GenerationRunContext,
     draft: ScenarioDraft,
@@ -884,25 +922,31 @@ def _draft_gap_summary(
         gap_messages.append("Draft is not parser-valid.")
 
     method = str(route_binding.get("http_method") or "").upper()
-    if method in {"POST", "PUT", "PATCH"}:
+    if _draft_requires_request_body(draft):
+        if not _draft_has_request_body(draft):
+            gap_codes.append("request_body_not_inferred")
+            gap_messages.append("Request body is required for this case but not present in the draft.")
+    elif not _draft_request_body_requirement_known(draft) and method in {"POST", "PUT", "PATCH"}:
         gap_codes.append("request_body_not_inferred")
         gap_messages.append("Request body not inferred.")
     gap_codes.extend(
         [
-            "auth_headers_unresolved",
             "assertions_not_generated",
-            "db_verification_absent",
             "captures_not_generated",
         ]
     )
     gap_messages.extend(
         [
-            "Auth/header requirements remain unresolved.",
             "Assertions were not generated.",
-            "DB verification steps are absent.",
             "Captures were not generated.",
         ]
     )
+    if _draft_requires_auth_strategy(draft) and not _draft_has_auth_strategy(draft):
+        gap_codes.append("auth_headers_unresolved")
+        gap_messages.append("Auth strategy is required for this case but not present in the draft.")
+    if _draft_requires_db_verification(draft) and not _draft_has_db_step(draft):
+        gap_codes.append("db_verification_absent")
+        gap_messages.append("DB verification is required for this case but no DB step is present in the draft.")
 
     readiness = str(route_binding.get("readiness") or "")
     if readiness == "route_resolved":
@@ -949,7 +993,17 @@ def _revalidation_gap_summary(
 
     api_step = _first_api_step(scenario)
     method = str(route_binding.get("http_method") or "").upper()
-    if api_step is not None and method in {"POST", "PUT", "PATCH"} and api_step.api is not None and api_step.api.body is None:
+    if _scenario_requires_request_body(scenario, draft):
+        if api_step is None or api_step.api is None or api_step.api.body is None:
+            gap_codes.append("request_body_not_inferred")
+            gap_messages.append("Request body is required for this scenario but not present.")
+    elif (
+        api_step is not None
+        and method in {"POST", "PUT", "PATCH"}
+        and not _scenario_request_body_requirement_known(scenario, draft)
+        and api_step.api is not None
+        and api_step.api.body is None
+    ):
         gap_codes.append("request_body_not_inferred")
         gap_messages.append("Request body or minimal request structure is missing.")
 
@@ -967,6 +1021,14 @@ def _revalidation_gap_summary(
     if not (has_step_expectation or has_db_expectation or has_final_expectation):
         gap_codes.append("assertions_not_generated")
         gap_messages.append("No concrete expected result or assertion was found.")
+
+    if _scenario_requires_auth_strategy(scenario, draft) and not _scenario_has_auth_strategy(scenario, draft):
+        gap_codes.append("auth_headers_unresolved")
+        gap_messages.append("Auth strategy is required for this scenario but not present.")
+
+    if _scenario_requires_db_verification(scenario, draft) and not _scenario_has_db_step(scenario):
+        gap_codes.append("db_verification_absent")
+        gap_messages.append("DB verification is required for this scenario but no DB step is present.")
 
     if scenario is not None and len(scenario.steps) > 1:
         has_capture = any(
@@ -1090,7 +1152,7 @@ def _build_draft_checklist(
         _check_http_method(route_binding, draft),
         _check_request_structure(route_binding, draft, gap_codes),
         _check_assertions(draft, gap_codes),
-        _check_auth_strategy(gap_codes),
+        _check_auth_strategy(draft, gap_codes),
         _check_db_verification(gap_codes),
         _check_captures(gap_codes),
     ]
@@ -1211,6 +1273,20 @@ def _check_request_structure(
     gap_codes: set[str],
 ) -> DraftRequirementCheck:
     http_method = str(route_binding.get("http_method") or "").upper()
+    if _draft_requires_request_body(draft) and "request_body_not_inferred" not in gap_codes:
+        return DraftRequirementCheck(
+            requirement=ScenarioRequirement("request_structure", ""),
+            status=ScenarioRequirementStatus.SATISFIED,
+            source="draft",
+            notes=["Required request body is present in the draft."],
+        )
+    if _draft_request_body_requirement_known(draft) and not _draft_requires_request_body(draft):
+        return DraftRequirementCheck(
+            requirement=ScenarioRequirement("request_structure", ""),
+            status=ScenarioRequirementStatus.SATISFIED,
+            source="draft",
+            notes=["This case explicitly does not require a request body."],
+        )
     if http_method in {"GET", "DELETE"}:
         return DraftRequirementCheck(
             requirement=ScenarioRequirement("request_structure", ""),
@@ -1265,7 +1341,21 @@ def _check_assertions(draft: ScenarioDraft, gap_codes: set[str]) -> DraftRequire
     )
 
 
-def _check_auth_strategy(gap_codes: set[str]) -> DraftRequirementCheck:
+def _check_auth_strategy(draft: ScenarioDraft, gap_codes: set[str]) -> DraftRequirementCheck:
+    if _draft_auth_requirement_known(draft) and not _draft_requires_auth_strategy(draft):
+        return DraftRequirementCheck(
+            requirement=ScenarioRequirement("auth_strategy", "", required=False),
+            status=ScenarioRequirementStatus.SATISFIED,
+            source="draft",
+            notes=["This case explicitly does not require auth strategy."],
+        )
+    if _draft_requires_auth_strategy(draft) and _draft_has_auth_strategy(draft):
+        return DraftRequirementCheck(
+            requirement=ScenarioRequirement("auth_strategy", "", required=False),
+            status=ScenarioRequirementStatus.SATISFIED,
+            source="draft",
+            notes=["Required auth strategy is present in the draft."],
+        )
     if "auth_headers_unresolved" in gap_codes:
         return DraftRequirementCheck(
             requirement=ScenarioRequirement("auth_strategy", "", required=False),
@@ -1276,8 +1366,8 @@ def _check_auth_strategy(gap_codes: set[str]) -> DraftRequirementCheck:
     return DraftRequirementCheck(
         requirement=ScenarioRequirement("auth_strategy", "", required=False),
         status=ScenarioRequirementStatus.SATISFIED,
-        source="unknown",
-        notes=["No unresolved auth requirement was detected in current artifacts."],
+        source="draft",
+        notes=["Auth strategy is either not required for this case or is already present."],
     )
 
 
@@ -1293,7 +1383,7 @@ def _check_db_verification(gap_codes: set[str]) -> DraftRequirementCheck:
         requirement=ScenarioRequirement("db_verification", "", required=False),
         status=ScenarioRequirementStatus.SATISFIED,
         source="unknown",
-        notes=["No unresolved DB verification requirement was detected in current artifacts."],
+        notes=["DB verification is either not required for this case or is already present."],
     )
 
 
@@ -1685,6 +1775,61 @@ def _route_binding_from_draft_metadata(draft: ScenarioDraft) -> dict[str, object
     return dict(draft.metadata.get("route_binding") or {})
 
 
+def _draft_request_body_requirement_known(draft: ScenarioDraft) -> bool:
+    return isinstance(draft.metadata.get("request_body_required"), bool) or (
+        "Request body required: yes." in draft.markdown or "Request body required: no." in draft.markdown
+    )
+
+
+def _draft_auth_requirement_known(draft: ScenarioDraft) -> bool:
+    return isinstance(draft.metadata.get("auth_strategy_required"), bool) or (
+        "Auth strategy required: yes." in draft.markdown or "Auth strategy required: no." in draft.markdown
+    )
+
+
+def _draft_requires_auth_strategy(draft: ScenarioDraft) -> bool:
+    raw_value = draft.metadata.get("auth_strategy_required")
+    if isinstance(raw_value, bool):
+        return raw_value
+    return "Auth strategy required: yes." in draft.markdown
+
+
+def _draft_has_auth_strategy(draft: ScenarioDraft) -> bool:
+    if draft.metadata.get("auth_strategy_present") is True:
+        return True
+    if re.search(r"(?im)^Auth strategy:\s", draft.markdown):
+        return True
+    if re.search(r"(?im)^\s*\"?(authorization|cookie|x-[^\"]*token|x-api-key|api-key)\"?\s*:", draft.markdown):
+        return True
+    return False
+
+
+def _draft_requires_request_body(draft: ScenarioDraft) -> bool:
+    raw_value = draft.metadata.get("request_body_required")
+    if isinstance(raw_value, bool):
+        return raw_value
+    return "Request body required: yes." in draft.markdown
+
+
+def _draft_has_request_body(draft: ScenarioDraft) -> bool:
+    if draft.metadata.get("request_body_present") is True:
+        return True
+    return any(marker in draft.markdown for marker in ("Body:", "Payload:", "Request body:"))
+
+
+def _draft_requires_db_verification(draft: ScenarioDraft) -> bool:
+    raw_value = draft.metadata.get("db_verification_required")
+    if isinstance(raw_value, bool):
+        return raw_value
+    return "DB verification required: yes." in draft.markdown
+
+
+def _draft_has_db_step(draft: ScenarioDraft) -> bool:
+    if draft.metadata.get("db_verification_present") is True:
+        return True
+    return bool(re.search(r"(?im)^Type:\s*db\s*$", draft.markdown))
+
+
 def _case_gaps_from_draft_metadata(draft: ScenarioDraft) -> list[PlannedCaseGap]:
     raw_gaps = draft.metadata.get("case_gaps", [])
     if not isinstance(raw_gaps, list):
@@ -1708,6 +1853,78 @@ def _first_api_step(scenario: ScenarioDefinition | None):
         if step.step_type == ScenarioStepType.API and step.api is not None:
             return step
     return None
+
+
+def _scenario_has_db_step(scenario: ScenarioDefinition | None) -> bool:
+    if scenario is None:
+        return False
+    return any(step.step_type == ScenarioStepType.DB and step.db is not None for step in scenario.steps)
+
+
+def _scenario_requires_db_verification(
+    scenario: ScenarioDefinition | None,
+    draft: ScenarioDraft,
+) -> bool:
+    if scenario is not None and "DB verification required: yes." in scenario.notes:
+        return True
+    return _draft_requires_db_verification(draft)
+
+
+def _scenario_has_auth_strategy(
+    scenario: ScenarioDefinition | None,
+    draft: ScenarioDraft,
+) -> bool:
+    if scenario is not None and "Auth strategy:" in scenario.notes:
+        return True
+    if scenario is not None and _scenario_headers_have_auth_signal(scenario):
+        return True
+    return _draft_has_auth_strategy(draft)
+
+
+def _scenario_requires_auth_strategy(
+    scenario: ScenarioDefinition | None,
+    draft: ScenarioDraft,
+) -> bool:
+    if scenario is not None and "Auth strategy required: yes." in scenario.notes:
+        return True
+    return _draft_requires_auth_strategy(draft)
+
+
+def _scenario_request_body_requirement_known(
+    scenario: ScenarioDefinition | None,
+    draft: ScenarioDraft,
+) -> bool:
+    if scenario is not None and (
+        "Request body required: yes." in scenario.notes or "Request body required: no." in scenario.notes
+    ):
+        return True
+    return _draft_request_body_requirement_known(draft)
+
+
+def _scenario_requires_request_body(
+    scenario: ScenarioDefinition | None,
+    draft: ScenarioDraft,
+) -> bool:
+    if scenario is not None and "Request body required: yes." in scenario.notes:
+        return True
+    return _draft_requires_request_body(draft)
+
+
+def _scenario_markdownish_notes(scenario: ScenarioDefinition) -> str:
+    return scenario.notes or ""
+
+
+def _scenario_headers_have_auth_signal(scenario: ScenarioDefinition) -> bool:
+    for step in scenario.steps:
+        if step.step_type != ScenarioStepType.API or step.api is None:
+            continue
+        for raw_name in step.api.headers:
+            name = str(raw_name).strip().lower()
+            if name == "authorization":
+                return True
+            if "token" in name or "api-key" in name or "apikey" in name or name == "cookie":
+                return True
+    return False
 
 
 def _revalidation_title(scenario: ScenarioDefinition | None, file_path: Path) -> str:

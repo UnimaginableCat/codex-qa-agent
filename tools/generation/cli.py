@@ -130,6 +130,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Collect typed code facts from the explicit evidence scope.",
     )
     parser.add_argument(
+        "--strict-coverage",
+        action="store_true",
+        help="Block generation when collected endpoint facts and authored API coverage do not align.",
+    )
+    parser.add_argument(
         "--enrich",
         action="store_true",
         help="Apply collected evidence to the NormalizedTestPlan.",
@@ -189,6 +194,7 @@ def build_request(args: argparse.Namespace) -> GenerateTestPlanRequest:
         options=GenerateTestPlanOptions(
             persist_artifacts=not args.no_persist,
             collect_code_facts=args.collect_code_facts,
+            strict_coverage=args.strict_coverage,
             enrichment_enabled=args.enrich,
             render_scenario_drafts=args.render_drafts,
         ),
@@ -277,6 +283,7 @@ def run_validate_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 def summarize_result(result: Any) -> dict[str, Any]:
     evidence_bundle = result.evidence_bundle
+    coverage_assessment = result.coverage_assessment
     enrichment_result = result.enrichment_result
     scenario_render_result = result.scenario_render_result
     unresolved_intents = _scenario_unresolved_intents(scenario_render_result)
@@ -290,6 +297,12 @@ def summarize_result(result: Any) -> dict[str, Any]:
             "input_mode": result.details.get("input_mode", "prose"),
             "test_case_count": len(result.normalized_plan.test_cases),
             "code_facts": result.details.get("code_facts", "not_requested"),
+            "coverage": result.details.get("coverage", "not_requested"),
+            "coverage_summary": result.details.get("coverage_summary", "not_requested"),
+            "coverage_guardrail": result.details.get("coverage_guardrail", "not_requested"),
+            "coverage_assessment": (
+                None if coverage_assessment is None else coverage_assessment.to_dict()
+            ),
             "evidence_fact_count": len(evidence_bundle.facts) if evidence_bundle else 0,
             "enrichment": result.details.get("enrichment", "not_requested"),
             "applied_evidence_count": (
@@ -660,6 +673,15 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
                 source_ref=args.source_id,
             )
         )
+    if args.strict_coverage and not args.collect_code_facts:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_strict_coverage_requires_code_facts",
+                message="--strict-coverage requires --collect-code-facts and an explicit evidence scope.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.source_id,
+            )
+        )
     if args.collect_code_facts and not args.project_path:
         diagnostics.append(
             GenerationDiagnostic(
@@ -797,6 +819,9 @@ def _print_payload(payload: dict[str, Any], *, output_format: str = "json", work
     if output_format == "text" and workflow == "authoring":
         print(_render_authoring_text(payload))
         return
+    if output_format == "text" and workflow == "generation":
+        print(_render_generation_text(payload))
+        return
     if output_format == "text" and workflow == "review":
         print(_render_review_text(payload))
         return
@@ -807,6 +832,117 @@ def _print_payload(payload: dict[str, Any], *, output_format: str = "json", work
         print(_render_revalidation_text(payload))
         return
     print(json.dumps(payload, ensure_ascii=False))
+
+
+def _render_generation_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Status: {payload['status']}",
+        f"Message: {payload.get('message', '')}",
+        f"Run ID: {payload.get('run_id', '')}",
+        f"Source ID: {payload.get('source_id', '')}",
+        f"Project: {payload.get('project', '')}",
+        f"Input mode: {payload.get('input_mode', '')}",
+        f"Cases: {payload.get('test_case_count', 0)}",
+        f"Code facts: {payload.get('code_facts', 'not_requested')}",
+        f"Coverage: {payload.get('coverage', 'not_requested')}",
+        f"Coverage guardrail: {payload.get('coverage_guardrail', 'not_requested')}",
+        f"Enrichment: {payload.get('enrichment', 'not_requested')}",
+        f"Scenario rendering: {payload.get('scenario_rendering', 'not_requested')}",
+    ]
+    coverage_summary = payload.get("coverage_summary")
+    if isinstance(coverage_summary, dict):
+        lines.append("Coverage summary:")
+        lines.append(
+            "  "
+            + ", ".join(
+                [
+                    f"api_cases={coverage_summary.get('api_case_count', 0)}",
+                    f"api_facts={coverage_summary.get('api_fact_count', 0)}",
+                    f"covered_cases={coverage_summary.get('covered_case_count', 0)}",
+                    f"uncovered_cases={coverage_summary.get('uncovered_case_count', 0)}",
+                    f"covered_facts={coverage_summary.get('covered_fact_count', 0)}",
+                    f"uncovered_facts={coverage_summary.get('uncovered_fact_count', 0)}",
+                    f"ambiguous_cases={coverage_summary.get('ambiguous_case_count', 0)}",
+                    f"duplicated_facts={coverage_summary.get('duplicated_fact_count', 0)}",
+                    f"weak_facts={coverage_summary.get('weak_fact_count', 0)}",
+                ]
+            )
+        )
+    coverage_assessment = payload.get("coverage_assessment") or {}
+    uncovered_cases = [
+        item
+        for item in coverage_assessment.get("case_assessments", [])
+        if item.get("status") == "uncovered"
+    ]
+    ambiguous_cases = [
+        item
+        for item in coverage_assessment.get("case_assessments", [])
+        if item.get("status") == "ambiguous"
+    ]
+    uncovered_facts = [
+        item
+        for item in coverage_assessment.get("fact_assessments", [])
+        if item.get("status") == "uncovered"
+    ]
+    duplicated_facts = [
+        item
+        for item in coverage_assessment.get("fact_assessments", [])
+        if item.get("status") == "duplicated"
+    ]
+    if uncovered_cases:
+        lines.append("Uncovered API cases:")
+        for item in uncovered_cases[:8]:
+            route = ""
+            if item.get("planned_http_method") or item.get("planned_endpoint_path"):
+                route = f" [{item.get('planned_http_method', '')} {item.get('planned_endpoint_path', '')}]".rstrip()
+            lines.append(f"  - {item.get('case_id', '')}: {item.get('title', '')}{route}")
+    if uncovered_facts:
+        lines.append("Uncovered endpoint facts:")
+        for item in uncovered_facts[:8]:
+            route = " ".join(
+                piece for piece in [item.get("http_method", ""), item.get("endpoint_path", "")] if piece
+            )
+            owner = item.get("handler_name") or item.get("controller_name") or ""
+            suffix = f" ({owner})" if owner else ""
+            lines.append(f"  - {item.get('fact_id', '')}: {route}{suffix}".rstrip())
+            suggested_case = item.get("suggested_case") or {}
+            if suggested_case.get("title"):
+                lines.append(
+                    f"    Suggest: {suggested_case.get('title', '')} [{suggested_case.get('http_method', '')} {suggested_case.get('endpoint_path', '')}]"
+                )
+            if suggested_case.get("objective"):
+                lines.append(f"    Objective: {suggested_case.get('objective', '')}")
+    if ambiguous_cases:
+        lines.append("Broad API cases:")
+        for item in ambiguous_cases[:8]:
+            lines.append(
+                f"  - {item.get('case_id', '')}: matches {len(item.get('matched_fact_ids', []))} facts"
+            )
+    if duplicated_facts:
+        lines.append("Overlapping endpoint facts:")
+        for item in duplicated_facts[:8]:
+            lines.append(
+                f"  - {item.get('fact_id', '')}: matched by {len(item.get('matched_case_ids', []))} cases"
+            )
+    artifact_paths = payload.get("artifact_paths") or {}
+    if artifact_paths:
+        lines.append("Artifacts:")
+        if artifact_paths.get("normalized_plan"):
+            lines.append(f"  - normalized_plan: {artifact_paths['normalized_plan']}")
+        if artifact_paths.get("coverage_assessment"):
+            lines.append(f"  - coverage_assessment: {artifact_paths['coverage_assessment']}")
+        if artifact_paths.get("evidence"):
+            lines.append(f"  - evidence: {artifact_paths['evidence']}")
+        if artifact_paths.get("summary"):
+            lines.append(f"  - summary: {artifact_paths['summary']}")
+    diagnostics = payload.get("diagnostics") or []
+    if diagnostics:
+        lines.append("Diagnostics:")
+        for diagnostic in diagnostics[:12]:
+            lines.append(
+                f"  - {diagnostic.get('severity', '').lower()}: {diagnostic.get('code', '')}: {diagnostic.get('message', '')}"
+            )
+    return "\n".join(lines).rstrip()
 
 
 def _render_authoring_text(payload: dict[str, Any]) -> str:
@@ -835,6 +971,13 @@ def _render_authoring_text(payload: dict[str, Any]) -> str:
         lines.append("Diagnostics:")
         for diagnostic in diagnostics:
             lines.append(f"  - {diagnostic.get('code', '')}: {diagnostic.get('message', '')}")
+            suggested_case = (diagnostic.get("details") or {}).get("suggested_case") or {}
+            if suggested_case.get("title"):
+                lines.append(
+                    f"    Suggest: {suggested_case.get('title', '')} [{suggested_case.get('http_method', '')} {suggested_case.get('endpoint_path', '')}]"
+                )
+            if suggested_case.get("objective"):
+                lines.append(f"    Objective: {suggested_case.get('objective', '')}")
     template = payload.get("template") or {}
     if template:
         lines.append("Template preview:")
@@ -904,6 +1047,18 @@ def _render_review_text(payload: dict[str, Any]) -> str:
         for item in deferred_items:
             lines.append(f"  {item['case_id']}: {item['reason_code']}")
         lines.append("")
+    diagnostics = payload.get("diagnostics") or []
+    if diagnostics:
+        lines.append("Review diagnostics:")
+        for diagnostic in diagnostics:
+            lines.append(f"  - {diagnostic.get('code', '')}: {diagnostic.get('message', '')}")
+            suggested_case = (diagnostic.get("details") or {}).get("suggested_case") or {}
+            if suggested_case.get("title"):
+                lines.append(
+                    f"    Suggest: {suggested_case.get('title', '')} [{suggested_case.get('http_method', '')} {suggested_case.get('endpoint_path', '')}]"
+                )
+            if suggested_case.get("objective"):
+                lines.append(f"    Objective: {suggested_case.get('objective', '')}")
     return "\n".join(lines).rstrip()
 
 

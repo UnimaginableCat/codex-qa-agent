@@ -16,9 +16,13 @@ from tools.generation.domain.models import (
     GapCategory,
     GenerationDiagnostic,
     PlannedCaseGap,
+    PlannedDbVerification,
     PlannedRouteIntent,
 )
 from tools.generation.evidence.models import TargetStack
+from tools.scenario_runner.domain.models import ApiStepDefinition, DbStepDefinition, ScenarioStep, ScenarioStepType
+from tools.scenario_runner.runtime.validators import ScenarioStepValidator
+from tools.db.validators import ReadOnlySqlValidator, SqlNormalizer
 
 from .models import AgentPlanLoadResult, AgentPlanValidationResult
 
@@ -32,6 +36,11 @@ AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_no_cases",
     "agent_plan_case_missing_title",
     "agent_plan_case_missing_objective",
+    "agent_plan_case_missing_expected_outcomes",
+    "agent_plan_case_invalid_expectation_contract",
+    "agent_plan_case_invalid_capture_contract",
+    "agent_plan_case_request_body_required",
+    "agent_plan_case_auth_strategy_required",
 }
 
 
@@ -74,10 +83,22 @@ class AgentPlanAuthoringService:
                 AgentPlannedTestCaseInput(
                     title="Replace with case title",
                     objective="Replace with case objective.",
-                    kind="functional",
+                    kind="api",
                     preconditions=["Replace with required setup or state."],
                     actions=["Replace with the minimal operator-authored action."],
-                    expected_outcomes=["Replace with the deterministic expected outcome."],
+                    auth_strategy=["Use the required auth/header strategy from runtime config without inlining secrets."],
+                    requires_auth_strategy=True,
+                    request_headers={"Content-Type": "application/json"},
+                    request_body={"field": "value"},
+                    requires_request_body=True,
+                    observable_outcomes=["Replace with the externally visible behavior this case proves."],
+                    expected_outcomes=[
+                        "HTTP 200",
+                        "response JSON exists",
+                        "response contains `id`",
+                    ],
+                    capture=["response.json.id -> created_id"],
+                    requires_db_verification=True,
                     priority="normal",
                     tags=["replace-tag"],
                     unresolved_items=["Replace with unresolved case-specific detail."],
@@ -92,6 +113,15 @@ class AgentPlanAuthoringService:
                         http_method="GET",
                         endpoint_path="/replace/path",
                         path_kind="collection",
+                    ),
+                    db_verification=PlannedDbVerification(
+                        name="Replace with DB verification step name when persisted-state checks are needed.",
+                        sql="SELECT id, status FROM replace_table WHERE id = :created_id",
+                        params={"created_id": "{{created_id}}"},
+                        expected_outcomes=[
+                            "one row exists",
+                            "`status` = `ACTIVE`",
+                        ],
                     ),
                     metadata={"notes": "Optional freeform case metadata."},
                 )
@@ -297,6 +327,263 @@ def validate_agent_plan_input(
                         details={"case_index": index},
                     )
                 )
+        diagnostics.extend(_validate_case_expectation_contract(case_input, case_ref, index))
+        diagnostics.extend(_validate_case_capture_contract(case_input, case_ref, index))
+        diagnostics.extend(_validate_case_auth_contract(case_input, case_ref, index))
+        diagnostics.extend(_validate_case_request_contract(case_input, case_ref, index))
+        diagnostics.extend(_validate_case_db_verification(case_input, case_ref, index))
+    return diagnostics
+
+
+def _validate_case_expectation_contract(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    kind = case_input.kind.strip().lower()
+    if kind not in {"api", "db"}:
+        return []
+    if not case_input.expected_outcomes:
+        return [
+            GenerationDiagnostic(
+                code="agent_plan_case_missing_expected_outcomes",
+                message="API and DB planned cases must include deterministic expected_outcomes using runner-supported syntax.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index, "kind": kind},
+            )
+        ]
+
+    validator = ScenarioStepValidator()
+    diagnostics: list[GenerationDiagnostic] = []
+    for contract_diagnostic in validator.inspect_contract(_case_contract_probe(case_input, case_index)):
+        if contract_diagnostic.supported:
+            continue
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_case_invalid_expectation_contract",
+                message=contract_diagnostic.detail,
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={
+                    "case_index": case_index,
+                    "kind": kind,
+                    "rule": contract_diagnostic.rule,
+                    "step_type": contract_diagnostic.step_type.value,
+                },
+            )
+        )
+    return diagnostics
+
+
+def _case_contract_probe(
+    case_input: AgentPlannedTestCaseInput,
+    case_index: int,
+) -> ScenarioStep:
+    kind = case_input.kind.strip().lower()
+    step_id = case_input.case_id.strip() or f"case-contract-{case_index:03d}"
+    title = case_input.title.strip() or step_id
+    if kind == "api":
+        route = case_input.route or PlannedRouteIntent(http_method="GET", endpoint_path="/__placeholder__")
+        return ScenarioStep(
+            step_id=step_id,
+            step_number=case_index,
+            title=title,
+            step_type=ScenarioStepType.API,
+            api=ApiStepDefinition(
+                name=title,
+                method=route.http_method.strip().upper() or "GET",
+                path=route.endpoint_path.strip() or "/__placeholder__",
+                expected=list(case_input.expected_outcomes),
+            ),
+        )
+    return ScenarioStep(
+        step_id=step_id,
+        step_number=case_index,
+        title=title,
+        step_type=ScenarioStepType.DB,
+        db=DbStepDefinition(
+            name=title,
+            sql="SELECT 1",
+            expected=list(case_input.expected_outcomes),
+        ),
+    )
+
+
+def _validate_case_capture_contract(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    for capture_rule in case_input.capture:
+        if _capture_rule_is_valid(capture_rule):
+            continue
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_case_invalid_capture_contract",
+                message="Capture rule must use '<source> -> <variable_name>' syntax.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index, "rule": capture_rule},
+            )
+        )
+    return diagnostics
+
+
+def _capture_rule_is_valid(capture_rule: str) -> bool:
+    if "->" not in capture_rule:
+        return False
+    source_expression, variable_name = (part.strip() for part in capture_rule.split("->", 1))
+    return bool(source_expression and variable_name)
+
+
+def _has_auth_header_signal(headers: dict[str, Any]) -> bool:
+    for raw_name in headers:
+        name = str(raw_name).strip().lower()
+        if name == "authorization":
+            return True
+        if "token" in name or "api-key" in name or "apikey" in name or name == "cookie":
+            return True
+    return False
+
+
+def _validate_case_auth_contract(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    if case_input.kind.strip().lower() != "api":
+        return []
+    if case_input.requires_auth_strategy and not (
+        case_input.auth_strategy or _has_auth_header_signal(case_input.request_headers)
+    ):
+        return [
+            GenerationDiagnostic(
+                code="agent_plan_case_auth_strategy_required",
+                message="Case requires auth strategy, but no auth_strategy or auth-like request header was authored.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index},
+            )
+        ]
+    return []
+
+
+def _validate_case_request_contract(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    if case_input.kind.strip().lower() != "api":
+        return []
+    if case_input.requires_request_body and case_input.request_body is None:
+        return [
+            GenerationDiagnostic(
+                code="agent_plan_case_request_body_required",
+                message="Case requires a request body, but request_body was not authored.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index},
+            )
+        ]
+    return []
+
+
+def _validate_case_db_verification(
+    case_input: AgentPlannedTestCaseInput,
+    case_ref: str,
+    case_index: int,
+) -> list[GenerationDiagnostic]:
+    verification = case_input.db_verification
+    diagnostics: list[GenerationDiagnostic] = []
+    if case_input.requires_db_verification and verification is None:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_case_db_verification_required",
+                message="Case requires DB verification, but no db_verification step was authored.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index},
+            )
+        )
+        return diagnostics
+    if verification is None:
+        return diagnostics
+
+    if not verification.sql.strip():
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_case_db_verification_missing_sql",
+                message="DB verification must include a read-only SQL query.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index},
+            )
+        )
+    else:
+        try:
+            ReadOnlySqlValidator(SqlNormalizer()).validate(verification.sql)
+        except Exception as exc:  # noqa: BLE001
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_case_db_verification_invalid_sql",
+                    message=f"DB verification SQL failed read-only validation: {exc}",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=case_ref,
+                    details={"case_index": case_index},
+                )
+            )
+
+    if not verification.expected_outcomes:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_case_db_verification_missing_expected_outcomes",
+                message="DB verification must include deterministic expected_outcomes using runner-supported DB syntax.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index},
+            )
+        )
+    else:
+        probe = ScenarioStep(
+            step_id=case_input.case_id.strip() or f"case-db-contract-{case_index:03d}",
+            step_number=case_index,
+            title=verification.name.strip() or case_input.title.strip() or f"case-{case_index:03d}",
+            step_type=ScenarioStepType.DB,
+            db=DbStepDefinition(
+                name=verification.name.strip() or case_input.title.strip(),
+                sql=verification.sql.strip() or "SELECT 1",
+                params=dict(verification.params),
+                expected=list(verification.expected_outcomes),
+            ),
+        )
+        validator = ScenarioStepValidator()
+        for contract_diagnostic in validator.inspect_contract(probe):
+            if contract_diagnostic.supported:
+                continue
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="agent_plan_case_db_verification_invalid_expectation_contract",
+                    message=contract_diagnostic.detail,
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=case_ref,
+                    details={"case_index": case_index, "rule": contract_diagnostic.rule},
+                )
+            )
+
+    for capture_rule in verification.capture:
+        if _capture_rule_is_valid(capture_rule):
+            continue
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_case_db_verification_invalid_capture_contract",
+                message="DB verification capture rule must use '<source> -> <variable_name>' syntax.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index, "rule": capture_rule},
+            )
+        )
     return diagnostics
 
 
@@ -346,7 +633,10 @@ def _validate_agent_plan_payload_shape(
             for field_name in (
                 "preconditions",
                 "actions",
+                "auth_strategy",
+                "observable_outcomes",
                 "expected_outcomes",
+                "capture",
                 "tags",
                 "unresolved_items",
                 "gaps",
@@ -374,6 +664,40 @@ def _validate_agent_plan_payload_shape(
                         details={"case_index": index},
                     )
                 )
+            for field_name in ("request_headers", "request_params"):
+                value = item.get(field_name)
+                if value is not None and not isinstance(value, dict):
+                    diagnostics.append(
+                        GenerationDiagnostic(
+                            code="agent_plan_case_request_field_not_object",
+                            message=f"Case field '{field_name}' must be a JSON object when provided.",
+                            severity=DiagnosticSeverity.ERROR,
+                            source_ref=source_ref,
+                            details={"case_index": index, "field": field_name},
+                        )
+                    )
+            raw_requires_request_body = item.get("requires_request_body")
+            if raw_requires_request_body is not None and not isinstance(raw_requires_request_body, bool):
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_case_requires_request_body_not_bool",
+                        message="Case requires_request_body must be a boolean when provided.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=source_ref,
+                        details={"case_index": index},
+                    )
+                )
+            raw_requires_auth_strategy = item.get("requires_auth_strategy")
+            if raw_requires_auth_strategy is not None and not isinstance(raw_requires_auth_strategy, bool):
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_case_requires_auth_strategy_not_bool",
+                        message="Case requires_auth_strategy must be a boolean when provided.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=source_ref,
+                        details={"case_index": index},
+                    )
+                )
             route = item.get("route")
             if route is not None and not isinstance(route, dict):
                 diagnostics.append(
@@ -385,6 +709,52 @@ def _validate_agent_plan_payload_shape(
                         details={"case_index": index},
                     )
                 )
+            raw_requires_db_verification = item.get("requires_db_verification")
+            if raw_requires_db_verification is not None and not isinstance(raw_requires_db_verification, bool):
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_case_requires_db_verification_not_bool",
+                        message="Case requires_db_verification must be a boolean when provided.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=source_ref,
+                        details={"case_index": index},
+                    )
+                )
+            db_verification = item.get("db_verification")
+            if db_verification is not None and not isinstance(db_verification, dict):
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="agent_plan_case_db_verification_not_object",
+                        message="Case db_verification must be a JSON object when provided.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=source_ref,
+                        details={"case_index": index},
+                    )
+                )
+            if isinstance(db_verification, dict):
+                params = db_verification.get("params")
+                if params is not None and not isinstance(params, dict):
+                    diagnostics.append(
+                        GenerationDiagnostic(
+                            code="agent_plan_case_db_verification_params_not_object",
+                            message="db_verification.params must be a JSON object when provided.",
+                            severity=DiagnosticSeverity.ERROR,
+                            source_ref=source_ref,
+                            details={"case_index": index},
+                        )
+                    )
+                for field_name in ("expected_outcomes", "capture"):
+                    value = db_verification.get(field_name)
+                    if value is not None and not isinstance(value, list):
+                        diagnostics.append(
+                            GenerationDiagnostic(
+                                code="agent_plan_case_db_verification_field_not_list",
+                                message=f"db_verification field '{field_name}' must be a JSON array.",
+                                severity=DiagnosticSeverity.ERROR,
+                                source_ref=source_ref,
+                                details={"case_index": index, "field": field_name},
+                            )
+                        )
             gaps = item.get("gaps")
             if isinstance(gaps, list):
                 for gap_index, gap in enumerate(gaps, start=1):

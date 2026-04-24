@@ -79,6 +79,30 @@ class PlannedRouteIntent:
 
 
 @dataclass(slots=True)
+class PlannedDbVerification:
+    """Typed DB verification step that can accompany a planned case."""
+
+    sql: str
+    params: dict[str, Any] = field(default_factory=dict)
+    expected_outcomes: list[str] = field(default_factory=list)
+    capture: list[str] = field(default_factory=list)
+    name: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "PlannedDbVerification":
+        return cls(
+            sql=str(payload.get("sql", "")),
+            params=dict(payload.get("params") or {}),
+            expected_outcomes=[str(item) for item in payload.get("expected_outcomes", [])],
+            capture=[str(item) for item in payload.get("capture", [])],
+            name=str(payload.get("name", "")),
+        )
+
+
+@dataclass(slots=True)
 class RouteSupportHint:
     """Typed route support projected from evidence or other deterministic sources."""
 
@@ -138,13 +162,23 @@ class AgentPlannedTestCaseInput:
     case_id: str = ""
     preconditions: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
+    auth_strategy: list[str] = field(default_factory=list)
+    requires_auth_strategy: bool = False
+    request_headers: dict[str, Any] = field(default_factory=dict)
+    request_params: dict[str, Any] = field(default_factory=dict)
+    request_body: Any = None
+    requires_request_body: bool = False
+    observable_outcomes: list[str] = field(default_factory=list)
     expected_outcomes: list[str] = field(default_factory=list)
+    capture: list[str] = field(default_factory=list)
+    requires_db_verification: bool = False
     priority: str = "normal"
     tags: list[str] = field(default_factory=list)
     unresolved_items: list[str] = field(default_factory=list)
     gaps: list[PlannedCaseGap] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
     route: PlannedRouteIntent | None = None
+    db_verification: PlannedDbVerification | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -159,7 +193,16 @@ class AgentPlannedTestCaseInput:
             case_id=str(payload.get("case_id", "")),
             preconditions=[str(item) for item in payload.get("preconditions", [])],
             actions=[str(item) for item in payload.get("actions", [])],
+            auth_strategy=[str(item) for item in payload.get("auth_strategy", [])],
+            requires_auth_strategy=bool(payload.get("requires_auth_strategy", False)),
+            request_headers=dict(payload.get("request_headers") or {}),
+            request_params=dict(payload.get("request_params") or {}),
+            request_body=payload.get("request_body"),
+            requires_request_body=bool(payload.get("requires_request_body", False)),
+            observable_outcomes=[str(item) for item in payload.get("observable_outcomes", [])],
             expected_outcomes=[str(item) for item in payload.get("expected_outcomes", [])],
+            capture=[str(item) for item in payload.get("capture", [])],
+            requires_db_verification=bool(payload.get("requires_db_verification", False)),
             priority=str(payload.get("priority", "normal")),
             tags=[str(item) for item in payload.get("tags", [])],
             unresolved_items=[str(item) for item in payload.get("unresolved_items", [])],
@@ -169,6 +212,11 @@ class AgentPlannedTestCaseInput:
                 None
                 if payload.get("route") is None
                 else PlannedRouteIntent.from_dict(dict(payload.get("route") or {}))
+            ),
+            db_verification=(
+                None
+                if payload.get("db_verification") is None
+                else PlannedDbVerification.from_dict(dict(payload.get("db_verification") or {}))
             ),
             metadata=dict(payload.get("metadata") or {}),
         )
@@ -251,13 +299,23 @@ class PlannedTestCase:
     source_refs: list[str] = field(default_factory=list)
     preconditions: list[str] = field(default_factory=list)
     steps: list[str] = field(default_factory=list)
+    auth_strategy: list[str] = field(default_factory=list)
+    requires_auth_strategy: bool = False
+    request_headers: dict[str, Any] = field(default_factory=dict)
+    request_params: dict[str, Any] = field(default_factory=dict)
+    request_body: Any = None
+    requires_request_body: bool = False
+    observable_outcomes: list[str] = field(default_factory=list)
     expected_results: list[str] = field(default_factory=list)
+    capture: list[str] = field(default_factory=list)
+    requires_db_verification: bool = False
     priority: str = "normal"
     assumptions: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
     gaps: list[PlannedCaseGap] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     planned_route: PlannedRouteIntent | None = None
+    db_verification: PlannedDbVerification | None = None
     support: PlannedCaseSupport | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -273,7 +331,16 @@ class PlannedTestCase:
             source_refs=[str(item) for item in payload.get("source_refs", [])],
             preconditions=[str(item) for item in payload.get("preconditions", [])],
             steps=[str(item) for item in payload.get("steps", [])],
+            auth_strategy=[str(item) for item in payload.get("auth_strategy", [])],
+            requires_auth_strategy=bool(payload.get("requires_auth_strategy", False)),
+            request_headers=dict(payload.get("request_headers") or {}),
+            request_params=dict(payload.get("request_params") or {}),
+            request_body=payload.get("request_body"),
+            requires_request_body=bool(payload.get("requires_request_body", False)),
+            observable_outcomes=[str(item) for item in payload.get("observable_outcomes", [])],
             expected_results=[str(item) for item in payload.get("expected_results", [])],
+            capture=[str(item) for item in payload.get("capture", [])],
+            requires_db_verification=bool(payload.get("requires_db_verification", False)),
             priority=str(payload.get("priority", "normal")),
             assumptions=[str(item) for item in payload.get("assumptions", [])],
             open_questions=[str(item) for item in payload.get("open_questions", [])],
@@ -283,6 +350,11 @@ class PlannedTestCase:
                 None
                 if payload.get("planned_route") is None
                 else PlannedRouteIntent.from_dict(dict(payload.get("planned_route") or {}))
+            ),
+            db_verification=(
+                None
+                if payload.get("db_verification") is None
+                else PlannedDbVerification.from_dict(dict(payload.get("db_verification") or {}))
             ),
             support=(
                 None
