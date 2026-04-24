@@ -30,11 +30,11 @@ Commands:
 
 <venv-python> -m tools.generation.cli `
   --validate-agent-plan `
-  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
+  --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --output-format text
 
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
+  --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --workspace-root .
 ```
 

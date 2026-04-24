@@ -38,6 +38,7 @@ class ScenarioExecutionEngineTests(unittest.TestCase):
             session = engine.execute(session, scenario)
 
         self.assertEqual(executor.execute_count, 0)
+        self.assertEqual(session.run_context.artifact_dir.name, session.run_context.run_id)
         self.assertEqual(session.run_state.final_outcome.status, StepStatus.BLOCKED)
         self.assertEqual(session.run_context.step_results, [])
         self.assertEqual(session.preflight_checks[0].status, StepStatus.BLOCKED)

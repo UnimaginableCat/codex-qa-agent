@@ -5,7 +5,7 @@ Phase 1 generation artifacts are isolated from `scenario_runner` artifacts.
 Canonical request bundle:
 
 ```text
-artifacts/agent/generation/<source_slug>-<run_id>/
+artifacts/agent/generation/<run_id>/
   manifest.json
   agent-plan.json
   context.json
@@ -68,7 +68,7 @@ CLI validate-only:
 ```powershell
 <project-venv-python> -m tools.generation.cli `
   --validate-agent-plan `
-  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
+  --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --output-format text
 ```
 
@@ -76,7 +76,7 @@ Structured generation:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
+  --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --workspace-root .
 ```
 
@@ -94,7 +94,7 @@ Draft scenario rendering preview:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
+  --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --workspace-root . `
   --render-drafts
 ```

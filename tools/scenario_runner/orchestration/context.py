@@ -31,7 +31,7 @@ def initialize_run_context(
         directories.parsed_plans_dir,
         scenario_definition.scenario_slug,
     )
-    artifact_dir_name = f"{scenario_definition.scenario_slug}-{run_id}"
+    artifact_dir_name = run_id
     run_state_dir = create_run_state_directory(directories.runs_root_dir, run_id)
     artifact_dir = create_artifact_directory(directories.artifacts_root_dir, artifact_dir_name)
     started_at = datetime.now(UTC).isoformat(timespec="seconds")

@@ -44,6 +44,8 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertEqual(payload["input_mode"], "agent_plan")
         self.assertEqual(output_path.name, "agent-plan.json")
         self.assertEqual(output_path.parent, Path(payload["bundle_dir"]))
+        self.assertTrue(output_path.parent.name.startswith("gen-"))
+        self.assertNotIn("users-api", output_path.parent.name)
 
     def test_validate_agent_plan_returns_pass_for_valid_file(self) -> None:
         with TemporaryDirectory() as tmp:

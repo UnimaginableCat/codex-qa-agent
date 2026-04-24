@@ -19,7 +19,7 @@ Command:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
+  --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --workspace-root . `
   --render-drafts
 ```

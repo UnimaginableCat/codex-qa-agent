@@ -11,7 +11,6 @@ from tools.generation.persistence.artifacts import (
     load_generation_run_context_from_bundle_file,
     create_generation_artifact_directory,
     ensure_generation_workspace_directories,
-    slugify_artifact_name,
 )
 
 
@@ -31,7 +30,7 @@ def initialize_generation_run_context(
     resolved_workspace_root = (workspace_root or Path.cwd()).resolve()
     run_id = create_generation_run_id()
     directories = ensure_generation_workspace_directories(resolved_workspace_root)
-    artifact_dir_name = f"{slugify_artifact_name(source_input.source_id)}-{run_id}"
+    artifact_dir_name = run_id
     artifact_dir = create_generation_artifact_directory(
         directories.artifacts_root_dir,
         artifact_dir_name,
