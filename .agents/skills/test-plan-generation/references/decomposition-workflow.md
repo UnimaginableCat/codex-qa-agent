@@ -117,6 +117,7 @@ For full workflow coverage, prefer a second pattern:
 
 - one case proves the end-to-end lifecycle
 - `workflow_steps[]` encode the concrete multi-step API/DB path inside that single case
+- if the workflow mutates persisted state and succeeds, include a read-only DB confirmation either as `db_verification` or as a final `workflow_steps[]` DB step
 - single-endpoint cases remain for isolated validation/not-found buckets
 
 Examples:
@@ -163,6 +164,7 @@ Prefer adding:
 - `request_body` / `requires_request_body` when the request shape matters
 - `auth_strategy[]` / `requires_auth_strategy` when auth is not implicit
 - `db_verification` / `requires_db_verification` when persisted state is part of the contract
+- for successful state-changing workflow cases, assume persisted state is part of the contract unless the user explicitly scoped the request to transport-only API checks
 
 If the agent cannot justify a concrete assertion yet, keep it as an explicit unknown instead of
 writing narrative `expected_outcomes[]` that downstream tooling cannot preserve.

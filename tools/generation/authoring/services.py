@@ -50,6 +50,7 @@ CAPTURE_RULE_EXAMPLES = [
     "response.json.principal.sessionId -> session_id",
     "db.first_row.id -> persisted_id",
 ]
+MUTATING_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_missing",
     "agent_plan_missing_source_id",
@@ -70,6 +71,7 @@ AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_workflow_step_route_required",
     "agent_plan_workflow_step_missing_sql",
     "agent_plan_workflow_step_invalid_sql",
+    "agent_plan_workflow_db_verification_required",
 }
 
 
@@ -766,6 +768,23 @@ def _validate_case_db_verification(
 ) -> list[GenerationDiagnostic]:
     verification = case_input.db_verification
     diagnostics: list[GenerationDiagnostic] = []
+    if (
+        _workflow_requires_persisted_state_verification(case_input)
+        and verification is None
+        and not _workflow_has_authored_db_step(case_input)
+    ):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_workflow_db_verification_required",
+                message=(
+                    "Workflow case includes successful mutating API steps but no persisted-state DB verification. "
+                    "Author either case-level db_verification or a db workflow_step."
+                ),
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={"case_index": case_index},
+            )
+        )
     if case_input.requires_db_verification and verification is None:
         diagnostics.append(
             GenerationDiagnostic(
@@ -864,6 +883,38 @@ def _validate_case_db_verification(
             )
         )
     return diagnostics
+
+
+def _workflow_requires_persisted_state_verification(case_input: AgentPlannedTestCaseInput) -> bool:
+    if not case_input.workflow_steps:
+        return False
+    case_level_success = _expectations_indicate_success(case_input.expected_outcomes)
+    for workflow_step in case_input.workflow_steps:
+        if workflow_step.step_type.strip().lower() != "api" or workflow_step.route is None:
+            continue
+        method = workflow_step.route.http_method.strip().upper()
+        if method not in MUTATING_HTTP_METHODS:
+            continue
+        if _expectations_indicate_success(workflow_step.expected_outcomes) or (
+            not workflow_step.expected_outcomes and case_level_success
+        ):
+            return True
+    return False
+
+
+def _workflow_has_authored_db_step(case_input: AgentPlannedTestCaseInput) -> bool:
+    return any(
+        workflow_step.step_type.strip().lower() == "db" and workflow_step.sql.strip()
+        for workflow_step in case_input.workflow_steps
+    )
+
+
+def _expectations_indicate_success(expectations: list[str]) -> bool:
+    for expectation in expectations:
+        normalized = expectation.strip().upper()
+        if normalized.startswith("HTTP 2"):
+            return True
+    return False
 
 
 def _validate_agent_plan_payload_shape(

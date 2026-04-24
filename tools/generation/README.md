@@ -55,6 +55,7 @@ Both paths use the same downstream evidence, enrichment, rendering, review, prom
 validation services.
 
 For true end-to-end coverage inside one case, use `workflow_steps[]` on `AgentPlannedTestCaseInput`.
+If that workflow includes successful state-changing API operations, add persisted-state verification with case-level `db_verification` or a `db` workflow step.
 This allows one canonical test case to render into multiple runnable API/DB scenario steps instead
 of collapsing the workflow into a single endpoint call.
 

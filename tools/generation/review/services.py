@@ -1873,7 +1873,11 @@ def _scenario_requires_db_verification(
 ) -> bool:
     if scenario is not None and "DB verification required: yes." in scenario.notes:
         return True
-    return _draft_requires_db_verification(draft)
+    if _draft_requires_db_verification(draft):
+        return True
+    if scenario is not None and _scenario_has_successful_mutating_api_step(scenario):
+        return True
+    return False
 
 
 def _scenario_has_auth_strategy(
@@ -1930,6 +1934,25 @@ def _scenario_headers_have_auth_signal(scenario: ScenarioDefinition) -> bool:
                 return True
             if "token" in name or "api-key" in name or "apikey" in name or name == "cookie":
                 return True
+    return False
+
+
+def _scenario_has_successful_mutating_api_step(scenario: ScenarioDefinition) -> bool:
+    for step in scenario.steps:
+        if step.step_type != ScenarioStepType.API or step.api is None:
+            continue
+        if step.api.method.strip().upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
+            continue
+        if _api_expectations_indicate_success(step.api.expected):
+            return True
+    return False
+
+
+def _api_expectations_indicate_success(expectations: list[str]) -> bool:
+    for expectation in expectations:
+        normalized = expectation.strip().upper()
+        if normalized.startswith("HTTP 2"):
+            return True
     return False
 
 

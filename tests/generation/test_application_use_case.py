@@ -586,6 +586,13 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
                                 ),
                                 expected_outcomes=["HTTP 204"],
                             ),
+                            PlannedWorkflowStep(
+                                step_type="db",
+                                title="Confirm revoked session in storage",
+                                sql="SELECT status FROM user_sessions WHERE id = :session_id",
+                                params={"session_id": "{{session_id}}"},
+                                expected_outcomes=["one row exists", "`status` = `REVOKED`"],
+                            ),
                         ],
                     )
                 ],
@@ -607,14 +614,16 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
             )
 
         self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertEqual(len(result.normalized_plan.test_cases[0].workflow_steps), 3)
-        self.assertGreaterEqual(len(result.normalized_plan.test_cases[0].steps), 3)
+        self.assertEqual(len(result.normalized_plan.test_cases[0].workflow_steps), 4)
+        self.assertGreaterEqual(len(result.normalized_plan.test_cases[0].steps), 4)
         self.assertIsNotNone(result.scenario_render_result)
         draft = result.scenario_render_result.draft_set.drafts[0]
         self.assertIn("### Step 1", draft.markdown)
         self.assertIn("### Step 2", draft.markdown)
         self.assertIn("### Step 3", draft.markdown)
+        self.assertIn("### Step 4", draft.markdown)
         self.assertIn("Path: /api/internal/v1/user-sessions/{{session_id}}/revoke", draft.markdown)
+        self.assertIn("Type: db", draft.markdown)
 
     def test_use_case_skips_enrichment_without_evidence_collection(self) -> None:
         with TemporaryDirectory() as tmp:

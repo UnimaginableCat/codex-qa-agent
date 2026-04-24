@@ -120,6 +120,7 @@ Write only what the agent can justify.
 - Keep `actions[]` at planning level, not runner-step level.
 - Do not collapse materially different setup, execution, and verification actions into one line just to stay compact.
 - When a case is truly cross-endpoint or lifecycle-based, use `workflow_steps[]` instead of trying to encode the whole flow in one request-level case.
+- If a workflow case performs a successful state change such as create, update, revoke, authenticate/session-create, or delete, add persisted-state verification with either `db_verification` or a `workflow_steps[]` DB step. A multi-step happy path without any DB confirmation is not considered fully end-to-end.
 - For API/DB cases, use `observable_outcomes[]` for human-readable behavior and `expected_outcomes[]` for runner-compatible assertion DSL.
 - Use `capture[]` only when later scenario steps or DB verification need captured values.
 - Put uncertain details into `unresolved_items[]` or `open_questions[]`.

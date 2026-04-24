@@ -161,7 +161,63 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
         self.assertIn("agent_plan_evidence_scope_paths_not_list", codes)
         self.assertIn("agent_plan_evidence_scope_invalid_stack_hint", codes)
 
-    def test_validate_file_accepts_multi_step_workflow_case(self) -> None:
+    def test_validate_file_accepts_multi_step_workflow_case_with_db_verification(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "sessions",
+                        "project": "code/demo",
+                        "title": "Sessions workflow",
+                        "planned_test_cases": [
+                            {
+                                "title": "Authenticate and revoke session workflow",
+                                "objective": "Verify the full session lifecycle.",
+                                "kind": "workflow",
+                                "workflow_steps": [
+                                    {
+                                        "step_type": "api",
+                                        "title": "Authenticate session",
+                                        "route": {
+                                            "http_method": "POST",
+                                            "endpoint_path": "/api/sessions/authenticate",
+                                        },
+                                        "expected_outcomes": ["HTTP 200"],
+                                        "capture": ["response.json.sessionId -> session_id"],
+                                    },
+                                    {
+                                        "step_type": "api",
+                                        "title": "Revoke session",
+                                        "route": {
+                                            "http_method": "POST",
+                                            "endpoint_path": "/api/sessions/{{session_id}}/revoke",
+                                        },
+                                        "expected_outcomes": ["HTTP 204"],
+                                    },
+                                    {
+                                        "step_type": "db",
+                                        "title": "Confirm session is revoked in storage",
+                                        "sql": "SELECT status FROM user_sessions WHERE id = :session_id",
+                                        "params": {
+                                            "session_id": "{{session_id}}"
+                                        },
+                                        "expected_outcomes": ["one row exists", "`status` = `REVOKED`"],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+
+    def test_validate_file_blocks_mutating_workflow_without_db_verification(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"
             path.write_text(
@@ -206,7 +262,10 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
 
             result = AgentPlanAuthoringService().validate_file(path)
 
-        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(diagnostic.code == "agent_plan_workflow_db_verification_required" for diagnostic in result.diagnostics)
+        )
 
 
 if __name__ == "__main__":

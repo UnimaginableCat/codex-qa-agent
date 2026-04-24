@@ -312,6 +312,10 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertIn("### Step 3", draft.markdown)
         self.assertIn("Path: /api/sessions/{{session_id}}/revoke", draft.markdown)
         self.assertEqual(draft.metadata["workflow_step_count"], 3)
+        self.assertEqual(draft.metadata["db_verification_required"], True)
+        self.assertEqual(draft.metadata["db_verification_present"], False)
+        self.assertIn("DB verification required: yes.", draft.markdown)
+        self.assertIn("Persisted-state verification is required for this workflow but is not authored yet.", draft.markdown)
 
     def test_preview_service_persists_route_hint_based_drafts_and_parse_results(self) -> None:
         with TemporaryDirectory() as tmp:

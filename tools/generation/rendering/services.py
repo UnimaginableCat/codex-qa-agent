@@ -29,6 +29,8 @@ from .models import (
     UnsupportedCheck,
 )
 
+MUTATING_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
 
 @dataclass(slots=True)
 class ScenarioDraftPreviewService:
@@ -151,13 +153,8 @@ class DraftScenarioRenderer:
                             "request_body_present": any(
                                 step.request_body is not None for step in test_case.workflow_steps
                             ) or test_case.request_body is not None,
-                            "db_verification_required": any(
-                                step.step_type.strip().lower() == "db" for step in test_case.workflow_steps
-                            ) or test_case.requires_db_verification,
-                            "db_verification_present": any(
-                                step.step_type.strip().lower() == "db" and step.sql.strip()
-                                for step in test_case.workflow_steps
-                            ) or test_case.db_verification is not None,
+                            "db_verification_required": _test_case_requires_db_verification(test_case),
+                            "db_verification_present": _test_case_has_db_verification(test_case),
                             "case_gaps": [gap.to_dict() for gap in test_case.gaps],
                         },
                     )
@@ -219,8 +216,8 @@ class DraftScenarioRenderer:
                         "auth_strategy_present": bool(test_case.auth_strategy) or _has_auth_header_signal(test_case.request_headers),
                         "request_body_required": test_case.requires_request_body,
                         "request_body_present": test_case.request_body is not None,
-                        "db_verification_required": test_case.requires_db_verification,
-                        "db_verification_present": test_case.db_verification is not None,
+                        "db_verification_required": _test_case_requires_db_verification(test_case),
+                        "db_verification_present": _test_case_has_db_verification(test_case),
                         "case_gaps": [gap.to_dict() for gap in test_case.gaps],
                     },
                 )
@@ -442,6 +439,8 @@ class DraftScenarioRenderer:
         project_name = Path(plan.project).name or _slugify(plan.project)
         typed_gap_notes = _typed_gap_notes(test_case)
         typed_gap_summary = _typed_gap_summary_lines(test_case)
+        db_verification_required = _test_case_requires_db_verification(test_case)
+        db_verification_present = _test_case_has_db_verification(test_case)
         lines = [
             f"# Scenario: {_escape_line(title)}",
             "",
@@ -466,8 +465,11 @@ class DraftScenarioRenderer:
                 "## Notes",
                 "Generated workflow draft preview only. Do not execute without operator review.",
                 f"Workflow step count: {len(test_case.workflow_steps)}.",
+                f"DB verification required: {'yes' if db_verification_required else 'no'}.",
             ]
         )
+        if db_verification_required and not db_verification_present:
+            lines.append("Persisted-state verification is required for this workflow but is not authored yet.")
         for outcome in test_case.observable_outcomes:
             lines.append(f"Observable outcome: {outcome}")
         for question in test_case.open_questions:
@@ -729,6 +731,44 @@ def _workflow_route_bindings(test_case: PlannedTestCase) -> list[dict[str, Any]]
             }
         )
     return bindings
+
+
+def _test_case_requires_db_verification(test_case: PlannedTestCase) -> bool:
+    if test_case.requires_db_verification:
+        return True
+    return _workflow_requires_persisted_state_verification(test_case)
+
+
+def _test_case_has_db_verification(test_case: PlannedTestCase) -> bool:
+    return test_case.db_verification is not None or any(
+        workflow_step.step_type.strip().lower() == "db" and workflow_step.sql.strip()
+        for workflow_step in test_case.workflow_steps
+    )
+
+
+def _workflow_requires_persisted_state_verification(test_case: PlannedTestCase) -> bool:
+    if not test_case.workflow_steps:
+        return False
+    case_level_success = _expectations_indicate_success(test_case.expected_results)
+    for workflow_step in test_case.workflow_steps:
+        if workflow_step.step_type.strip().lower() != "api" or workflow_step.route is None:
+            continue
+        method = workflow_step.route.http_method.strip().upper()
+        if method not in MUTATING_HTTP_METHODS:
+            continue
+        if _expectations_indicate_success(workflow_step.expected_outcomes) or (
+            not workflow_step.expected_outcomes and case_level_success
+        ):
+            return True
+    return False
+
+
+def _expectations_indicate_success(expectations: list[str]) -> bool:
+    for expectation in expectations:
+        normalized = expectation.strip().upper()
+        if normalized.startswith("HTTP 2"):
+            return True
+    return False
 
 
 def _render_workflow_step_block(
