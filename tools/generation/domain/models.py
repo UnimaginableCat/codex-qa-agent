@@ -537,8 +537,6 @@ class GenerationRunContext:
     workspace_root: Path
     source_id: str
     project: str
-    runs_root_dir: Path
-    run_state_dir: Path
     artifacts_root_dir: Path
     artifact_dir: Path
     started_at: str
@@ -549,15 +547,16 @@ class GenerationRunContext:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "GenerationRunContext":
+        artifact_dir = payload.get("artifact_dir") or payload.get("run_state_dir")
+        if artifact_dir is None:
+            raise KeyError("artifact_dir")
         return cls(
             run_id=str(payload["run_id"]),
             workspace_root=Path(str(payload["workspace_root"])),
             source_id=str(payload["source_id"]),
             project=str(payload["project"]),
-            runs_root_dir=Path(str(payload["runs_root_dir"])),
-            run_state_dir=Path(str(payload["run_state_dir"])),
             artifacts_root_dir=Path(str(payload["artifacts_root_dir"])),
-            artifact_dir=Path(str(payload["artifact_dir"])),
+            artifact_dir=Path(str(artifact_dir)),
             started_at=str(payload["started_at"]),
             variables=dict(payload.get("variables") or {}),
         )

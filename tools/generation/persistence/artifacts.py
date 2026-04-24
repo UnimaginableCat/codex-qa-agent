@@ -25,7 +25,6 @@ from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderRe
 from tools.generation.review.models import ScenarioPromotionResult
 
 GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
-GENERATION_RUNS_DIRNAME = GENERATION_ARTIFACTS_DIRNAME
 CONTEXT_FILENAME = "context.json"
 AGENT_PLAN_FILENAME = "agent-plan.json"
 SOURCE_INPUT_FILENAME = "source-input.json"
@@ -33,7 +32,6 @@ NORMALIZED_SOURCE_FILENAME = "normalized-source.json"
 NORMALIZED_PLAN_FILENAME = "normalized-plan.json"
 TRACEABILITY_MAP_FILENAME = "traceability-map.json"
 DIAGNOSTICS_FILENAME = "diagnostics.json"
-EVIDENCE_RUN_STATE_FILENAME = "evidence.json"
 EVIDENCE_BUNDLE_FILENAME = "evidence-bundle.json"
 ENRICHED_PLAN_FILENAME = "enriched-plan.json"
 ENRICHMENT_RESULT_FILENAME = "enrichment-result.json"
@@ -77,7 +75,6 @@ class GenerationArtifactPolicyError(ToolingError):
 
 @dataclass(slots=True)
 class GenerationWorkspaceDirectories:
-    runs_root_dir: Path
     artifacts_root_dir: Path
 
 
@@ -266,15 +263,8 @@ def ensure_generation_workspace_directories(workspace_root: Path) -> GenerationW
     artifacts_root_dir.mkdir(parents=True, exist_ok=True)
 
     return GenerationWorkspaceDirectories(
-        runs_root_dir=artifacts_root_dir,
         artifacts_root_dir=artifacts_root_dir,
     )
-
-
-def create_generation_run_state_directory(runs_root_dir: Path, run_id: str) -> Path:
-    run_state_dir = runs_root_dir / run_id
-    run_state_dir.mkdir(parents=True, exist_ok=False)
-    return run_state_dir
 
 
 def create_generation_artifact_directory(artifacts_root_dir: Path, artifact_dir_name: str) -> Path:
@@ -332,9 +322,9 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
         "source_id": run_context.source_id,
         "project": run_context.project,
         "workspace_root": str(run_context.workspace_root),
-        "run_state_dir": str(run_context.run_state_dir),
+        "bundle_dir": str(run_context.artifact_dir),
         "artifact_dir": str(run_context.artifact_dir),
-        "layout_version": 4,
+        "layout_version": 5,
         "bundle": {
             "manifest_path": str(target_path),
             "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),

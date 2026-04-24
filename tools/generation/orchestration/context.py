@@ -38,8 +38,6 @@ def initialize_generation_run_context(
         workspace_root=resolved_workspace_root,
         source_id=source_input.source_id,
         project=source_input.project,
-        runs_root_dir=directories.runs_root_dir,
-        run_state_dir=artifact_dir,
         artifacts_root_dir=directories.artifacts_root_dir,
         artifact_dir=artifact_dir,
         started_at=started_at,
