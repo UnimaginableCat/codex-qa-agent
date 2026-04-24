@@ -1015,18 +1015,12 @@ def _draft_gap_summary(
     elif not _draft_request_body_requirement_known(draft) and method in {"POST", "PUT", "PATCH"}:
         gap_codes.append("request_body_not_inferred")
         gap_messages.append("Request body not inferred.")
-    gap_codes.extend(
-        [
-            "assertions_not_generated",
-            "captures_not_generated",
-        ]
-    )
-    gap_messages.extend(
-        [
-            "Assertions were not generated.",
-            "Captures were not generated.",
-        ]
-    )
+    if not _draft_has_expected_assertions(draft):
+        gap_codes.append("assertions_not_generated")
+        gap_messages.append("Assertions were not generated.")
+    if _draft_requires_capture_rules(draft) and not _draft_has_capture_rules(draft):
+        gap_codes.append("captures_not_generated")
+        gap_messages.append("Captures were not generated.")
     if _draft_requires_auth_strategy(draft) and not _draft_has_auth_strategy(draft):
         gap_codes.append("auth_headers_unresolved")
         gap_messages.append("Auth strategy is required for this case but not present in the draft.")
@@ -1403,7 +1397,7 @@ def _check_request_structure(
 
 
 def _check_assertions(draft: ScenarioDraft, gap_codes: set[str]) -> DraftRequirementCheck:
-    has_expected_section = "Expected:" in draft.markdown or "## Final expectations" in draft.markdown
+    has_expected_section = _draft_has_expected_assertions(draft)
     if "assertions_not_generated" in gap_codes:
         status = (
             ScenarioRequirementStatus.PARTIALLY_SATISFIED
@@ -1914,6 +1908,27 @@ def _draft_has_db_step(draft: ScenarioDraft) -> bool:
     if draft.metadata.get("db_verification_present") is True:
         return True
     return bool(re.search(r"(?im)^Type:\s*db\s*$", draft.markdown))
+
+
+def _draft_has_expected_assertions(draft: ScenarioDraft) -> bool:
+    raw_value = draft.metadata.get("expected_assertions_present")
+    if isinstance(raw_value, bool):
+        return raw_value
+    return bool(re.search(r"(?im)^Expected:\s*$", draft.markdown))
+
+
+def _draft_requires_capture_rules(draft: ScenarioDraft) -> bool:
+    raw_value = draft.metadata.get("capture_rules_required")
+    if isinstance(raw_value, bool):
+        return raw_value
+    return False
+
+
+def _draft_has_capture_rules(draft: ScenarioDraft) -> bool:
+    raw_value = draft.metadata.get("capture_rules_present")
+    if isinstance(raw_value, bool):
+        return raw_value
+    return bool(re.search(r"(?im)^Capture:\s*$", draft.markdown))
 
 
 def _case_gaps_from_draft_metadata(draft: ScenarioDraft) -> list[PlannedCaseGap]:

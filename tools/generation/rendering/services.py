@@ -140,6 +140,8 @@ class DraftScenarioRenderer:
                             "workflow_route_bindings": _workflow_route_bindings(test_case),
                             "workflow_step_count": len(test_case.workflow_steps),
                             "case_support": _draft_case_support(test_case, workflow_support),
+                            "expected_assertions_present": _test_case_has_authored_expectations(test_case),
+                            "capture_rules_present": _test_case_has_capture_rules(test_case),
                             "auth_strategy_required": any(
                                 step.requires_auth_strategy for step in test_case.workflow_steps
                             ) or test_case.requires_auth_strategy,
@@ -211,6 +213,8 @@ class DraftScenarioRenderer:
                         "preview_only": True,
                         "route_binding": support,
                         "case_support": _draft_case_support(test_case, support),
+                        "expected_assertions_present": _test_case_has_authored_expectations(test_case),
+                        "capture_rules_present": _test_case_has_capture_rules(test_case),
                         "auth_strategy_required": test_case.requires_auth_strategy,
                         "auth_strategy_present": bool(test_case.auth_strategy) or _has_auth_header_signal(test_case.request_headers),
                         "request_body_required": test_case.requires_request_body,
@@ -723,6 +727,22 @@ def _test_case_has_db_verification(test_case: PlannedTestCase) -> bool:
         workflow_step.step_type.strip().lower() == "db" and workflow_step.sql.strip()
         for workflow_step in test_case.workflow_steps
     )
+
+
+def _test_case_has_authored_expectations(test_case: PlannedTestCase) -> bool:
+    if test_case.expected_results:
+        return True
+    if test_case.db_verification is not None and test_case.db_verification.expected_outcomes:
+        return True
+    return any(workflow_step.expected_outcomes for workflow_step in test_case.workflow_steps)
+
+
+def _test_case_has_capture_rules(test_case: PlannedTestCase) -> bool:
+    if test_case.capture:
+        return True
+    if test_case.db_verification is not None and test_case.db_verification.capture:
+        return True
+    return any(workflow_step.capture for workflow_step in test_case.workflow_steps)
 
 
 def _workflow_requires_persisted_state_verification(test_case: PlannedTestCase) -> bool:

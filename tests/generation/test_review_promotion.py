@@ -34,7 +34,22 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertEqual(review_set.items[0].readiness_category.value, "parser_valid_strongly_supported")
         self.assertEqual(review_set.items[0].promotion_advisory.value, "promotable_with_known_gaps")
         self.assertEqual(review_set.items[0].route_status, "resolved_from_planned_route")
-        self.assertTrue(any(target.target_type.value == "add_expected_assertion" for target in review_set.items[0].edit_targets.targets))
+        self.assertFalse(any(target.target_type.value == "add_expected_assertion" for target in review_set.items[0].edit_targets.targets))
+        self.assertNotIn("assertions_not_generated", review_set.items[0].gap_summary.gap_codes)
+
+    def test_review_service_does_not_flag_authored_workflow_capture_or_expectations(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_workflow_draft_run(root)
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        self.assertEqual(len(review_set.items), 1)
+        item = review_set.items[0]
+        self.assertEqual(item.parse_status.value, "valid")
+        self.assertNotIn("assertions_not_generated", item.gap_summary.gap_codes)
+        self.assertNotIn("captures_not_generated", item.gap_summary.gap_codes)
+        self.assertFalse(any(target.target_type.value == "add_expected_assertion" for target in item.edit_targets.targets))
+        self.assertFalse(any(target.target_type.value == "add_capture" for target in item.edit_targets.targets))
 
     def test_review_service_reads_case_support_when_route_binding_projection_is_missing(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -158,6 +173,68 @@ def _generate_draft_run(root: Path) -> dict[str, object]:
                         "objective": "Verify create user.",
                         "route": {"http_method": "POST", "endpoint_path": "/users"},
                         "expected_outcomes": ["HTTP 201"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = cli.main(
+            [
+                "--agent-plan-file",
+                str(agent_plan_path),
+                "--workspace-root",
+                str(root),
+                "--render-drafts",
+            ]
+        )
+    payload = json.loads(stdout.getvalue())
+    if exit_code != 0:
+        raise AssertionError(payload)
+    return payload
+
+
+def _generate_workflow_draft_run(root: Path) -> dict[str, object]:
+    agent_plan_path = root / "agent-plan.json"
+    agent_plan_path.write_text(
+        json.dumps(
+            {
+                "source_id": "sessions",
+                "project": "code/demo",
+                "title": "Sessions API",
+                "planned_test_cases": [
+                    {
+                        "case_id": "tc-001",
+                        "title": "Create and fetch session",
+                        "objective": "Verify workflow draft keeps authored expectations and captures.",
+                        "kind": "workflow",
+                        "requires_db_verification": True,
+                        "db_verification": {
+                            "name": "Verify session row remains readable",
+                            "sql": "SELECT COUNT(*) AS row_count FROM sessions WHERE id = :session_id",
+                            "params": {"session_id": "{{session_id}}"},
+                            "expected_outcomes": ["`row_count` = 1"],
+                        },
+                        "workflow_steps": [
+                            {
+                                "step_type": "api",
+                                "title": "Create session",
+                                "route": {"http_method": "POST", "endpoint_path": "/sessions"},
+                                "request_body": {"name": "demo"},
+                                "requires_request_body": True,
+                                "capture": ["response.json.id -> session_id"],
+                                "expected_outcomes": ["HTTP 201"],
+                            },
+                            {
+                                "step_type": "api",
+                                "title": "Fetch session",
+                                "route": {"http_method": "GET", "endpoint_path": "/sessions/{{session_id}}"},
+                                "expected_outcomes": ["HTTP 200"],
+                            },
+                        ],
                     }
                 ],
             },
