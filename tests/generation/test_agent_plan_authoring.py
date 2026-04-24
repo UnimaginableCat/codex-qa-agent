@@ -216,6 +216,44 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
 
         self.assertEqual(result.status, StepStatus.PASS)
 
+    def test_validate_file_accepts_case_level_db_verification_with_no_rows_exist(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "db-verification.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "identities",
+                        "project": "code/demo",
+                        "title": "Identity deletion",
+                        "planned_test_cases": [
+                            {
+                                "title": "Delete identity removes persisted row",
+                                "objective": "Verify deleted identities no longer exist in storage.",
+                                "kind": "api",
+                                "route": {
+                                    "http_method": "DELETE",
+                                    "endpoint_path": "/api/users/{{user_id}}/identities/{{identity_id}}",
+                                },
+                                "expected_outcomes": ["HTTP 204"],
+                                "requires_db_verification": True,
+                                "db_verification": {
+                                    "name": "Confirm row was deleted",
+                                    "sql": "SELECT id FROM user_identities WHERE id = :identity_id",
+                                    "params": {"identity_id": "{{identity_id}}"},
+                                    "expected_outcomes": ["no rows exist"],
+                                },
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+
     def test_validate_file_blocks_mutating_workflow_without_db_verification(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"

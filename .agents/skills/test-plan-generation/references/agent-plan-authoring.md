@@ -89,5 +89,6 @@ Each case should contain:
 - Use `workflow_steps[]` for true cross-endpoint lifecycle coverage.
 - For successful mutating workflows, include persisted-state verification.
 - Use `observable_outcomes[]` for human-readable behavior and `expected_outcomes[]` for runner-compatible assertions.
+- For DB steps, prefer direct row-shape assertions like `one row exists` / `no rows exist` before falling back to aggregate SQL.
 - Put uncertain details into `unresolved_items[]` or `open_questions[]`.
 - Do not hide primary planning fields inside `metadata`.

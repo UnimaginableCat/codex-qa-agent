@@ -39,6 +39,7 @@ API_EXPECTATION_EXAMPLES = [
 ]
 DB_EXPECTATION_EXAMPLES = [
     "one row exists",
+    "no rows exist",
     "`status` = `ACTIVE`",
     "`revoked_at` is null",
     "`created_at` is not null",
@@ -1269,7 +1270,7 @@ def _build_validation_message(
 
 def _expectation_contract_hint(kind: str) -> str:
     if kind == "db":
-        return "Use deterministic DB expectation syntax like 'one row exists' or '`status` = `ACTIVE`'."
+        return "Use deterministic DB expectation syntax like 'one row exists', 'no rows exist', or '`status` = `ACTIVE`'."
     return (
         "Use deterministic API expectation syntax like 'HTTP 404', 'response JSON exists', "
         "or 'response `status` = `AUTHENTICATED`'."

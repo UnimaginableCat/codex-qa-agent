@@ -321,6 +321,15 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
         self.assertTrue(all("first row" in result.detail.lower() for result in results[1:]), results)
 
+    def test_db_no_rows_exist_expectation_passes_for_empty_result(self) -> None:
+        results = self.validator.validate(
+            self._db_step(["no rows exist"]),
+            {"query": {"row_count": 0, "rows": []}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.PASS)
+        self.assertIn("Actual row_count: 0", results[0].detail)
+
     def test_db_comparison_operators_support_scalar_fields(self) -> None:
         payload = {
             "query": {
@@ -425,6 +434,13 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         self.assertEqual(len(diagnostics), 1)
         self.assertFalse(diagnostics[0].supported)
         self.assertIn("Unsupported expectation rule: response magically works", diagnostics[0].detail)
+
+    def test_contract_inspection_accepts_no_rows_exist_for_db_steps(self) -> None:
+        diagnostics = self.validator.inspect_contract(self._db_step(["no rows exist"]))
+
+        self.assertEqual(len(diagnostics), 1)
+        self.assertTrue(diagnostics[0].supported)
+        self.assertEqual(diagnostics[0].detail, "Expectation syntax is supported.")
 
     def test_unsupported_comparison_syntax_does_not_become_missing_path(self) -> None:
         results = self.validator.validate(

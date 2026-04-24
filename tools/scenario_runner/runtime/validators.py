@@ -267,6 +267,11 @@ class ScenarioStepValidator:
             passed = actual_row_count == 1
             return self._result(expectation, passed, f"Actual row_count: {actual_row_count}")
 
+        if normalized_expectation == "no rows exist":
+            actual_row_count = row_count if isinstance(row_count, int) else len(rows) if isinstance(rows, list) else None
+            passed = actual_row_count == 0
+            return self._result(expectation, passed, f"Actual row_count: {actual_row_count}")
+
         if match := _DB_IS_NULL_RE.fullmatch(db_expectation):
             field_path = self._parse_field_path(match.group(1))
             lookup = self._try_get_path(first_row_result.value, field_path) if first_row_result.exists else first_row_result
@@ -353,6 +358,7 @@ class ScenarioStepValidator:
         supported = any(
             (
                 normalized_expectation == "one row exists",
+                normalized_expectation == "no rows exist",
                 _DB_IS_NULL_RE.fullmatch(normalized_rule),
                 _DB_IS_NOT_NULL_RE.fullmatch(normalized_rule),
                 _DB_STARTS_WITH_RE.fullmatch(normalized_rule),
