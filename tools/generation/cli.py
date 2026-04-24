@@ -26,7 +26,6 @@ from tools.generation.domain.models import (
     PlannedCaseGap,
     SourceInputFormat,
 )
-from tools.generation.evidence.models import CodeFactsScope, TargetStack
 from tools.generation.review import (
     DraftEditTargetType,
     PatchTemplateCatalogService,
@@ -51,7 +50,7 @@ MANAGED_AGENT_PLAN_ROOT = ("artifacts", "agent", "generation")
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tools.generation.cli",
-        description="Generate a NormalizedTestPlan, optionally enriched by explicit scoped code facts.",
+        description="Generate a NormalizedTestPlan and optionally render markdown draft scenarios.",
     )
     workflow = parser.add_mutually_exclusive_group()
     workflow.add_argument("--init-agent-plan", action="store_true", help="Write an AgentTestPlanInput template JSON file.")
@@ -109,50 +108,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Promotion target directory under scenarios/. The default generated/ root uses a run-scoped subdirectory.",
     )
 
-    parser.add_argument("--project-path", help="Explicit target project path for code facts extraction.")
-    parser.add_argument(
-        "--evidence-scope-id",
-        default="api",
-        help="Explicit scope id for code facts extraction.",
-    )
-    parser.add_argument(
-        "--evidence-scope-path",
-        action="append",
-        default=[],
-        help="Explicit scoped file or directory path for code facts extraction. Repeat for multiple paths.",
-    )
-    parser.add_argument(
-        "--evidence-pattern",
-        action="append",
-        default=[],
-        help="File glob used inside scoped directories. Defaults to *.py and *.java.",
-    )
-    parser.add_argument(
-        "--evidence-max-files",
-        type=int,
-        default=20,
-        help="Maximum files to inspect inside explicit evidence scope.",
-    )
-    parser.add_argument(
-        "--stack-hint",
-        choices=[stack.value for stack in TargetStack],
-        help="Optional explicit stack hint for code facts extraction.",
-    )
-    parser.add_argument(
-        "--collect-code-facts",
-        action="store_true",
-        help="Collect typed code facts from the explicit evidence scope.",
-    )
-    parser.add_argument(
-        "--strict-coverage",
-        action="store_true",
-        help="Block generation when collected endpoint facts and authored API coverage do not align.",
-    )
-    parser.add_argument(
-        "--enrich",
-        action="store_true",
-        help="Apply collected evidence to the NormalizedTestPlan.",
-    )
     parser.add_argument(
         "--render-drafts",
         action="store_true",
@@ -188,28 +143,13 @@ def build_request(args: argparse.Namespace) -> GenerateTestPlanRequest:
             source_path=Path(args.source_file) if args.source_file else None,
             metadata={"input_mode": GenerationInputMode.PROSE.value},
         )
-    evidence_scope = None
-    if args.collect_code_facts:
-        evidence_scope = CodeFactsScope(
-            scope_id=args.evidence_scope_id,
-            paths=[Path(item) for item in args.evidence_scope_path],
-            file_patterns=args.evidence_pattern or ["*.py", "*.java"],
-            max_files=args.evidence_max_files,
-            stack_hint=None if not args.stack_hint else TargetStack(args.stack_hint),
-        )
-
     return GenerateTestPlanRequest(
         source_input=source_input,
         input_mode=input_mode,
         agent_plan=agent_plan,
         workspace_root=Path(args.workspace_root),
-        project_path=Path(args.project_path) if args.project_path else None,
-        evidence_scope=evidence_scope,
         options=GenerateTestPlanOptions(
             persist_artifacts=not args.no_persist,
-            collect_code_facts=args.collect_code_facts,
-            strict_coverage=args.strict_coverage,
-            enrichment_enabled=args.enrich,
             render_scenario_drafts=args.render_drafts,
         ),
     )
@@ -291,9 +231,6 @@ def run_validate_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def summarize_result(result: Any) -> dict[str, Any]:
-    evidence_bundle = result.evidence_bundle
-    coverage_assessment = result.coverage_assessment
-    enrichment_result = result.enrichment_result
     scenario_render_result = result.scenario_render_result
     unresolved_intents = _scenario_unresolved_intents(scenario_render_result)
     return to_json_safe(
@@ -307,21 +244,6 @@ def summarize_result(result: Any) -> dict[str, Any]:
             "agent_plan_path": result.artifact_paths.get("agent_plan"),
             "input_mode": result.details.get("input_mode", "prose"),
             "test_case_count": len(result.normalized_plan.test_cases),
-            "code_facts": result.details.get("code_facts", "not_requested"),
-            "coverage": result.details.get("coverage", "not_requested"),
-            "coverage_summary": result.details.get("coverage_summary", "not_requested"),
-            "coverage_guardrail": result.details.get("coverage_guardrail", "not_requested"),
-            "coverage_assessment": (
-                None if coverage_assessment is None else coverage_assessment.to_dict()
-            ),
-            "evidence_fact_count": len(evidence_bundle.facts) if evidence_bundle else 0,
-            "enrichment": result.details.get("enrichment", "not_requested"),
-            "applied_evidence_count": (
-                len(enrichment_result.applied_evidence) if enrichment_result else 0
-            ),
-            "unapplied_evidence_count": (
-                len(enrichment_result.unapplied_evidence) if enrichment_result else 0
-            ),
             "scenario_rendering": result.details.get("scenario_rendering", "not_requested"),
             "scenario_draft_count": (
                 len(scenario_render_result.draft_set.drafts) if scenario_render_result else 0
@@ -337,16 +259,6 @@ def summarize_result(result: Any) -> dict[str, Any]:
             "scenario_unresolved_intent_count": sum(item["gap_count"] for item in unresolved_intents),
             "scenario_unresolved_intents": unresolved_intents,
             "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
-            "evidence_diagnostics": (
-                [diagnostic.to_dict() for diagnostic in evidence_bundle.diagnostics]
-                if evidence_bundle
-                else []
-            ),
-            "unapplied_evidence": (
-                [reason.to_dict() for reason in enrichment_result.unapplied_evidence]
-                if enrichment_result
-                else []
-            ),
             "artifact_paths": result.artifact_paths,
         }
     )
@@ -706,51 +618,6 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
                 source_ref=args.source_id,
             )
         )
-    if args.enrich and not args.collect_code_facts:
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="adapter_enrichment_requires_code_facts",
-                message="--enrich requires --collect-code-facts and an explicit evidence scope.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=args.source_id,
-            )
-        )
-    if args.strict_coverage and not args.collect_code_facts:
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="adapter_strict_coverage_requires_code_facts",
-                message="--strict-coverage requires --collect-code-facts and an explicit evidence scope.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=args.source_id,
-            )
-        )
-    if args.collect_code_facts and not args.project_path:
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="adapter_code_facts_require_project_path",
-                message="Code facts collection requires explicit --project-path.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=args.source_id,
-            )
-        )
-    if args.collect_code_facts and not args.evidence_scope_path:
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="adapter_code_facts_require_explicit_scope",
-                message="Code facts collection requires at least one --evidence-scope-path.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=args.source_id,
-            )
-        )
-    if args.evidence_max_files < 1:
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="adapter_invalid_evidence_max_files",
-                message="--evidence-max-files must be at least 1.",
-                severity=DiagnosticSeverity.ERROR,
-                source_ref=args.source_id,
-            )
-        )
     if args.render_drafts and args.no_persist:
         diagnostics.append(
             GenerationDiagnostic(
@@ -908,87 +775,8 @@ def _render_generation_text(payload: dict[str, Any]) -> str:
         f"Agent plan: {payload.get('agent_plan_path') or 'not_applicable'}",
         f"Input mode: {payload.get('input_mode', '')}",
         f"Cases: {payload.get('test_case_count', 0)}",
-        f"Code facts: {payload.get('code_facts', 'not_requested')}",
-        f"Coverage: {payload.get('coverage', 'not_requested')}",
-        f"Coverage guardrail: {payload.get('coverage_guardrail', 'not_requested')}",
-        f"Enrichment: {payload.get('enrichment', 'not_requested')}",
         f"Scenario rendering: {payload.get('scenario_rendering', 'not_requested')}",
     ]
-    coverage_summary = payload.get("coverage_summary")
-    if isinstance(coverage_summary, dict):
-        lines.append("Coverage summary:")
-        lines.append(
-            "  "
-            + ", ".join(
-                [
-                    f"api_cases={coverage_summary.get('api_case_count', 0)}",
-                    f"api_facts={coverage_summary.get('api_fact_count', 0)}",
-                    f"covered_cases={coverage_summary.get('covered_case_count', 0)}",
-                    f"uncovered_cases={coverage_summary.get('uncovered_case_count', 0)}",
-                    f"covered_facts={coverage_summary.get('covered_fact_count', 0)}",
-                    f"uncovered_facts={coverage_summary.get('uncovered_fact_count', 0)}",
-                    f"ambiguous_cases={coverage_summary.get('ambiguous_case_count', 0)}",
-                    f"duplicated_facts={coverage_summary.get('duplicated_fact_count', 0)}",
-                    f"weak_facts={coverage_summary.get('weak_fact_count', 0)}",
-                ]
-            )
-        )
-    coverage_assessment = payload.get("coverage_assessment") or {}
-    uncovered_cases = [
-        item
-        for item in coverage_assessment.get("case_assessments", [])
-        if item.get("status") == "uncovered"
-    ]
-    ambiguous_cases = [
-        item
-        for item in coverage_assessment.get("case_assessments", [])
-        if item.get("status") == "ambiguous"
-    ]
-    uncovered_facts = [
-        item
-        for item in coverage_assessment.get("fact_assessments", [])
-        if item.get("status") == "uncovered"
-    ]
-    duplicated_facts = [
-        item
-        for item in coverage_assessment.get("fact_assessments", [])
-        if item.get("status") == "duplicated"
-    ]
-    if uncovered_cases:
-        lines.append("Uncovered API cases:")
-        for item in uncovered_cases[:8]:
-            route = ""
-            if item.get("planned_http_method") or item.get("planned_endpoint_path"):
-                route = f" [{item.get('planned_http_method', '')} {item.get('planned_endpoint_path', '')}]".rstrip()
-            lines.append(f"  - {item.get('case_id', '')}: {item.get('title', '')}{route}")
-    if uncovered_facts:
-        lines.append("Uncovered endpoint facts:")
-        for item in uncovered_facts[:8]:
-            route = " ".join(
-                piece for piece in [item.get("http_method", ""), item.get("endpoint_path", "")] if piece
-            )
-            owner = item.get("handler_name") or item.get("controller_name") or ""
-            suffix = f" ({owner})" if owner else ""
-            lines.append(f"  - {item.get('fact_id', '')}: {route}{suffix}".rstrip())
-            suggested_case = item.get("suggested_case") or {}
-            if suggested_case.get("title"):
-                lines.append(
-                    f"    Suggest: {suggested_case.get('title', '')} [{suggested_case.get('http_method', '')} {suggested_case.get('endpoint_path', '')}]"
-                )
-            if suggested_case.get("objective"):
-                lines.append(f"    Objective: {suggested_case.get('objective', '')}")
-    if ambiguous_cases:
-        lines.append("Broad API cases:")
-        for item in ambiguous_cases[:8]:
-            lines.append(
-                f"  - {item.get('case_id', '')}: matches {len(item.get('matched_fact_ids', []))} facts"
-            )
-    if duplicated_facts:
-        lines.append("Overlapping endpoint facts:")
-        for item in duplicated_facts[:8]:
-            lines.append(
-                f"  - {item.get('fact_id', '')}: matched by {len(item.get('matched_case_ids', []))} cases"
-            )
     artifact_paths = payload.get("artifact_paths") or {}
     if artifact_paths:
         lines.append("Artifacts:")
@@ -998,10 +786,6 @@ def _render_generation_text(payload: dict[str, Any]) -> str:
             lines.append(f"  - agent_plan: {artifact_paths['agent_plan']}")
         if artifact_paths.get("normalized_plan"):
             lines.append(f"  - normalized_plan: {artifact_paths['normalized_plan']}")
-        if artifact_paths.get("coverage_assessment"):
-            lines.append(f"  - coverage_assessment: {artifact_paths['coverage_assessment']}")
-        if artifact_paths.get("evidence"):
-            lines.append(f"  - evidence: {artifact_paths['evidence']}")
         if artifact_paths.get("summary"):
             lines.append(f"  - summary: {artifact_paths['summary']}")
     diagnostics = payload.get("diagnostics") or []

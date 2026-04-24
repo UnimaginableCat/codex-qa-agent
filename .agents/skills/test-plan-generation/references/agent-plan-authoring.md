@@ -1,18 +1,15 @@
 # Agent Plan Authoring
 
-## Standard Authoring Workflow
+## Standard Workflow
 
 1. Scaffold a starter JSON.
-2. Fill the top-level plan fields.
+2. Fill top-level plan fields.
 3. Expand `planned_test_cases[]`.
 4. Add assumptions and open questions explicitly.
 5. Validate before generation.
 6. Run generation with `--agent-plan-file`.
 
-The agent should do this by default for decomposable requests. The user does not need to explicitly
-ask for scaffold/validate steps.
-
-## Scaffold Command
+## Scaffold
 
 ```powershell
 <venv-python> -m tools.generation.cli `
@@ -24,7 +21,7 @@ ask for scaffold/validate steps.
   --goal "Cover user API behavior."
 ```
 
-## Validate Command
+## Validate
 
 ```powershell
 <venv-python> -m tools.generation.cli `
@@ -32,19 +29,6 @@ ask for scaffold/validate steps.
   --agent-plan-file artifacts/agent/generation/users-api-<run_id>/agent-plan.json `
   --output-format text
 ```
-
-When `expected_outcomes[]` or `capture[]` use unsupported syntax, prefer the validator output over
-manual source diving. The text output now includes:
-
-- the exact invalid rule
-- a short DSL hint
-- supported examples
-
-Do not inspect old plan artifacts just to rediscover the supported expectation syntax.
-
-After generation, the authored input is persisted again inside the request bundle as
-`artifacts/agent/generation/<source>-<run_id>/agent-plan.json`. Treat that bundle copy as the
-canonical request artifact, not the temporary scaffold path.
 
 ## Canonical Shape
 
@@ -57,7 +41,6 @@ Top-level fields:
 - `planned_test_cases[]`
 - `assumptions[]`
 - `open_questions[]`
-- optional `evidence_scope`
 - optional `metadata`
 
 Each case should contain:
@@ -86,13 +69,7 @@ Each case should contain:
 - optional `assumptions[]`
 - optional `metadata`
 
-`workflow_steps[]` is the preferred shape for true end-to-end or lifecycle scenarios inside one
-test case. Each step may be `api` or `db` and can carry its own route/request/capture/expected
-contract. Use it when one case must span multiple controller operations.
-
 ## Validation Rules
-
-Validation checks:
 
 - file exists and is valid JSON
 - payload is a JSON object
@@ -100,58 +77,17 @@ Validation checks:
 - at least one planned case exists
 - each case has `title`
 - each case has `objective`
-- list/object fields use supported JSON shapes
-- API/DB `expected_outcomes[]` use supported scenario expectation syntax rather than free-form narrative
+- API/DB `expected_outcomes[]` use supported scenario expectation syntax
 - `capture[]` uses supported capture syntax when present
 - `requires_request_body=true` requires `request_body`
 - `requires_auth_strategy=true` requires explicit auth strategy or authored auth headers
 - `requires_db_verification=true` requires explicit `db_verification`
 
-Status behavior:
-
-- `PASS`: valid authoring input
-- `BLOCKED`: required fields missing
-- `ERROR`: malformed JSON or unsupported structure
-
 ## Authoring Guidance
 
-Write only what the agent can justify.
-
 - Keep `actions[]` at planning level, not runner-step level.
-- Do not collapse materially different setup, execution, and verification actions into one line just to stay compact.
-- When a case is truly cross-endpoint or lifecycle-based, use `workflow_steps[]` instead of trying to encode the whole flow in one request-level case.
-- If a workflow case performs a successful state change such as create, update, revoke, authenticate/session-create, or delete, add persisted-state verification with either `db_verification` or a `workflow_steps[]` DB step. A multi-step happy path without any DB confirmation is not considered fully end-to-end.
-- For API/DB cases, use `observable_outcomes[]` for human-readable behavior and `expected_outcomes[]` for runner-compatible assertion DSL.
-- Use `capture[]` only when later scenario steps or DB verification need captured values.
+- Use `workflow_steps[]` for true cross-endpoint lifecycle coverage.
+- For successful mutating workflows, include persisted-state verification.
+- Use `observable_outcomes[]` for human-readable behavior and `expected_outcomes[]` for runner-compatible assertions.
 - Put uncertain details into `unresolved_items[]` or `open_questions[]`.
-- Use `assumptions[]` only for stable assumptions the plan depends on.
 - Do not hide primary planning fields inside `metadata`.
-- Do not ask the user to prescribe the JSON structure unless a true ambiguity remains.
-
-During generation, the planner now expands thin authored actions into a compact execution outline in
-`NormalizedTestPlan.test_cases[].steps`. Treat that outline as normalized planning output, not as a
-reason to author only one vague action per case.
-
-For API-heavy plans, prefer authoring cases that are already grounded enough for:
-
-- request structure
-- auth strategy
-- executable expectations
-- capture needs
-- optional DB verification
-
-This reduces drift between the authored plan and downstream scenario drafts.
-
-If validation fails on expectation DSL, rewrite the authored rule into the supported syntax instead
-of weakening the case objective. For example:
-
-- bad: `Missing-user response status is 404.`
-- good: `HTTP 404`
-- bad: `Successful response returns session JSON.`
-- good: `HTTP 200`
-- good: `response JSON exists`
-
-## When To Add `evidence_scope`
-
-Add `evidence_scope` only when the next phase is expected to collect code facts. If no evidence
-phase is needed yet, leave it out and keep authoring focused on the plan itself.

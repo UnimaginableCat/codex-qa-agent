@@ -16,11 +16,9 @@ from tools.generation.domain.models import (
     PlannedCaseGap,
 )
 from tools.generation.persistence.artifacts import (
-    COVERAGE_ASSESSMENT_FILENAME,
     GENERATION_ARTIFACTS_DIRNAME,
     FileGenerationArtifactStore,
 )
-from tools.generation.enrichment.models import CoverageAssessmentResult
 from tools.generation.rendering.models import ScenarioDraft, ScenarioDraftValidationResult, ScenarioRenderResult
 
 from .models import (
@@ -92,7 +90,6 @@ class ScenarioDraftReviewService:
             for item in render_result.draft_set.deferred_items
         ]
         diagnostics: list[GenerationDiagnostic] = []
-        diagnostics.extend(_coverage_review_diagnostics(_load_coverage_assessment(run_context)))
         if not items:
             diagnostics.append(
                 GenerationDiagnostic(
@@ -864,41 +861,6 @@ def _load_render_result(run_context: GenerationRunContext) -> ScenarioRenderResu
     return ScenarioRenderResult.from_dict(dict(payload))
 
 
-def _load_coverage_assessment(run_context: GenerationRunContext) -> CoverageAssessmentResult | None:
-    coverage_path = run_context.artifact_dir / COVERAGE_ASSESSMENT_FILENAME
-    if not coverage_path.exists():
-        return None
-    payload = read_json_file(coverage_path, "Coverage assessment")
-    return CoverageAssessmentResult.from_dict(dict(payload))
-
-
-def _coverage_review_diagnostics(
-    coverage_assessment: CoverageAssessmentResult | None,
-) -> list[GenerationDiagnostic]:
-    if coverage_assessment is None:
-        return []
-    diagnostics: list[GenerationDiagnostic] = []
-    for fact in coverage_assessment.fact_assessments:
-        if fact.status != "uncovered" or fact.suggested_case is None:
-            continue
-        diagnostics.append(
-            GenerationDiagnostic(
-                code="coverage_missing_case_suggestion",
-                message="Coverage assessment found an uncovered endpoint fact and suggests adding one authored API case.",
-                severity=DiagnosticSeverity.WARNING,
-                source_ref=fact.fact_id,
-                details={
-                    "endpoint_path": fact.endpoint_path,
-                    "http_method": fact.http_method,
-                    "handler_name": fact.handler_name,
-                    "controller_name": fact.controller_name,
-                    "suggested_case": fact.suggested_case.to_dict(),
-                },
-            )
-        )
-    return diagnostics
-
-
 def _build_review_item(
     run_context: GenerationRunContext,
     draft: ScenarioDraft,
@@ -1191,7 +1153,7 @@ def _draft_readiness_category(
     if parse_status == ScenarioDraftParseStatus.INVALID:
         return DraftReadinessCategory.PARSER_INVALID
     readiness = str(route_binding.get("readiness") or "")
-    if readiness == "evidence_supported":
+    if readiness in {"evidence_supported", "route_resolved", "planned_route_defined", "workflow_authored", "manual_revalidated"}:
         return DraftReadinessCategory.PARSER_VALID_STRONGLY_SUPPORTED
     return DraftReadinessCategory.PARSER_VALID_PARTIAL
 
@@ -1237,7 +1199,7 @@ def _route_status(route_binding: dict[str, object]) -> str:
     if source == "route_hints":
         return "resolved_from_route_hints"
     if source == "evidence_hints":
-        return "resolved_from_legacy_evidence"
+        return "resolved_from_legacy_metadata"
     return "resolved"
 
 
@@ -1807,7 +1769,7 @@ def _build_edit_targets(
 def _build_deferred_edit_targets(draft_id: str, gap_summary: DraftGapSummary) -> DraftEditTargetList:
     targets: list[DraftEditTarget] = []
     gap_codes = set(gap_summary.gap_codes)
-    if "ambiguous_route_mapping" in gap_codes or "missing_endpoint_evidence" in gap_codes:
+    if "ambiguous_route_mapping" in gap_codes or "missing_planned_route" in gap_codes or "missing_endpoint_evidence" in gap_codes:
         targets.append(
             _edit_target(
                 draft_id=draft_id,

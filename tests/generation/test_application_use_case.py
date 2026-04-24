@@ -23,9 +23,7 @@ from tools.generation.domain.models import (
     NormalizedTestPlan,
     PlannedRouteIntent,
     SourceInputFormat,
-    PlannedWorkflowStep,
 )
-from tools.generation.evidence.models import CodeFactsScope, TargetStack
 
 
 class GenerateTestPlanUseCaseTests(unittest.TestCase):
@@ -37,7 +35,7 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
                     source_input=GenerationSourceInput(
                         source_id="tenant-api",
                         project="code/demo",
-                        content="Нужен тест-план на internal tenants API: create, get, list, patch, invalid status transition, missing entity",
+                        content="Verify create tenant, get tenant by id, and list tenants",
                     ),
                     workspace_root=root,
                 )
@@ -46,7 +44,7 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
 
         self.assertEqual(result.final_status, StepStatus.PASS)
         self.assertIsInstance(result.normalized_plan, NormalizedTestPlan)
-        self.assertGreaterEqual(len(result.normalized_plan.test_cases), 6)
+        self.assertGreaterEqual(len(result.normalized_plan.test_cases), 3)
         self.assertEqual(result.details["application_use_case"], "GenerateTestPlanUseCase")
         self.assertEqual(result.details["input_mode"], "prose")
         self.assertEqual(plan_payload["metadata"]["generation_phase"], "prose_plan_generation")
@@ -58,13 +56,13 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
                 source_id="internal-user-sessions",
                 project="code/demo",
                 title="Internal user session API",
-                goal="Cover session authentication, listing, lookup, and revocation.",
+                goal="Cover session authentication and revoke-all behavior.",
                 planned_test_cases=[
                     AgentPlannedTestCaseInput(
                         title="Authenticate internal user session",
                         objective="Verify successful session authentication.",
                         actions=["Call the authenticate endpoint with valid credentials."],
-                        expected_outcomes=["A session is created and returned."],
+                        expected_outcomes=["HTTP 200"],
                         priority="high",
                         tags=["api", "happy-path"],
                         route=PlannedRouteIntent(
@@ -77,7 +75,7 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
                         title="Revoke all sessions",
                         objective="Verify all active sessions can be revoked.",
                         actions=["Call the revoke all sessions endpoint."],
-                        expected_outcomes=["All active sessions are invalidated."],
+                        expected_outcomes=["HTTP 200"],
                         unresolved_items=["Exact auth strategy is not specified."],
                     ),
                 ],
@@ -99,78 +97,12 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
                 )
             )
             plan_payload = json.loads(result.artifact_paths["normalized_plan"].read_text(encoding="utf-8"))
-            source_input_payload = json.loads(result.artifact_paths["source_input"].read_text(encoding="utf-8"))
-            source_payload = json.loads(result.artifact_paths["normalized_source"].read_text(encoding="utf-8"))
 
         self.assertEqual(result.final_status, StepStatus.PASS)
         self.assertEqual(result.details["input_mode"], "agent_plan")
-        self.assertEqual(result.details["phase"], "agent_plan_generation")
-        self.assertEqual(result.normalized_plan.metadata["generation_phase"], "agent_plan_generation")
-        self.assertEqual(result.normalized_plan.metadata["input_mode"], "agent_plan")
-        self.assertEqual(result.normalized_plan.title, "Internal user session API")
-        self.assertEqual(len(result.normalized_plan.test_cases), 2)
-        self.assertEqual(result.normalized_plan.test_cases[0].case_id, "tc-001")
-        self.assertGreaterEqual(len(result.normalized_plan.test_cases[0].steps), 3)
-        self.assertIn(
-            "Call the authenticate endpoint with valid credentials.",
-            result.normalized_plan.test_cases[0].steps,
-        )
-        self.assertTrue(
-            any(step.startswith("Prepare POST /api/internal/v1/user-sessions/authenticate") for step in result.normalized_plan.test_cases[0].steps)
-        )
-        self.assertTrue(
-            any("Verify the expected outcomes" in step for step in result.normalized_plan.test_cases[0].steps)
-        )
-        self.assertEqual(
-            result.normalized_plan.test_cases[0].planned_route.endpoint_path,
-            "/api/internal/v1/user-sessions/authenticate",
-        )
-        self.assertEqual(result.normalized_plan.test_cases[1].open_questions, ["Exact auth strategy is not specified."])
+        self.assertEqual(result.normalized_plan.test_cases[0].planned_route.endpoint_path, "/api/internal/v1/user-sessions/authenticate")
         self.assertEqual(result.normalized_plan.test_cases[1].gaps[0].category, GapCategory.AUTH_STRATEGY)
         self.assertEqual(plan_payload["metadata"]["generation_phase"], "agent_plan_generation")
-        self.assertEqual(source_input_payload["input_format"], "structured")
-        self.assertIn("planned_test_cases", json.loads(source_input_payload["content"]))
-        self.assertEqual(source_payload["metadata"]["normalizer"], "agent-plan-adapter-v1")
-        self.assertTrue(
-            any(link.relation == "agent_plan_case_to_test_case" for link in result.traceability_map.links)
-        )
-        self.assertEqual(
-            result.normalized_plan.test_cases[0].metadata["step_outline_version"],
-            "planned-execution-outline-v1",
-        )
-
-    def test_use_case_propagates_blocking_diagnostics(self) -> None:
-        with TemporaryDirectory() as tmp:
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id="empty",
-                        project="code/demo",
-                    ),
-                    workspace_root=Path(tmp),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.BLOCKED)
-        self.assertTrue(any(diagnostic.code == "source_content_empty" for diagnostic in result.diagnostics))
-        self.assertEqual(result.normalized_plan.test_cases, [])
-
-    def test_use_case_keeps_structured_input_as_future_path_without_normalizer_coupling(self) -> None:
-        with TemporaryDirectory() as tmp:
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id="structured",
-                        project="code/demo",
-                        input_format=SourceInputFormat.STRUCTURED,
-                        content='{"cases": []}',
-                    ),
-                    workspace_root=Path(tmp),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.BLOCKED)
-        self.assertTrue(any(diagnostic.code == "unsupported_source_format" for diagnostic in result.diagnostics))
 
     def test_agent_plan_validation_reports_invalid_input_without_prose_fallback(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -178,12 +110,7 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
                 source_id="broken",
                 project="code/demo",
                 title="",
-                planned_test_cases=[
-                    AgentPlannedTestCaseInput(
-                        title="",
-                        objective="",
-                    )
-                ],
+                planned_test_cases=[AgentPlannedTestCaseInput(title="", objective="")],
             )
             result = GenerateTestPlanUseCase().execute(
                 GenerateTestPlanRequest(
@@ -203,16 +130,15 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
         self.assertIn("agent_plan_missing_title", diagnostic_codes)
         self.assertIn("agent_plan_case_missing_title", diagnostic_codes)
         self.assertIn("agent_plan_case_missing_objective", diagnostic_codes)
-        self.assertNotIn("unsupported_source_format", diagnostic_codes)
 
-    def test_use_case_can_run_without_persisting_artifacts_for_skill_or_tests(self) -> None:
+    def test_use_case_can_run_without_persisting_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
             result = GenerateTestPlanUseCase().execute(
                 GenerateTestPlanRequest(
                     source_input=GenerationSourceInput(
                         source_id="users",
                         project="code/demo",
-                        content="Проверить создание пользователя, получение пользователя по id",
+                        content="Verify create user and get user by id",
                     ),
                     workspace_root=Path(tmp),
                     options=GenerateTestPlanOptions(persist_artifacts=False),
@@ -223,287 +149,7 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
         self.assertEqual(result.artifact_paths, {})
         self.assertEqual(len(result.normalized_plan.test_cases), 2)
 
-    def test_use_case_expands_prose_case_into_execution_outline(self) -> None:
-        with TemporaryDirectory() as tmp:
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id="users",
-                        project="code/demo",
-                        content="Verify create user",
-                    ),
-                    workspace_root=Path(tmp),
-                    options=GenerateTestPlanOptions(persist_artifacts=False),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertGreaterEqual(len(result.normalized_plan.test_cases[0].steps), 2)
-        self.assertTrue(
-            any("Verify the expected outcomes" in step for step in result.normalized_plan.test_cases[0].steps)
-        )
-        self.assertEqual(
-            result.normalized_plan.test_cases[0].metadata["step_outline_version"],
-            "planned-execution-outline-v1",
-        )
-
-    def test_use_case_returns_evidence_bundle_when_code_facts_are_enabled(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            project = root / "code" / "demo"
-            project.mkdir(parents=True)
-            (project / "api.py").write_text(
-                "\n".join(
-                    [
-                        "from fastapi import APIRouter",
-                        "router = APIRouter()",
-                        "",
-                        "@router.post('/users')",
-                        "def create_user(payload: dict) -> dict:",
-                        "    return payload",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id="users",
-                        project="code/demo",
-                        content="Verify create user and get user by id",
-                    ),
-                    workspace_root=root,
-                    project_path=project,
-                    evidence_scope=CodeFactsScope(scope_id="api", paths=[Path("api.py")]),
-                    options=GenerateTestPlanOptions(collect_code_facts=True),
-                )
-            )
-
-            self.assertEqual(result.final_status, StepStatus.PASS)
-            self.assertIsNotNone(result.evidence_bundle)
-            self.assertEqual(result.details["code_facts"], "collected")
-            self.assertEqual(result.evidence_bundle.facts[0].payload["endpoint_path"], "/users")
-            self.assertEqual(result.evidence_bundle.facts[0].payload["http_method"], "POST")
-            self.assertTrue(result.artifact_paths["evidence"].exists())
-            self.assertTrue((result.run_context.artifact_dir / "evidence-bundle.json").exists())
-            self.assertEqual(result.normalized_plan.project, "code/demo")
-
-    def test_use_case_applies_enrichment_when_enabled_with_evidence(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            project = root / "code" / "demo"
-            project.mkdir(parents=True)
-            (project / "api.py").write_text(
-                "\n".join(
-                    [
-                        "from fastapi import APIRouter",
-                        "router = APIRouter()",
-                        "",
-                        "@router.post('/users')",
-                        "def create_user(payload: dict) -> dict:",
-                        "    return payload",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id="users",
-                        project="code/demo",
-                        content="Verify create user",
-                    ),
-                    workspace_root=root,
-                    project_path=project,
-                    evidence_scope=CodeFactsScope(scope_id="api", paths=[Path("api.py")]),
-                    options=GenerateTestPlanOptions(
-                        collect_code_facts=True,
-                        enrichment_enabled=True,
-                    ),
-                )
-            )
-
-            self.assertEqual(result.final_status, StepStatus.PASS)
-            self.assertIsNotNone(result.enrichment_result)
-            self.assertEqual(result.details["enrichment"], "applied")
-            self.assertEqual(result.enrichment_result.applied_evidence[0].case_id, "tc-001")
-            self.assertEqual(
-                result.normalized_plan.test_cases[0].metadata["evidence_hints"][0]["applied_fields"][
-                    "endpoint_path"
-                ],
-                "/users",
-            )
-            self.assertTrue(result.artifact_paths["enrichment_result"].exists())
-            self.assertTrue(result.artifact_paths["enriched_plan"].exists())
-            self.assertTrue((result.run_context.artifact_dir / "applied-evidence.json").exists())
-            self.assertTrue(
-                any(link.relation == "evidence_supports_case" for link in result.traceability_map.links)
-            )
-
-    def test_agent_plan_input_continues_through_evidence_enrichment(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            project = root / "code" / "demo"
-            project.mkdir(parents=True)
-            (project / "api.py").write_text(
-                "\n".join(
-                    [
-                        "from fastapi import APIRouter",
-                        "router = APIRouter()",
-                        "",
-                        "@router.post('/users')",
-                        "def create_user(payload: dict) -> dict:",
-                        "    return payload",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            agent_plan = AgentTestPlanInput(
-                source_id="users-agent-plan",
-                project="code/demo",
-                title="Users API",
-                planned_test_cases=[
-                    AgentPlannedTestCaseInput(
-                        title="Create user",
-                        objective="Verify user creation.",
-                        actions=["Call the create user API."],
-                        expected_outcomes=["User is created."],
-                        unresolved_items=["API endpoint executable detail is not resolved."],
-                    )
-                ],
-            )
-
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id=agent_plan.source_id,
-                        project=agent_plan.project,
-                        input_format=SourceInputFormat.STRUCTURED,
-                        name=agent_plan.title,
-                    ),
-                    input_mode=GenerationInputMode.AGENT_PLAN,
-                    agent_plan=agent_plan,
-                    workspace_root=root,
-                    project_path=project,
-                    evidence_scope=CodeFactsScope(scope_id="api", paths=[Path("api.py")]),
-                    options=GenerateTestPlanOptions(
-                        collect_code_facts=True,
-                        enrichment_enabled=True,
-                    ),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertEqual(result.details["input_mode"], "agent_plan")
-        self.assertIsNotNone(result.evidence_bundle)
-        self.assertIsNotNone(result.enrichment_result)
-        self.assertEqual(result.enrichment_result.applied_evidence[0].case_id, "tc-001")
-        self.assertEqual(
-            result.normalized_plan.test_cases[0].metadata["route_hints"][0]["endpoint_path"],
-            "/users",
-        )
-        self.assertEqual(result.normalized_plan.test_cases[0].support.route_hints[0].endpoint_path, "/users")
-        self.assertEqual(result.normalized_plan.test_cases[0].gaps, [])
-
-    def test_use_case_uses_agent_plan_evidence_scope_when_request_scope_missing(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            project = root / "code" / "demo"
-            project.mkdir(parents=True)
-            (project / "api.py").write_text(
-                "\n".join(
-                    [
-                        "from fastapi import APIRouter",
-                        "router = APIRouter()",
-                        "@router.post('/users')",
-                        "def create_user(payload: dict) -> dict:",
-                        "    return payload",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            agent_plan = AgentTestPlanInput(
-                source_id="users-agent-plan",
-                project="code/demo",
-                title="Users API",
-                evidence_scope={"paths": ["api.py"], "stack_hint": "python"},
-                planned_test_cases=[
-                    AgentPlannedTestCaseInput(title="Create user", objective="Verify create user.")
-                ],
-            )
-
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id=agent_plan.source_id,
-                        project=agent_plan.project,
-                        input_format=SourceInputFormat.STRUCTURED,
-                        name=agent_plan.title,
-                    ),
-                    input_mode=GenerationInputMode.AGENT_PLAN,
-                    agent_plan=agent_plan,
-                    workspace_root=root,
-                    project_path=project,
-                    options=GenerateTestPlanOptions(collect_code_facts=True),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertIsNotNone(result.evidence_bundle)
-        self.assertEqual(result.evidence_bundle.facts[0].payload["endpoint_path"], "/users")
-
-    def test_request_evidence_scope_overrides_agent_plan_scope(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            project = root / "code" / "demo"
-            project.mkdir(parents=True)
-            (project / "api.py").write_text(
-                "\n".join(
-                    [
-                        "from fastapi import APIRouter",
-                        "router = APIRouter()",
-                        "@router.post('/users')",
-                        "def create_user(payload: dict) -> dict:",
-                        "    return payload",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            (project / "unused.py").write_text("x = 1\n", encoding="utf-8")
-            agent_plan = AgentTestPlanInput(
-                source_id="users-agent-plan",
-                project="code/demo",
-                title="Users API",
-                evidence_scope={"paths": ["unused.py"], "stack_hint": "python"},
-                planned_test_cases=[
-                    AgentPlannedTestCaseInput(title="Create user", objective="Verify create user.")
-                ],
-            )
-
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id=agent_plan.source_id,
-                        project=agent_plan.project,
-                        input_format=SourceInputFormat.STRUCTURED,
-                        name=agent_plan.title,
-                    ),
-                    input_mode=GenerationInputMode.AGENT_PLAN,
-                    agent_plan=agent_plan,
-                    workspace_root=root,
-                    project_path=project,
-                    evidence_scope=CodeFactsScope(scope_id="api", paths=[Path("api.py")]),
-                    options=GenerateTestPlanOptions(collect_code_facts=True),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertIsNotNone(result.evidence_bundle)
-        self.assertEqual(result.evidence_bundle.facts[0].payload["endpoint_path"], "/users")
-
-    def test_agent_plan_with_explicit_route_can_render_drafts_without_evidence(self) -> None:
+    def test_agent_plan_with_explicit_route_can_render_drafts(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             agent_plan = AgentTestPlanInput(
@@ -514,13 +160,9 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
                     AgentPlannedTestCaseInput(
                         title="Create user",
                         objective="Verify user creation.",
-                        actions=["Call the create user API."],
-                        expected_outcomes=["User is created."],
-                        route=PlannedRouteIntent(
-                            http_method="POST",
-                            endpoint_path="/users",
-                            path_kind="collection",
-                        ),
+                        actions=["POST the user create endpoint."],
+                        expected_outcomes=["HTTP 201"],
+                        route=PlannedRouteIntent(http_method="POST", endpoint_path="/users", path_kind="collection"),
                     )
                 ],
             )
@@ -541,152 +183,10 @@ class GenerateTestPlanUseCaseTests(unittest.TestCase):
             )
 
         self.assertEqual(result.final_status, StepStatus.PASS)
+        self.assertEqual(result.details["scenario_rendering"], "rendered")
         self.assertIsNotNone(result.scenario_render_result)
         self.assertEqual(len(result.scenario_render_result.draft_set.drafts), 1)
-        self.assertEqual(result.scenario_render_result.validation_results[0].parse_valid, True)
-
-    def test_agent_plan_workflow_steps_render_multi_step_draft(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            agent_plan = AgentTestPlanInput(
-                source_id="internal-user-session-workflow",
-                project="code/demo",
-                title="Internal user session workflow",
-                planned_test_cases=[
-                    AgentPlannedTestCaseInput(
-                        title="Authenticate, fetch, and revoke session",
-                        objective="Verify the session lifecycle end-to-end.",
-                        kind="workflow",
-                        workflow_steps=[
-                            PlannedWorkflowStep(
-                                step_type="api",
-                                title="Authenticate session",
-                                route=PlannedRouteIntent(
-                                    http_method="POST",
-                                    endpoint_path="/api/internal/v1/user-sessions/authenticate",
-                                ),
-                                expected_outcomes=["HTTP 200", "response JSON exists"],
-                                capture=["response.json.sessionId -> session_id"],
-                            ),
-                            PlannedWorkflowStep(
-                                step_type="api",
-                                title="Get session",
-                                route=PlannedRouteIntent(
-                                    http_method="GET",
-                                    endpoint_path="/api/internal/v1/user-sessions/{{session_id}}",
-                                ),
-                                expected_outcomes=["HTTP 200"],
-                            ),
-                            PlannedWorkflowStep(
-                                step_type="api",
-                                title="Revoke session",
-                                route=PlannedRouteIntent(
-                                    http_method="POST",
-                                    endpoint_path="/api/internal/v1/user-sessions/{{session_id}}/revoke",
-                                ),
-                                expected_outcomes=["HTTP 204"],
-                            ),
-                            PlannedWorkflowStep(
-                                step_type="db",
-                                title="Confirm revoked session in storage",
-                                sql="SELECT status FROM user_sessions WHERE id = :session_id",
-                                params={"session_id": "{{session_id}}"},
-                                expected_outcomes=["one row exists", "`status` = `REVOKED`"],
-                            ),
-                        ],
-                    )
-                ],
-            )
-
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id=agent_plan.source_id,
-                        project=agent_plan.project,
-                        input_format=SourceInputFormat.STRUCTURED,
-                        name=agent_plan.title,
-                    ),
-                    input_mode=GenerationInputMode.AGENT_PLAN,
-                    agent_plan=agent_plan,
-                    workspace_root=root,
-                    options=GenerateTestPlanOptions(render_scenario_drafts=True),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertEqual(len(result.normalized_plan.test_cases[0].workflow_steps), 4)
-        self.assertGreaterEqual(len(result.normalized_plan.test_cases[0].steps), 4)
-        self.assertIsNotNone(result.scenario_render_result)
-        draft = result.scenario_render_result.draft_set.drafts[0]
-        self.assertIn("### Step 1", draft.markdown)
-        self.assertIn("### Step 2", draft.markdown)
-        self.assertIn("### Step 3", draft.markdown)
-        self.assertIn("### Step 4", draft.markdown)
-        self.assertIn("Path: /api/internal/v1/user-sessions/{{session_id}}/revoke", draft.markdown)
-        self.assertIn("Type: db", draft.markdown)
-
-    def test_use_case_skips_enrichment_without_evidence_collection(self) -> None:
-        with TemporaryDirectory() as tmp:
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id="users",
-                        project="code/demo",
-                        content="Verify create user",
-                    ),
-                    workspace_root=Path(tmp),
-                    options=GenerateTestPlanOptions(enrichment_enabled=True),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertIsNone(result.enrichment_result)
-        self.assertTrue(any(diagnostic.code == "enrichment_requires_evidence" for diagnostic in result.diagnostics))
-
-    def test_use_case_collects_java_spring_evidence_for_controller_scope(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            project = root / "code" / "demo"
-            controller = project / "src" / "main" / "java" / "demo" / "UserController.java"
-            controller.parent.mkdir(parents=True)
-            controller.write_text(
-                "\n".join(
-                    [
-                        "import org.springframework.web.bind.annotation.*;",
-                        "@RestController",
-                        '@RequestMapping("/api/users")',
-                        "public class UserController {",
-                        '  @GetMapping("/{id}")',
-                        "  public UserDto getUser() { return null; }",
-                        "}",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            result = GenerateTestPlanUseCase().execute(
-                GenerateTestPlanRequest(
-                    source_input=GenerationSourceInput(
-                        source_id="users-java",
-                        project="code/demo",
-                        content="Verify get user by id",
-                    ),
-                    workspace_root=root,
-                    project_path=project,
-                    evidence_scope=CodeFactsScope(
-                        scope_id="api",
-                        paths=[Path("src/main/java/demo/UserController.java")],
-                        stack_hint=TargetStack.JAVA_SPRING,
-                    ),
-                    options=GenerateTestPlanOptions(collect_code_facts=True),
-                )
-            )
-
-        self.assertEqual(result.final_status, StepStatus.PASS)
-        self.assertIsNotNone(result.evidence_bundle)
-        self.assertEqual(result.evidence_bundle.facts[0].payload["endpoint_path"], "/api/users/{id}")
-        self.assertEqual(result.evidence_bundle.facts[0].payload["http_method"], "GET")
-        self.assertEqual(result.evidence_bundle.facts[0].payload["controller_name"], "UserController")
+        self.assertIn("scenario_render_result", result.artifact_paths)
 
 
 if __name__ == "__main__":

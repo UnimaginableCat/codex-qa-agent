@@ -9,7 +9,6 @@ from typing import Any
 
 from tools.common.json_safe import to_json_safe
 from tools.generation.domain.models import AgentTestPlanInput, GenerationSourceInput
-from tools.generation.evidence.models import CodeFactsScope
 
 
 class GenerationOutputMode(StrEnum):
@@ -29,9 +28,6 @@ class GenerateTestPlanOptions:
 
     persist_artifacts: bool = True
     allow_empty_plan: bool = False
-    enrichment_enabled: bool = False
-    collect_code_facts: bool = False
-    strict_coverage: bool = False
     render_scenario_drafts: bool = False
     details: dict[str, Any] = field(default_factory=dict)
 
@@ -48,7 +44,6 @@ class GenerateTestPlanRequest:
     agent_plan: AgentTestPlanInput | None = None
     workspace_root: Path | None = None
     project_path: Path | None = None
-    evidence_scope: CodeFactsScope | None = None
     output_mode: GenerationOutputMode = GenerationOutputMode.TEST_PLAN
     options: GenerateTestPlanOptions = field(default_factory=GenerateTestPlanOptions)
 

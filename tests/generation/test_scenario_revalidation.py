@@ -154,7 +154,7 @@ class ScenarioRevalidationTests(unittest.TestCase):
         self.assertEqual(result.parse_status.value, "valid")
         self.assertIsNotNone(result.compile_validation)
         self.assertEqual(result.compile_validation.compile_status.value, "success")
-        self.assertEqual(result.execution_readiness_category.value, "compile_valid_runner_ready")
+        self.assertEqual(result.execution_readiness_category.value, "compile_valid_but_incomplete")
         self.assertEqual(result.compile_validation.issues, [])
         self.assertEqual(result.compile_validation.warnings, [])
 

@@ -150,7 +150,7 @@ class PlannedWorkflowStep:
 
 @dataclass(slots=True)
 class RouteSupportHint:
-    """Typed route support projected from evidence or other deterministic sources."""
+    """Typed route support projected from authored data or compatible metadata."""
 
     fact_id: str = ""
     endpoint_path: str = ""
@@ -182,7 +182,7 @@ class RouteSupportHint:
 
 @dataclass(slots=True)
 class PlannedCaseSupport:
-    """Typed support state for a planned test case after deterministic enrichment."""
+    """Typed support state for a planned test case after deterministic route projection."""
 
     readiness: str = ""
     route_hints: list[RouteSupportHint] = field(default_factory=list)

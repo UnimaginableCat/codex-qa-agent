@@ -20,7 +20,6 @@ from tools.generation.domain.models import (
     PlannedRouteIntent,
     PlannedWorkflowStep,
 )
-from tools.generation.evidence.models import TargetStack
 from tools.scenario_runner.domain.models import ApiStepDefinition, DbStepDefinition, ScenarioStep, ScenarioStepType
 from tools.scenario_runner.runtime.validators import ScenarioStepValidator
 from tools.db.validators import ReadOnlySqlValidator, SqlNormalizer
@@ -1225,11 +1224,11 @@ def _validate_agent_plan_payload_shape(
                 )
             )
         stack_hint = evidence_scope.get("stack_hint")
-        if stack_hint not in {None, ""} and str(stack_hint) not in {item.value for item in TargetStack}:
+        if stack_hint not in {None, ""} and not isinstance(stack_hint, str):
             diagnostics.append(
                 GenerationDiagnostic(
                     code="agent_plan_evidence_scope_invalid_stack_hint",
-                    message="evidence_scope.stack_hint must be one of the supported target stacks.",
+                    message="evidence_scope.stack_hint must be a string when provided.",
                     severity=DiagnosticSeverity.ERROR,
                     source_ref=source_ref,
                     details={"stack_hint": str(stack_hint)},

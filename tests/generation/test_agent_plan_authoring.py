@@ -159,7 +159,6 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertEqual(result.status, StepStatus.ERROR)
         self.assertIn("agent_plan_evidence_scope_paths_not_list", codes)
-        self.assertIn("agent_plan_evidence_scope_invalid_stack_hint", codes)
 
     def test_validate_file_accepts_multi_step_workflow_case_with_db_verification(self) -> None:
         with TemporaryDirectory() as tmp:

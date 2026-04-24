@@ -20,13 +20,11 @@ from tools.generation.domain.models import (
     NormalizedTestPlan,
     TraceabilityMap,
 )
-from tools.generation.enrichment.models import CoverageAssessmentResult, EnrichedTestPlanResult
-from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 from tools.generation.review.models import ScenarioPromotionBatchResult, ScenarioPromotionResult
 
 GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
-BUNDLE_LAYOUT_VERSION = 6
+BUNDLE_LAYOUT_VERSION = 7
 CONTEXT_FILENAME = "context.json"
 AGENT_PLAN_FILENAME = "agent-plan.json"
 SOURCE_INPUT_FILENAME = "source-input.json"
@@ -34,12 +32,6 @@ NORMALIZED_SOURCE_FILENAME = "normalized-source.json"
 NORMALIZED_PLAN_FILENAME = "normalized-plan.json"
 TRACEABILITY_MAP_FILENAME = "traceability-map.json"
 DIAGNOSTICS_FILENAME = "diagnostics.json"
-EVIDENCE_BUNDLE_FILENAME = "evidence-bundle.json"
-ENRICHED_PLAN_FILENAME = "enriched-plan.json"
-ENRICHMENT_RESULT_FILENAME = "enrichment-result.json"
-APPLIED_EVIDENCE_FILENAME = "applied-evidence.json"
-UNAPPLIED_EVIDENCE_FILENAME = "unapplied-evidence.json"
-COVERAGE_ASSESSMENT_FILENAME = "coverage-assessment.json"
 SCENARIO_DRAFTS_DIRNAME = "scenario-drafts"
 SCENARIO_RENDER_RESULT_FILENAME = "scenario-render-result.json"
 SCENARIO_PARSE_RESULTS_FILENAME = "scenario-parse-results.json"
@@ -148,55 +140,6 @@ class FileGenerationArtifactStore:
         target_path = _bundle_file_path(run_context, DIAGNOSTICS_FILENAME)
         payload = {"diagnostics": [diagnostic.to_dict() for diagnostic in diagnostics]}
         _write_json_file(target_path, payload)
-        self.write_manifest(run_context)
-        return target_path
-
-    def write_evidence_bundle(
-        self,
-        run_context: GenerationRunContext,
-        evidence_bundle: GenerationEvidenceBundle,
-    ) -> Path:
-        payload = evidence_bundle.to_dict()
-        target_path = _bundle_file_path(run_context, EVIDENCE_BUNDLE_FILENAME)
-        _write_json_file(target_path, payload)
-        self.write_manifest(run_context)
-        return target_path
-
-    def write_enriched_plan(
-        self,
-        run_context: GenerationRunContext,
-        normalized_plan: NormalizedTestPlan,
-    ) -> Path:
-        target_path = _bundle_file_path(run_context, ENRICHED_PLAN_FILENAME)
-        _write_json_file(target_path, normalized_plan.to_dict())
-        self.write_manifest(run_context)
-        return target_path
-
-    def write_enrichment_result(
-        self,
-        run_context: GenerationRunContext,
-        enrichment_result: EnrichedTestPlanResult,
-    ) -> Path:
-        target_path = _bundle_file_path(run_context, ENRICHMENT_RESULT_FILENAME)
-        _write_json_file(target_path, enrichment_result.to_dict())
-        _write_json_file(
-            _bundle_file_path(run_context, APPLIED_EVIDENCE_FILENAME),
-            {"applied_evidence": [link.to_dict() for link in enrichment_result.applied_evidence]},
-        )
-        _write_json_file(
-            _bundle_file_path(run_context, UNAPPLIED_EVIDENCE_FILENAME),
-            {"unapplied_evidence": [reason.to_dict() for reason in enrichment_result.unapplied_evidence]},
-        )
-        self.write_manifest(run_context)
-        return target_path
-
-    def write_coverage_assessment(
-        self,
-        run_context: GenerationRunContext,
-        coverage_assessment: CoverageAssessmentResult,
-    ) -> Path:
-        target_path = _bundle_file_path(run_context, COVERAGE_ASSESSMENT_FILENAME)
-        _write_json_file(target_path, coverage_assessment.to_dict())
         self.write_manifest(run_context)
         return target_path
 
@@ -362,12 +305,6 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
             "normalized_plan_path": str(run_context.artifact_dir / NORMALIZED_PLAN_FILENAME),
             "traceability_map_path": str(run_context.artifact_dir / TRACEABILITY_MAP_FILENAME),
             "diagnostics_path": str(run_context.artifact_dir / DIAGNOSTICS_FILENAME),
-            "evidence_bundle_path": str(run_context.artifact_dir / EVIDENCE_BUNDLE_FILENAME),
-            "enriched_plan_path": str(run_context.artifact_dir / ENRICHED_PLAN_FILENAME),
-            "enrichment_result_path": str(run_context.artifact_dir / ENRICHMENT_RESULT_FILENAME),
-            "applied_evidence_path": str(run_context.artifact_dir / APPLIED_EVIDENCE_FILENAME),
-            "unapplied_evidence_path": str(run_context.artifact_dir / UNAPPLIED_EVIDENCE_FILENAME),
-            "coverage_assessment_path": str(run_context.artifact_dir / COVERAGE_ASSESSMENT_FILENAME),
             "scenario_drafts_dir": str(run_context.artifact_dir / SCENARIO_DRAFTS_DIRNAME),
             "scenario_render_result_path": str(run_context.artifact_dir / SCENARIO_RENDER_RESULT_FILENAME),
             "scenario_parse_results_path": str(run_context.artifact_dir / SCENARIO_PARSE_RESULTS_FILENAME),

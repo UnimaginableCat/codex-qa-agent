@@ -14,8 +14,6 @@ from .models import (
     NormalizedTestPlan,
     TraceabilityMap,
 )
-from tools.generation.enrichment.models import CoverageAssessmentResult, EnrichedTestPlanResult
-from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 from tools.generation.review.models import ScenarioPromotionResult
 from tools.generation.review.models import ScenarioPromotionBatchResult
@@ -74,38 +72,6 @@ class GenerationArtifactStore(Protocol):
         diagnostics: list[GenerationDiagnostic],
     ) -> Path:
         """Persist generation diagnostics."""
-        ...
-
-    def write_evidence_bundle(
-        self,
-        run_context: GenerationRunContext,
-        evidence_bundle: GenerationEvidenceBundle,
-    ) -> Path:
-        """Persist typed code facts and evidence diagnostics."""
-        ...
-
-    def write_enriched_plan(
-        self,
-        run_context: GenerationRunContext,
-        normalized_plan: NormalizedTestPlan,
-    ) -> Path:
-        """Persist the enriched normalized plan as an explicit artifact."""
-        ...
-
-    def write_enrichment_result(
-        self,
-        run_context: GenerationRunContext,
-        enrichment_result: EnrichedTestPlanResult,
-    ) -> Path:
-        """Persist enrichment result and applied/unapplied evidence projections."""
-        ...
-
-    def write_coverage_assessment(
-        self,
-        run_context: GenerationRunContext,
-        coverage_assessment: CoverageAssessmentResult,
-    ) -> Path:
-        """Persist authored-plan coverage assessment against extracted evidence facts."""
         ...
 
     def write_scenario_drafts(
