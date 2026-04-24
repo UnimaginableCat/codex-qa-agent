@@ -29,7 +29,7 @@ Example:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -46,7 +46,7 @@ Example:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -63,7 +63,7 @@ Example:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -146,3 +146,4 @@ After generation:
 - render drafts only when preview markdown is needed
 - review/promote only when the operator wants scenario files
 - validate only after manual editing or readiness checks
+- keep one run = one canonical bundle under `artifacts/agent/generation/<source>-<run_id>/`

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .models import (
+    AgentTestPlanInput,
     GenerationDiagnostic,
     GenerationRunContext,
     GenerationSourceInput,
@@ -32,6 +33,14 @@ class GenerationArtifactStore(Protocol):
         source_input: GenerationSourceInput,
     ) -> Path:
         """Persist the typed source input captured for the run."""
+        ...
+
+    def write_agent_plan(
+        self,
+        run_context: GenerationRunContext,
+        agent_plan: AgentTestPlanInput,
+    ) -> Path:
+        """Persist the authored agent plan captured for the run bundle."""
         ...
 
     def write_normalized_source(

@@ -17,7 +17,7 @@ from tools.generation.domain.models import (
 )
 from tools.generation.persistence.artifacts import (
     COVERAGE_ASSESSMENT_FILENAME,
-    GENERATION_RUNS_DIRNAME,
+    GENERATION_ARTIFACTS_DIRNAME,
     FileGenerationArtifactStore,
 )
 from tools.generation.enrichment.models import CoverageAssessmentResult
@@ -730,7 +730,13 @@ def _merge_preflight_gaps(
 
 
 def _load_run_context(workspace_root: Path, run_id: str) -> GenerationRunContext:
-    context_path = workspace_root / GENERATION_RUNS_DIRNAME / run_id / "context.json"
+    artifacts_root = workspace_root / GENERATION_ARTIFACTS_DIRNAME
+    matches = sorted(path for path in artifacts_root.glob(f"*-{run_id}") if path.is_dir())
+    if not matches:
+        raise FileNotFoundError(f"Generation artifact bundle for run_id '{run_id}' was not found.")
+    if len(matches) > 1:
+        raise ValueError(f"Multiple generation artifact bundles matched run_id '{run_id}'.")
+    context_path = matches[0] / "context.json"
     payload = read_json_file(context_path, "Generation run context")
     return GenerationRunContext.from_dict(dict(payload))
 

@@ -27,7 +27,7 @@ from tools.db.validators import ReadOnlySqlValidator, SqlNormalizer
 from .models import AgentPlanLoadResult, AgentPlanValidationResult
 
 AGENT_PLAN_TEMPLATE_VERSION = "agent-plan-template-v1"
-MANAGED_AGENT_INPUT_ROOT = ("artifacts", "agent", "input")
+MANAGED_AGENT_INPUT_ROOT = ("artifacts", "agent", "generation")
 API_EXPECTATION_EXAMPLES = [
     "HTTP 200",
     "HTTP 200 or HTTP 201",

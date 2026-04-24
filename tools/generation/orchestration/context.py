@@ -9,7 +9,6 @@ from uuid import uuid4
 from tools.generation.domain.models import GenerationRunContext, GenerationSourceInput
 from tools.generation.persistence.artifacts import (
     create_generation_artifact_directory,
-    create_generation_run_state_directory,
     ensure_generation_workspace_directories,
     slugify_artifact_name,
 )
@@ -28,7 +27,6 @@ def initialize_generation_run_context(
     run_id = create_generation_run_id()
     directories = ensure_generation_workspace_directories(resolved_workspace_root)
     artifact_dir_name = f"{slugify_artifact_name(source_input.source_id)}-{run_id}"
-    run_state_dir = create_generation_run_state_directory(directories.runs_root_dir, run_id)
     artifact_dir = create_generation_artifact_directory(
         directories.artifacts_root_dir,
         artifact_dir_name,
@@ -41,7 +39,7 @@ def initialize_generation_run_context(
         source_id=source_input.source_id,
         project=source_input.project,
         runs_root_dir=directories.runs_root_dir,
-        run_state_dir=run_state_dir,
+        run_state_dir=artifact_dir,
         artifacts_root_dir=directories.artifacts_root_dir,
         artifact_dir=artifact_dir,
         started_at=started_at,

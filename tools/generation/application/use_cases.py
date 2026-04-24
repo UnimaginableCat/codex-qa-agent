@@ -164,6 +164,11 @@ class GenerateTestPlanUseCase:
             artifact_paths.update(
                 {
                     "context": self.artifact_store.write_context(run_context),
+                    **(
+                        {}
+                        if request.agent_plan is None
+                        else {"agent_plan": self.artifact_store.write_agent_plan(run_context, request.agent_plan)}
+                    ),
                     "source_input": self.artifact_store.write_source_input(
                         run_context,
                         source_input_for_persistence,

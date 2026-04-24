@@ -152,12 +152,15 @@ Use prose mode only when:
 
 # Artifact Expectations
 
-Generation artifacts remain isolated from runner artifacts:
+One generation request should resolve to one canonical bundle:
 
 ```text
-.codex-qa/generation/runs/<run_id>/
 artifacts/agent/generation/<source_slug>-<run_id>/
 ```
+
+Treat this bundle as the single source of truth for that request. It contains the persisted
+`agent-plan.json`, `context.json`, `normalized-plan.json`, diagnostics, optional evidence, and any
+downstream draft/review artifacts for the same run.
 
 Treat `normalized-plan.json` as the canonical generated plan artifact. Do not treat draft markdown,
 review output, or validation output as the canonical plan.

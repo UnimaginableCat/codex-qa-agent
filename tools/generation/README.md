@@ -1,22 +1,13 @@
 # Generation Pipeline Foundation
 
-Phase 1 generation artifacts are isolated from `scenario_runner` artifacts while keeping a familiar
-run-state plus immutable-bundle shape.
+Phase 1 generation artifacts are isolated from `scenario_runner` artifacts.
 
-Run state:
-
-```text
-.codex-qa/generation/runs/<run_id>/
-  context.json
-  evidence.json        # only when code facts collection is enabled
-  summary.json
-```
-
-Artifact bundle:
+Canonical request bundle:
 
 ```text
 artifacts/agent/generation/<source_slug>-<run_id>/
   manifest.json
+  agent-plan.json
   context.json
   source-input.json
   normalized-source.json
@@ -37,6 +28,9 @@ artifacts/agent/generation/<source_slug>-<run_id>/
   promotion-result.json
   summary.json
 ```
+
+Treat this bundle as the single source of truth for one generation request. Do not split one
+request across a separate run-state tree and a second artifact tree.
 
 Canonical Phase 1 contracts live in `tools.generation.domain.models`.
 The canonical application entrypoint is `GenerateTestPlanUseCase` with `GenerateTestPlanRequest`.
@@ -74,7 +68,7 @@ CLI scaffold:
 ```powershell
 <project-venv-python> -m tools.generation.cli `
   --init-agent-plan `
-  --output artifacts/agent/input/users-api-plan.json `
+  --output artifacts/agent/generation/users-api-plan.json `
   --source-id users-api `
   --project code/demo `
   --name "Users API" `
@@ -86,7 +80,7 @@ CLI validate-only:
 ```powershell
 <project-venv-python> -m tools.generation.cli `
   --validate-agent-plan `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
   --output-format text
 ```
 
@@ -94,10 +88,14 @@ The scaffolded template is deterministic and section-complete for Phase 1 author
 deterministic and checks required top-level fields, case presence, required case fields, malformed
 JSON, and unsupported payload shape before full generation runs.
 
-When scaffold output is requested under the managed `artifacts/agent/input/` tree and the exact
+When scaffold output is requested under the managed `artifacts/agent/generation/` tree and the exact
 file already exists, the CLI writes the new scaffold into a separate sibling directory such as
-`artifacts/agent/input/users-api-plan-001/users-api-plan.json` instead of failing on the collision.
-Custom output paths outside the managed input tree remain strict and are never overwritten.
+`artifacts/agent/generation/users-api-plan-001/users-api-plan.json` instead of failing on the
+collision. Custom output paths outside the managed generation tree remain strict and are never
+overwritten.
+
+After generation, the authored input is persisted inside the canonical request bundle as
+`agent-plan.json`. Treat that bundle copy as the canonical request artifact.
 
 Code facts are a separate opt-in evidence layer. Canonical evidence contracts live in
 `tools.generation.evidence.models`; the extractor interface is `CodeFactsExtractor`, and the
@@ -123,7 +121,7 @@ Agent-facing adapter:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -135,7 +133,7 @@ Java/Spring controller scope uses the same flow, optionally with an explicit sta
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `
@@ -165,7 +163,7 @@ Draft scenario rendering preview:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
   --workspace-root . `
   --project-path code/demo `
   --collect-code-facts `

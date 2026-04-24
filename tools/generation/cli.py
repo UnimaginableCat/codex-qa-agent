@@ -37,6 +37,9 @@ from tools.generation.review import (
     ScenarioRevalidationService,
 )
 
+LEGACY_AGENT_PLAN_ROOT = ("artifacts", "agent", "input")
+MANAGED_AGENT_PLAN_ROOT = ("artifacts", "agent", "generation")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -647,6 +650,15 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
                 source_ref=args.agent_plan_file,
             )
         )
+    if args.agent_plan_file and _path_under_root(Path(args.agent_plan_file), LEGACY_AGENT_PLAN_ROOT):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_agent_plan_file_legacy_root_unsupported",
+                message="Legacy artifacts/agent/input is no longer supported. Use one generation bundle root under artifacts/agent/generation.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.agent_plan_file,
+            )
+        )
     if not args.agent_plan_file and not args.source_id:
         diagnostics.append(
             GenerationDiagnostic(
@@ -743,11 +755,29 @@ def _init_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[Gener
                 severity=DiagnosticSeverity.ERROR,
             )
         )
+    elif not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_init_agent_plan_requires_managed_root",
+                message="Agent plan scaffold must be written under artifacts/agent/generation.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.output,
+            )
+        )
     return diagnostics
 
 
 def _validate_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     if args.agent_plan_file:
+        if _path_under_root(Path(args.agent_plan_file), LEGACY_AGENT_PLAN_ROOT):
+            return [
+                GenerationDiagnostic(
+                    code="adapter_validate_agent_plan_legacy_root_unsupported",
+                    message="Legacy artifacts/agent/input is no longer supported. Use one generation bundle root under artifacts/agent/generation.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=args.agent_plan_file,
+                )
+            ]
         return []
     return [
         GenerationDiagnostic(
@@ -927,6 +957,8 @@ def _render_generation_text(payload: dict[str, Any]) -> str:
     artifact_paths = payload.get("artifact_paths") or {}
     if artifact_paths:
         lines.append("Artifacts:")
+        if artifact_paths.get("agent_plan"):
+            lines.append(f"  - agent_plan: {artifact_paths['agent_plan']}")
         if artifact_paths.get("normalized_plan"):
             lines.append(f"  - normalized_plan: {artifact_paths['normalized_plan']}")
         if artifact_paths.get("coverage_assessment"):
@@ -1184,6 +1216,12 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+def _path_under_root(path: Path, root_parts: tuple[str, ...]) -> bool:
+    parts = tuple(part.lower() for part in path.parts)
+    width = len(root_parts)
+    return any(parts[index:index + width] == root_parts for index in range(len(parts) - width + 1))
 
 
 def _average_completeness_ratio(review_set: Any) -> float:

@@ -1,6 +1,7 @@
 """Artifact persistence for generation pipeline runs."""
 
 from .artifacts import (
+    AGENT_PLAN_FILENAME,
     APPLIED_EVIDENCE_FILENAME,
     CONTEXT_FILENAME,
     COVERAGE_ASSESSMENT_FILENAME,
@@ -28,6 +29,7 @@ from .artifacts import (
 )
 
 __all__ = [
+    "AGENT_PLAN_FILENAME",
     "APPLIED_EVIDENCE_FILENAME",
     "CONTEXT_FILENAME",
     "COVERAGE_ASSESSMENT_FILENAME",

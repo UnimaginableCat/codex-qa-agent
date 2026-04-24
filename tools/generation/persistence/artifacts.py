@@ -11,6 +11,7 @@ from typing import Any
 from tools.common.errors import ToolingError
 from tools.common.io import write_text_file
 from tools.generation.domain.models import (
+    AgentTestPlanInput,
     GenerationDiagnostic,
     GenerationRunContext,
     GenerationSourceInput,
@@ -23,9 +24,10 @@ from tools.generation.evidence.models import GenerationEvidenceBundle
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 from tools.generation.review.models import ScenarioPromotionResult
 
-GENERATION_RUNS_DIRNAME = Path(".codex-qa/generation/runs")
 GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
+GENERATION_RUNS_DIRNAME = GENERATION_ARTIFACTS_DIRNAME
 CONTEXT_FILENAME = "context.json"
+AGENT_PLAN_FILENAME = "agent-plan.json"
 SOURCE_INPUT_FILENAME = "source-input.json"
 NORMALIZED_SOURCE_FILENAME = "normalized-source.json"
 NORMALIZED_PLAN_FILENAME = "normalized-plan.json"
@@ -83,10 +85,19 @@ class FileGenerationArtifactStore:
     """Writes generation artifacts to a predictable filesystem bundle."""
 
     def write_context(self, run_context: GenerationRunContext) -> Path:
-        target_path = run_context.run_state_dir / CONTEXT_FILENAME
+        target_path = _bundle_file_path(run_context, CONTEXT_FILENAME)
         payload = run_context.to_dict()
         _write_json_file(target_path, payload)
-        _write_json_file(_bundle_file_path(run_context, CONTEXT_FILENAME), payload)
+        self.write_manifest(run_context)
+        return target_path
+
+    def write_agent_plan(
+        self,
+        run_context: GenerationRunContext,
+        agent_plan: AgentTestPlanInput,
+    ) -> Path:
+        target_path = _bundle_file_path(run_context, AGENT_PLAN_FILENAME)
+        _write_json_file(target_path, agent_plan.to_dict())
         self.write_manifest(run_context)
         return target_path
 
@@ -146,12 +157,11 @@ class FileGenerationArtifactStore:
         run_context: GenerationRunContext,
         evidence_bundle: GenerationEvidenceBundle,
     ) -> Path:
-        run_state_path = run_context.run_state_dir / EVIDENCE_RUN_STATE_FILENAME
         payload = evidence_bundle.to_dict()
-        _write_json_file(run_state_path, payload)
-        _write_json_file(_bundle_file_path(run_context, EVIDENCE_BUNDLE_FILENAME), payload)
+        target_path = _bundle_file_path(run_context, EVIDENCE_BUNDLE_FILENAME)
+        _write_json_file(target_path, payload)
         self.write_manifest(run_context)
-        return run_state_path
+        return target_path
 
     def write_enriched_plan(
         self,
@@ -241,9 +251,8 @@ class FileGenerationArtifactStore:
         return target_path
 
     def write_summary(self, run_context: GenerationRunContext, summary: dict[str, object]) -> Path:
-        target_path = run_context.run_state_dir / SUMMARY_FILENAME
+        target_path = _bundle_file_path(run_context, SUMMARY_FILENAME)
         _write_json_file(target_path, summary)
-        _write_json_file(_bundle_file_path(run_context, SUMMARY_FILENAME), summary)
         self.write_manifest(run_context)
         return target_path
 
@@ -253,14 +262,11 @@ class FileGenerationArtifactStore:
 
 
 def ensure_generation_workspace_directories(workspace_root: Path) -> GenerationWorkspaceDirectories:
-    runs_root_dir = workspace_root / GENERATION_RUNS_DIRNAME
     artifacts_root_dir = workspace_root / GENERATION_ARTIFACTS_DIRNAME
-
-    runs_root_dir.mkdir(parents=True, exist_ok=True)
     artifacts_root_dir.mkdir(parents=True, exist_ok=True)
 
     return GenerationWorkspaceDirectories(
-        runs_root_dir=runs_root_dir,
+        runs_root_dir=artifacts_root_dir,
         artifacts_root_dir=artifacts_root_dir,
     )
 
@@ -328,10 +334,11 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
         "workspace_root": str(run_context.workspace_root),
         "run_state_dir": str(run_context.run_state_dir),
         "artifact_dir": str(run_context.artifact_dir),
-        "layout_version": 2,
+        "layout_version": 4,
         "bundle": {
             "manifest_path": str(target_path),
             "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),
+            "agent_plan_path": str(run_context.artifact_dir / AGENT_PLAN_FILENAME),
             "source_input_path": str(run_context.artifact_dir / SOURCE_INPUT_FILENAME),
             "normalized_source_path": str(run_context.artifact_dir / NORMALIZED_SOURCE_FILENAME),
             "normalized_plan_path": str(run_context.artifact_dir / NORMALIZED_PLAN_FILENAME),
@@ -350,11 +357,6 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
             "deferred_items_path": str(run_context.artifact_dir / DEFERRED_ITEMS_FILENAME),
             "promotion_result_path": str(run_context.artifact_dir / PROMOTION_RESULT_FILENAME),
             "summary_path": str(run_context.artifact_dir / SUMMARY_FILENAME),
-        },
-        "run_state": {
-            "context_path": str(run_context.run_state_dir / CONTEXT_FILENAME),
-            "evidence_path": str(run_context.run_state_dir / EVIDENCE_RUN_STATE_FILENAME),
-            "summary_path": str(run_context.run_state_dir / SUMMARY_FILENAME),
         },
     }
     _write_json_file(target_path, payload)

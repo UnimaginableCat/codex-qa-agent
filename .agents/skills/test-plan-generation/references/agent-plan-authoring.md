@@ -17,7 +17,7 @@ ask for scaffold/validate steps.
 ```powershell
 <venv-python> -m tools.generation.cli `
   --init-agent-plan `
-  --output artifacts/agent/input/users-api-plan.json `
+  --output artifacts/agent/generation/users-api-plan.json `
   --source-id users-api `
   --project code/demo `
   --name "Users API" `
@@ -29,9 +29,22 @@ ask for scaffold/validate steps.
 ```powershell
 <venv-python> -m tools.generation.cli `
   --validate-agent-plan `
-  --agent-plan-file artifacts/agent/input/users-api-plan.json `
+  --agent-plan-file artifacts/agent/generation/users-api-plan.json `
   --output-format text
 ```
+
+When `expected_outcomes[]` or `capture[]` use unsupported syntax, prefer the validator output over
+manual source diving. The text output now includes:
+
+- the exact invalid rule
+- a short DSL hint
+- supported examples
+
+Do not inspect old plan artifacts just to rediscover the supported expectation syntax.
+
+After generation, the authored input is persisted again inside the request bundle as
+`artifacts/agent/generation/<source>-<run_id>/agent-plan.json`. Treat that bundle copy as the
+canonical request artifact, not the temporary scaffold path.
 
 ## Canonical Shape
 
@@ -116,6 +129,15 @@ For API-heavy plans, prefer authoring cases that are already grounded enough for
 - optional DB verification
 
 This reduces drift between the authored plan and downstream scenario drafts.
+
+If validation fails on expectation DSL, rewrite the authored rule into the supported syntax instead
+of weakening the case objective. For example:
+
+- bad: `Missing-user response status is 404.`
+- good: `HTTP 404`
+- bad: `Successful response returns session JSON.`
+- good: `HTTP 200`
+- good: `response JSON exists`
 
 ## When To Add `evidence_scope`
 
