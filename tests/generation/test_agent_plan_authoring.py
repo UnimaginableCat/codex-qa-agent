@@ -160,6 +160,56 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
         self.assertEqual(result.status, StepStatus.ERROR)
         self.assertIn("agent_plan_evidence_scope_paths_not_list", codes)
 
+    def test_validate_file_blocks_workflow_case_level_prose_expected_outcomes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow-prose-expected.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "users",
+                        "project": "code/demo",
+                        "title": "Users workflow",
+                        "planned_test_cases": [
+                            {
+                                "title": "User lifecycle workflow",
+                                "objective": "Verify user lifecycle.",
+                                "kind": "workflow",
+                                "expected_outcomes": ["workflow completes"],
+                                "workflow_steps": [
+                                    {
+                                        "step_type": "api",
+                                        "title": "Create user",
+                                        "route": {
+                                            "http_method": "POST",
+                                            "endpoint_path": "/api/users",
+                                        },
+                                        "expected_outcomes": ["HTTP 201"],
+                                    },
+                                    {
+                                        "step_type": "db",
+                                        "title": "Verify user row",
+                                        "sql": "SELECT 1 AS id",
+                                        "expected_outcomes": ["one row exists"],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "agent_plan_workflow_case_level_expected_outcomes_unsupported"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_validate_file_accepts_multi_step_workflow_case_with_db_verification(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"

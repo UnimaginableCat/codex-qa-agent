@@ -637,7 +637,7 @@ class ScenarioVariableTests(unittest.TestCase):
         scenario = cls._scenario(root)
         scenario.steps[0].api.capture = ["response.body.id -> price_list_id"]
         scenario.steps[0].api.expected = [
-            "response contains id",
+            "response contains field id",
             "response id = {{price_list_id}}",
         ]
         scenario.steps.append(
@@ -768,3 +768,4 @@ def _dedent(value: str) -> str:
 
 if __name__ == "__main__":
     unittest.main()
+

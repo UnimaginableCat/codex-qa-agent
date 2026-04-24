@@ -36,9 +36,9 @@ class ScenarioStepValidatorTests(unittest.TestCase):
                 [
                     "HTTP 200",
                     "response JSON exists",
-                    "response contains id",
-                    "response contains root_category_id",
-                    "response contains default_measurement_unit",
+                    "response contains field id",
+                    "response contains field root_category_id",
+                    "response contains field default_measurement_unit",
                     "response contains field id",
                     "response contains field `id`",
                     'response name = "abc"',
@@ -420,6 +420,23 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         self.assertEqual(results[0].status, StepStatus.FAIL)
         self.assertNotIn("Unsupported expectation rule", results[0].detail)
         self.assertIn("Expected value", results[0].detail)
+
+    def test_contract_inspection_rejects_ambiguous_response_contains_literals(self) -> None:
+        diagnostics = self.validator.inspect_contract(
+            self._api_step(["response contains {{user_id}}", "response contains AUTOTEST IUC Primary run-1"])
+        )
+
+        self.assertEqual(len(diagnostics), 2)
+        self.assertTrue(all(not diagnostic.supported for diagnostic in diagnostics))
+
+    def test_response_contains_without_field_keyword_is_blocked(self) -> None:
+        results = self.validator.validate(
+            self._api_step(["response contains id"]),
+            {"response": {"body": {"id": 123}}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.BLOCKED)
+        self.assertIn("Unsupported expectation rule", results[0].detail)
 
     def test_unsupported_expectation_returns_structured_blocked_result(self) -> None:
         results = self.validator.validate(self._api_step(["response magically works"]), {"response": {"body": {}}})

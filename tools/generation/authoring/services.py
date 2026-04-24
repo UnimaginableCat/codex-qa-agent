@@ -33,7 +33,7 @@ API_EXPECTATION_EXAMPLES = [
     "HTTP 200 or HTTP 201",
     "response JSON exists",
     "response JSON is an array",
-    "response contains `id`",
+    "response contains field `id`",
     "response `status` = `AUTHENTICATED`",
     "response `createdAt` is not null",
 ]
@@ -65,6 +65,7 @@ AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_case_mutating_api_db_verification_required",
     "agent_plan_case_missing_expected_outcomes",
     "agent_plan_case_invalid_expectation_contract",
+    "agent_plan_workflow_case_level_expected_outcomes_unsupported",
     "agent_plan_case_invalid_capture_contract",
     "agent_plan_case_request_body_required",
     "agent_plan_case_auth_strategy_required",
@@ -138,7 +139,7 @@ class AgentPlanAuthoringService:
                     expected_outcomes=[
                         "HTTP 200",
                         "response JSON exists",
-                        "response contains `id`",
+                        "response contains field `id`",
                     ],
                     capture=["response.json.id -> created_id"],
                     requires_db_verification=True,
@@ -480,6 +481,23 @@ def _validate_case_expectation_contract(
         )
     if kind not in {"api", "db"} and not case_input.workflow_steps:
         return diagnostics
+    if kind == "workflow" and case_input.expected_outcomes:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="agent_plan_workflow_case_level_expected_outcomes_unsupported",
+                message=(
+                    "Workflow planned case must express executable expectations inside workflow_steps. "
+                    "Do not use case-level prose expected_outcomes such as 'workflow completes'."
+                ),
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={
+                    "case_index": case_index,
+                    "kind": kind,
+                    "supported_examples": API_EXPECTATION_EXAMPLES + DB_EXPECTATION_EXAMPLES,
+                },
+            )
+        )
     if kind in {"api", "db"} and not case_input.expected_outcomes:
         diagnostics.extend(_validate_workflow_step_expectation_contract(case_input, case_ref, case_index))
         return diagnostics

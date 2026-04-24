@@ -115,7 +115,8 @@ class DraftScenarioRenderer:
                 continue
             if test_case.workflow_steps:
                 workflow_support = _workflow_route_binding(test_case)
-                if workflow_support is None or not _workflow_steps_renderable(test_case):
+                draft_route_binding = workflow_support or _db_only_workflow_binding(test_case)
+                if not _workflow_steps_renderable(test_case):
                     check = UnsupportedCheck(
                         case_id=test_case.case_id,
                         reason_code="workflow_step_incomplete",
@@ -165,10 +166,10 @@ class DraftScenarioRenderer:
                         metadata={
                             "renderer": "draft-scenario-renderer-v1",
                             "preview_only": True,
-                            "route_binding": workflow_support,
+                            "route_binding": draft_route_binding,
                             "workflow_route_bindings": _workflow_route_bindings(test_case),
                             "workflow_step_count": len(test_case.workflow_steps),
-                            "case_support": _draft_case_support(test_case, workflow_support),
+                            "case_support": _draft_case_support(test_case, draft_route_binding),
                             "expected_assertions_present": _test_case_has_authored_expectations(test_case),
                             "capture_rules_present": _test_case_has_capture_rules(test_case),
                             "auth_strategy_required": any(
@@ -743,6 +744,18 @@ def _workflow_route_bindings(test_case: PlannedTestCase) -> list[dict[str, Any]]
             }
         )
     return bindings
+
+
+def _db_only_workflow_binding(test_case: PlannedTestCase) -> dict[str, Any] | None:
+    if not test_case.workflow_steps:
+        return None
+    if any(step.step_type.strip().lower() == "api" for step in test_case.workflow_steps):
+        return None
+    return {
+        "route_source": "workflow_db_only",
+        "readiness": "workflow_authored",
+        "path_shape": "db_only",
+    }
 
 
 def _test_case_requires_db_verification(test_case: PlannedTestCase) -> bool:

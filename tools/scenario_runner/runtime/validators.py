@@ -17,7 +17,7 @@ from .path_lookup import PathLookupResult as _PathLookupResult
 from .path_lookup import resolve_path
 
 _HTTP_EXPECTATION_RE = re.compile(r"^\s*HTTP\s+(\d{3})(?:\s+or\s+HTTP\s+(\d{3}))?\s*$", re.IGNORECASE)
-_RESPONSE_CONTAINS_FIELD_RE = re.compile(r"^\s*response\s+contains(?:\s+field)?\s+(.+?)\s*$", re.IGNORECASE)
+_RESPONSE_CONTAINS_FIELD_RE = re.compile(r"^\s*response\s+contains\s+field\s+(.+?)\s*$", re.IGNORECASE)
 _RESPONSE_LENGTH_RE = re.compile(
     r"^\s*response\s+(.+?)\s+length\s*(>=|<=|!=|=|>|<)\s*(.+?)\s*$",
     re.IGNORECASE,

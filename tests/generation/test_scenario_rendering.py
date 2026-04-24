@@ -102,6 +102,33 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertEqual(len(render_result.draft_set.drafts), 1)
         self.assertIn("Route source: route_hints.", render_result.draft_set.drafts[0].markdown)
 
+    def test_renderer_renders_db_only_workflow_case(self) -> None:
+        render_result = DraftScenarioRenderer().render(
+            _plan(
+                [
+                    PlannedTestCase(
+                        case_id="tc-db-001",
+                        title="Verify schema row shape",
+                        objective="Verify users table schema metadata.",
+                        workflow_steps=[
+                            PlannedWorkflowStep(
+                                step_type="db",
+                                title="Check users schema",
+                                sql="SELECT 1 AS expected_column_count",
+                                expected_outcomes=["one row exists", "`expected_column_count` = `1`"],
+                            )
+                        ],
+                    )
+                ]
+            )
+        )
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("### Step 1", draft.markdown)
+        self.assertEqual(draft.metadata["route_binding"]["route_source"], "workflow_db_only")
+        self.assertEqual(render_result.draft_set.deferred_items, [])
+
     def test_renderer_renders_multi_step_workflow_case(self) -> None:
         render_result = DraftScenarioRenderer().render(
             _plan(

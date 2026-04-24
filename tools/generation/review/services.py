@@ -55,9 +55,10 @@ from .models import (
     ScenarioRevalidationResult,
 )
 from .templates import PatchTemplateCatalogService
-from tools.scenario_runner.domain.models import ScenarioDefinition, ScenarioStepType
+from tools.scenario_runner.domain.models import ApiStepDefinition, ScenarioDefinition, ScenarioStep, ScenarioStepType
 from tools.scenario_runner.orchestration.compiler import CompiledScenario, ScenarioCompiler
 from tools.scenario_runner.orchestration.preflight import ScenarioPreflightChecker
+from tools.scenario_runner.runtime.validators import ScenarioStepValidator
 from tools.scenario_runner.parser import MarkdownScenarioParser
 
 
@@ -1095,9 +1096,26 @@ def _revalidation_gap_summary(
         if step.step_type == ScenarioStepType.DB
     )
     has_final_expectation = bool(scenario is not None and scenario.final_expectations)
-    if not (has_step_expectation or has_db_expectation or has_final_expectation):
+    has_executable_final_expectation = False
+    if scenario is not None and scenario.final_expectations:
+        validator = ScenarioStepValidator()
+        for expectation in scenario.final_expectations:
+            probe = ScenarioStep(
+                step_id="final-expectation-probe",
+                step_number=0,
+                title="Final expectations",
+                step_type=ScenarioStepType.API,
+                api=ApiStepDefinition(expected=[expectation]),
+            )
+            if any(diagnostic.supported for diagnostic in validator.inspect_contract(probe)):
+                has_executable_final_expectation = True
+                break
+    if not (has_step_expectation or has_db_expectation or has_executable_final_expectation):
         gap_codes.append("assertions_not_generated")
         gap_messages.append("No concrete expected result or assertion was found.")
+    elif has_final_expectation and not has_executable_final_expectation and not (has_step_expectation or has_db_expectation):
+        gap_codes.append("assertions_not_generated")
+        gap_messages.append("Final expectations are present, but they are prose notes rather than executable assertions.")
 
     if _scenario_requires_auth_strategy(scenario, draft) and not _scenario_has_auth_strategy(scenario, draft):
         gap_codes.append("auth_headers_unresolved")
@@ -1328,7 +1346,15 @@ def _check_parser_valid(parse_status: ScenarioDraftParseStatus) -> DraftRequirem
 
 
 def _check_endpoint_path(route_binding: dict[str, object], draft: ScenarioDraft) -> DraftRequirementCheck:
+    route_source = str(route_binding.get("route_source") or "")
     endpoint_path = str(route_binding.get("endpoint_path") or "")
+    if route_source == "workflow_db_only":
+        return DraftRequirementCheck(
+            requirement=ScenarioRequirement("endpoint_path", ""),
+            status=ScenarioRequirementStatus.SATISFIED,
+            source=route_source,
+            notes=["DB-only workflow does not require an HTTP endpoint path."],
+        )
     if endpoint_path:
         return DraftRequirementCheck(
             requirement=ScenarioRequirement("endpoint_path", ""),
@@ -1345,7 +1371,15 @@ def _check_endpoint_path(route_binding: dict[str, object], draft: ScenarioDraft)
 
 
 def _check_http_method(route_binding: dict[str, object], draft: ScenarioDraft) -> DraftRequirementCheck:
+    route_source = str(route_binding.get("route_source") or "")
     http_method = str(route_binding.get("http_method") or "").upper()
+    if route_source == "workflow_db_only":
+        return DraftRequirementCheck(
+            requirement=ScenarioRequirement("http_method", ""),
+            status=ScenarioRequirementStatus.SATISFIED,
+            source=route_source,
+            notes=["DB-only workflow does not require an HTTP method."],
+        )
     if http_method:
         return DraftRequirementCheck(
             requirement=ScenarioRequirement("http_method", ""),
@@ -1366,7 +1400,15 @@ def _check_request_structure(
     draft: ScenarioDraft,
     gap_codes: set[str],
 ) -> DraftRequirementCheck:
+    route_source = str(route_binding.get("route_source") or "")
     http_method = str(route_binding.get("http_method") or "").upper()
+    if route_source == "workflow_db_only":
+        return DraftRequirementCheck(
+            requirement=ScenarioRequirement("request_structure", ""),
+            status=ScenarioRequirementStatus.SATISFIED,
+            source=route_source,
+            notes=["DB-only workflow does not require an HTTP request structure."],
+        )
     if _draft_requires_request_body(draft) and "request_body_not_inferred" not in gap_codes:
         return DraftRequirementCheck(
             requirement=ScenarioRequirement("request_structure", ""),
@@ -1838,18 +1880,24 @@ def _has_edit_target(
 
 def _route_binding_from_scenario(scenario: ScenarioDefinition | None) -> dict[str, object]:
     api_step = _first_api_step(scenario)
-    if api_step is None or api_step.api is None:
-        return {}
-    if not api_step.api.method or not api_step.api.path:
-        return {}
-    return {
-        "endpoint_path": api_step.api.path,
-        "http_method": api_step.api.method,
-        "handler_name": api_step.api.name,
-        "route_source": "manual_scenario",
-        "confidence": "explicit",
-        "readiness": "manual_revalidated",
-    }
+    if api_step is not None and api_step.api is not None:
+        if not api_step.api.method or not api_step.api.path:
+            return {}
+        return {
+            "endpoint_path": api_step.api.path,
+            "http_method": api_step.api.method,
+            "handler_name": api_step.api.name,
+            "route_source": "manual_scenario",
+            "confidence": "explicit",
+            "readiness": "manual_revalidated",
+        }
+    if scenario is not None and any(step.step_type == ScenarioStepType.DB and step.db is not None for step in scenario.steps):
+        return {
+            "route_source": "workflow_db_only",
+            "readiness": "manual_revalidated",
+            "path_shape": "db_only",
+        }
+    return {}
 
 
 def _route_binding_from_draft_metadata(draft: ScenarioDraft) -> dict[str, object]:
