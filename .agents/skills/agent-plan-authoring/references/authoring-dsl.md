@@ -57,6 +57,42 @@ Compiler behavior:
 - uses `defaults.auth` as fallback auth strategy when case/setup API auth is not authored explicitly
 - runs existing `validate_agent_plan_input(...)` after compilation
 
+Expectation syntax is strict. Author only compile-safe checks.
+
+Supported API checks include:
+
+- `HTTP 200`
+- `HTTP 200 or HTTP 201`
+- `response JSON exists`
+- `response JSON is an array`
+- `response contains field \`id\``
+- `response \`status\` = \`ACTIVE\``
+- `response \`createdAt\` is not null`
+- `response \`items\` length >= 1`
+
+Supported DB checks include:
+
+- `one row exists`
+- `no rows exist`
+- `` `status` = `ACTIVE` ``
+- `` `email` is null ``
+- `` `created_at` is not null ``
+- `` `email` starts with `autotest.` ``
+
+Avoid unsupported prose-like checks such as:
+
+- `response error exists`
+- `response JSON array exists`
+- `response array contains a user with ...`
+- `response indicates ...`
+- `response email is null or omitted`
+- `display_name = LeadFlow User` without backticks in DB expectations
+
+Capture syntax is strict too:
+
+- good: `response.json.id -> user_id`
+- bad: `capture response id as user_id`
+
 Supported `state_change` values:
 
 - mutating: `create`, `update`, `delete`, `mutate`

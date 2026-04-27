@@ -78,3 +78,16 @@ cases:
       status_code: 200
       business_checks:
         - response contains field `id`
+
+  - id: list-users-success
+    kind: api
+    objective: Admin lists users successfully
+    state_change: none
+    execute:
+      route:
+        method: GET
+        path: /users
+    oracle:
+      status_code: 200
+      business_checks:
+        - response JSON is an array

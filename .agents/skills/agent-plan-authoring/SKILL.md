@@ -86,12 +86,45 @@ start inside the authoring branch rather than being classified first.
 - Keep the DSL compact and declarative.
 - Use YAML as the default authoring format.
 - Do not write the full internal `AgentTestPlanInput`.
+- Use only supported expectation DSL. Do not invent natural-language checks that "sound right" but are not compile-safe.
 - Use `setup[]` only on `workflow` cases.
 - Resolve reusable setup and persisted-state templates through `entities.<entity>.operations.<name>`.
 - Use deterministic `oracle.status_code`, `oracle.business_checks`, `oracle.captures`, and `oracle.persisted_state`.
 - Use `defaults.environment` when one env file should flow into rendered scenario `## Environment`.
 - Use `defaults.actor` when a stable execution actor should flow into rendered scenario variables as `actor = literal:<value>` and select actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
 - Do not rely on the compiler to invent SQL, routes, or capture targets.
+
+## Strict DSL Gate
+
+Before writing a broad full-coverage plan, make the first `1-2` cases compile-safe in your head:
+
+- API expectations must use supported patterns such as:
+  - `HTTP 200`
+  - `response JSON exists`
+  - `response JSON is an array`
+  - `response contains field \`id\``
+  - `response \`status\` = \`ACTIVE\``
+  - `response \`createdAt\` is not null`
+- DB expectations must use supported patterns such as:
+  - `one row exists`
+  - `no rows exist`
+  - `` `status` = `ACTIVE` ``
+  - `` `email` is null ``
+  - `` `email` starts with `autotest.` ``
+- Capture rules must use `<source> -> <variable_name>`.
+
+Do not write unsupported prose-like checks such as:
+
+- `response error exists`
+- `response JSON array exists`
+- `response array contains a user with ...`
+- `response indicates only suspended users can be activated`
+- `response email is null or omitted`
+
+If a desired assertion cannot be expressed in supported DSL, prefer:
+
+- a simpler supported API assertion plus persisted-state DB verification
+- or split the behavior into a workflow case with stronger DB verification
 
 # CLI Flow
 
@@ -105,6 +138,8 @@ start inside the authoring branch rather than being classified first.
   `<venv-python> -m tools.generation.cli --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --workspace-root .`
 
 Use only the validate step by default inside this skill. Compile/generate commands are downstream handoff points unless the user explicitly asks to continue.
+
+If validation fails on expectation syntax, rewrite the authoring DSL itself. Do not keep unsupported phrasing and hope downstream render/review will compensate.
 
 # Guardrails
 
