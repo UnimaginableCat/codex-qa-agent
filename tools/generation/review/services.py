@@ -848,7 +848,11 @@ def _merge_preflight_gaps(
 
 def _load_run_context(workspace_root: Path, run_id: str) -> GenerationRunContext:
     artifacts_root = workspace_root / GENERATION_ARTIFACTS_DIRNAME
-    matches = sorted(path for path in artifacts_root.glob(f"*-{run_id}") if path.is_dir())
+    exact_match = artifacts_root / run_id
+    if exact_match.is_dir():
+        matches = [exact_match]
+    else:
+        matches = sorted(path for path in artifacts_root.glob(f"*-{run_id}") if path.is_dir())
     if not matches:
         raise FileNotFoundError(f"Generation artifact bundle for run_id '{run_id}' was not found.")
     if len(matches) > 1:
