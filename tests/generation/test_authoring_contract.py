@@ -399,6 +399,51 @@ cases:
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertIn("authoring_persisted_state_id_field_missing", codes)
 
+    def test_compile_blocks_persisted_state_template_mixing_id_and_entity_id_field(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="tenants-plan",
+            project="code/demo",
+            title="Tenants API",
+            goal="Cover tenant API.",
+            scope=AuthoringScope(surface="tenants-controller"),
+            entities={
+                "tenant": AuthoringEntitySpec(
+                    id_field="tenant_id",
+                    operations={
+                        "verify_created": AuthoringEntityOperation(
+                            sql="SELECT id, tenant_id FROM tenants WHERE id = :tenant_id",
+                            params={"tenant_id": "{{tenant_id}}"},
+                            expected_outcomes=[
+                                "one row exists",
+                                "`tenant_id` = `{{tenant_id}}`",
+                            ],
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="create-tenant",
+                    kind="api",
+                    objective="Create tenant",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/tenants")),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> tenant_id"],
+                        persisted_state=AuthoringPersistedStateRef(entity="tenant", operation="verify_created"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertIn("authoring_persisted_state_id_field_semantic_mismatch", codes)
+
     def test_compile_blocks_string_too_long_case_when_body_does_not_exceed_stated_boundary(self) -> None:
         plan = AuthoringPlan(
             version=1,

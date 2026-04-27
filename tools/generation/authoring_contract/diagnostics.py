@@ -31,6 +31,7 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_invalid_entity_id_field",
     "authoring_setup_entity_id_field_unresolved",
     "authoring_persisted_state_id_field_missing",
+    "authoring_persisted_state_id_field_semantic_mismatch",
     "authoring_case_boundary_mismatch",
 }
 

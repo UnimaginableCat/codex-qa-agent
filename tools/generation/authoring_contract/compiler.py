@@ -660,6 +660,27 @@ class AuthoringPlanCompiler:
                 )
             )
             return None, diagnostics, set()
+        if _persistance_template_mixes_primary_key_and_entity_id(
+            sql=operation.sql,
+            expected_outcomes=expected_outcomes,
+            entity_id_field=entity_id_field,
+        ):
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_persisted_state_id_field_semantic_mismatch",
+                    (
+                        "Persisted-state template mixes the DB primary key column `id` with the entity id_field. "
+                        "Use one identifier consistently across capture, route placeholders, SQL filters, and DB expectations."
+                    ),
+                    source_ref=case_ref,
+                    details={
+                        "entity": entity_name,
+                        "operation": operation_name,
+                        "id_field": entity_id_field,
+                    },
+                )
+            )
+            return None, diagnostics, set()
         return (
             PlannedDbVerification(
                 name=f"Verify {entity_name}.{operation_name}",
@@ -823,6 +844,26 @@ def _authoring_defaults_metadata(authoring_plan: AuthoringPlan) -> dict[str, Any
     if authoring_plan.defaults.auth.strip():
         metadata["default_auth"] = authoring_plan.defaults.auth.strip()
     return metadata
+
+
+def _persistance_template_mixes_primary_key_and_entity_id(
+    *,
+    sql: str,
+    expected_outcomes: list[str],
+    entity_id_field: str,
+) -> bool:
+    normalized_id_field = entity_id_field.strip()
+    if not normalized_id_field or normalized_id_field == "id":
+        return False
+    sql_pattern = re.compile(
+        rf'(?i)(?:\b\w+\.)?"?id"?\s*=\s*:{re.escape(normalized_id_field)}\b'
+    )
+    if sql_pattern.search(sql) is None:
+        return False
+    expected_pattern = re.compile(
+        rf"`{re.escape(normalized_id_field)}`\s*=\s*`{{{{\s*{re.escape(normalized_id_field)}\s*}}}}`"
+    )
+    return any(expected_pattern.search(outcome) for outcome in expected_outcomes)
 
 
 def _boundary_case_diagnostics(
