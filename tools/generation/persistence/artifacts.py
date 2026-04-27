@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tools.common.errors import ToolingError
 from tools.common.io import read_json_file
@@ -23,9 +23,13 @@ from tools.generation.domain.models import (
 from tools.generation.rendering.models import ScenarioDraftSet, ScenarioRenderResult
 from tools.generation.review.models import ScenarioPromotionBatchResult, ScenarioPromotionResult
 
+if TYPE_CHECKING:
+    from tools.generation.authoring_contract.models import AuthoringPlan
+
 GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
 BUNDLE_LAYOUT_VERSION = 7
 CONTEXT_FILENAME = "context.json"
+AUTHORING_PLAN_FILENAME = "authoring-plan.yaml"
 AGENT_PLAN_FILENAME = "agent-plan.json"
 SOURCE_INPUT_FILENAME = "source-input.json"
 NORMALIZED_SOURCE_FILENAME = "normalized-source.json"
@@ -79,6 +83,23 @@ class FileGenerationArtifactStore:
         target_path = _bundle_file_path(run_context, CONTEXT_FILENAME)
         payload = run_context.to_dict()
         _write_json_file(target_path, payload)
+        self.write_manifest(run_context)
+        return target_path
+
+    def write_authoring_plan(
+        self,
+        run_context: GenerationRunContext,
+        authoring_plan: "AuthoringPlan",
+    ) -> Path:
+        target_path = _bundle_file_path(run_context, AUTHORING_PLAN_FILENAME)
+        try:
+            import yaml
+        except ModuleNotFoundError as exc:  # pragma: no cover
+            raise GenerationArtifactPolicyError("PyYAML is required to write authoring-plan YAML files.") from exc
+        write_text_file(
+            target_path,
+            yaml.safe_dump(authoring_plan.to_dict(), allow_unicode=True, sort_keys=False),
+        )
         self.write_manifest(run_context)
         return target_path
 
@@ -232,7 +253,7 @@ def managed_generation_artifacts_root_for_path(path: Path) -> Path | None:
 
 
 def load_generation_run_context_from_bundle_file(path: Path) -> GenerationRunContext | None:
-    if path.name != AGENT_PLAN_FILENAME:
+    if path.name not in {AGENT_PLAN_FILENAME, AUTHORING_PLAN_FILENAME}:
         return None
     artifacts_root_dir = managed_generation_artifacts_root_for_path(path)
     if artifacts_root_dir is None:
@@ -299,6 +320,7 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
         "bundle": {
             "manifest_path": str(target_path),
             "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),
+            "authoring_plan_path": str(run_context.artifact_dir / AUTHORING_PLAN_FILENAME),
             "agent_plan_path": str(run_context.artifact_dir / AGENT_PLAN_FILENAME),
             "source_input_path": str(run_context.artifact_dir / SOURCE_INPUT_FILENAME),
             "normalized_source_path": str(run_context.artifact_dir / NORMALIZED_SOURCE_FILENAME),

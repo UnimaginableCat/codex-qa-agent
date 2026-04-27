@@ -5,7 +5,7 @@
 The normal skill-routed path is:
 
 1. use `qa-entrypoint` when the request is broad
-2. author or refine `authoring-plan.yaml` through `agent-plan-authoring`
+2. scaffold or refine `artifacts/agent/generation/<run_id>/authoring-plan.yaml` through `agent-plan-authoring`
 3. validate authoring DSL
 4. compile or generate through `test-plan-generation`
 

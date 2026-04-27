@@ -15,7 +15,7 @@ if __package__ in {None, ""}:
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 from tools.generation.authoring import AgentPlanAuthoringService
-from tools.generation.authoring_contract import AuthoringPlanCompiler
+from tools.generation.authoring_contract import AuthoringPlanCompiler, AuthoringPlanTemplateService
 from tools.generation.application import GenerateTestPlanOptions, GenerateTestPlanRequest, GenerationInputMode
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.gaps import format_case_gap_note, project_case_gap
@@ -54,6 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Compile authoring DSL into a NormalizedTestPlan and optionally render markdown draft scenarios.",
     )
     workflow = parser.add_mutually_exclusive_group()
+    workflow.add_argument(
+        "--init-authoring-plan",
+        action="store_true",
+        help="Write a scaffolded authoring-plan YAML file into a managed generation bundle.",
+    )
     workflow.add_argument(
         "--init-agent-plan",
         action="store_true",
@@ -103,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--goal", default="", help="Optional goal used when scaffolding a low-level agent plan template.")
     parser.add_argument(
         "--output",
-        help="Managed generation root hint for --init-agent-plan or --compile-authoring-plan. The CLI writes bundles under artifacts/agent/generation.",
+        help="Managed generation root hint for --init-authoring-plan, --init-agent-plan, or --compile-authoring-plan. The CLI writes bundles under artifacts/agent/generation.",
     )
     parser.add_argument("--workspace-root", default=".", help="Workspace root for artifact persistence.")
     parser.add_argument(
@@ -198,6 +203,57 @@ def run_generation(args: argparse.Namespace) -> dict[str, Any]:
     request = build_request(args)
     result = GenerateTestPlanUseCase().execute(request)
     return summarize_result(result)
+
+
+def run_init_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _init_authoring_plan_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    requested_output_path = Path(args.output)
+    artifacts_root_dir = managed_generation_artifacts_root_for_path(requested_output_path)
+    if artifacts_root_dir is None:
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_init_authoring_plan_requires_managed_root",
+                    message="Authoring plan scaffold must be written under artifacts/agent/generation.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(requested_output_path),
+                )
+            ]
+        )
+    workspace_root = artifacts_root_dir.parent.parent.parent
+    template = AuthoringPlanTemplateService().build_template(
+        source_id=args.source_id or "",
+        project=args.project or "",
+        title=args.name or "",
+        goal=args.goal or "",
+    )
+    source_input = GenerationSourceInput(
+        source_id=template.source_id,
+        project=template.project,
+        input_format=SourceInputFormat.STRUCTURED,
+        name=template.title,
+        content=json.dumps(template.to_dict(), ensure_ascii=False),
+        metadata={"input_mode": GenerationInputMode.AUTHORING_PLAN.value},
+    )
+    run_context = initialize_generation_run_context(source_input, workspace_root=workspace_root)
+    artifact_store = FileGenerationArtifactStore()
+    artifact_store.write_context(run_context)
+    output_path = artifact_store.write_authoring_plan(run_context, template)
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "message": "Authoring-plan bundle scaffolded.",
+            "bundle_dir": run_context.artifact_dir,
+            "output_path": output_path,
+            "requested_output_path": requested_output_path,
+            "template_version": template.metadata.get("template_version", ""),
+            "input_mode": GenerationInputMode.AUTHORING_PLAN.value,
+            "diagnostics": [],
+            "authoring_plan": template.to_dict(),
+        }
+    )
 
 
 def run_init_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
@@ -383,7 +439,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.init_agent_plan:
+        if args.init_authoring_plan:
+            payload = run_init_authoring_plan(args)
+        elif args.init_agent_plan:
             payload = run_init_agent_plan(args)
         elif args.validate_agent_plan:
             payload = run_validate_agent_plan(args)
@@ -422,7 +480,7 @@ def main(argv: list[str] | None = None) -> int:
 
     workflow = (
         "authoring"
-        if args.init_agent_plan or args.validate_agent_plan or args.validate_authoring_plan or args.compile_authoring_plan
+        if args.init_authoring_plan or args.init_agent_plan or args.validate_agent_plan or args.validate_authoring_plan or args.compile_authoring_plan
         else "review"
         if args.review_drafts
         else "promotion"
@@ -867,6 +925,28 @@ def _init_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[Gener
             GenerationDiagnostic(
                 code="adapter_init_agent_plan_requires_managed_root",
                 message="Agent plan scaffold must be written under artifacts/agent/generation.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.output,
+            )
+        )
+    return diagnostics
+
+
+def _init_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    if not args.output:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_init_authoring_plan_requires_output",
+                message="--init-authoring-plan requires --output.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        )
+    elif not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_init_authoring_plan_requires_managed_root",
+                message="Authoring plan scaffold must be written under artifacts/agent/generation.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=args.output,
             )

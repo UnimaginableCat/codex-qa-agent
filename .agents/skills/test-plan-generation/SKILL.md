@@ -36,7 +36,7 @@ the downstream generation branch rather than being classified first.
 
 # Operating Modes
 
-- `compile`: compile `authoring-plan.yaml` into managed `agent-plan.json`.
+- `compile`: compile bundle-local `authoring-plan.yaml` into managed `agent-plan.json` inside the same generation bundle.
 - `generate`: accept compiled input, validate it, and produce `normalized-plan.json`.
 - `render`: render markdown draft scenarios from the generated plan.
 - `review`: inspect rendered drafts and classify promotion readiness.
@@ -51,13 +51,15 @@ for later phases.
 - Validate compiled plan:
   `<venv-python> -m tools.generation.cli --validate-agent-plan --agent-plan-file <bundle>/agent-plan.json --output-format text`
 - Validate authoring DSL:
-  `<venv-python> -m tools.generation.cli --validate-authoring-plan --authoring-plan-file <file> --output-format text`
+  `<venv-python> -m tools.generation.cli --validate-authoring-plan --authoring-plan-file <bundle>/authoring-plan.yaml --output-format text`
+- Scaffold authoring DSL bundle:
+  `<venv-python> -m tools.generation.cli --init-authoring-plan --output artifacts/agent/generation --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
 - Compile authoring DSL:
-  `<venv-python> -m tools.generation.cli --compile-authoring-plan --authoring-plan-file <file> --output artifacts/agent/generation --output-format text`
+  `<venv-python> -m tools.generation.cli --compile-authoring-plan --authoring-plan-file <bundle>/authoring-plan.yaml --output artifacts/agent/generation --output-format text`
 - Generate from structured plan:
   `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root .`
 - Generate from authoring DSL:
-  `<venv-python> -m tools.generation.cli --authoring-plan-file <file> --workspace-root .`
+  `<venv-python> -m tools.generation.cli --authoring-plan-file <bundle>/authoring-plan.yaml --workspace-root .`
 - Prose fallback:
   `<venv-python> -m tools.generation.cli --source-id <id> --project code/<project> --prose "<text>" --workspace-root .`
 - Render drafts:
@@ -74,7 +76,7 @@ for later phases.
 # Default Decisions
 
 - Use compiled input unless the request is too vague or the user explicitly wants prose bootstrap.
-- Expect `authoring-plan.yaml` or compiled `agent-plan.json` as the normal input.
+- Expect `artifacts/agent/generation/<run_id>/authoring-plan.yaml` or compiled `agent-plan.json` from the same bundle as the normal input.
 - Route decomposition-first requests back to `agent-plan-authoring`.
 - Validate authoring or compiled input before generation when the agent edited source artifacts.
 - Stop at `NormalizedTestPlan` unless the user asked for downstream phases.
@@ -89,14 +91,14 @@ for later phases.
 - Preserve author intent while compiling and generating; do not add or expand cases unless the user explicitly asks for that rewrite.
 - Treat `expected_outcomes[]`, `capture`, `workflow_steps[]`, and `db_verification` as executable downstream contracts.
 - Treat rendered `actor = literal:<value>` as an execution profile selector for actor-scoped API/DB env keys, not as decorative notes-only metadata.
-- If compile, render, or review reveals authoring defects, send the workflow back to `authoring-plan.yaml` rather than compensating by inventing new coverage here.
+- If compile, render, or review reveals authoring defects, send the workflow back to `artifacts/agent/generation/<run_id>/authoring-plan.yaml` rather than compensating by inventing new coverage here.
 - Use direct `agent_plan` editing only as a low-level escape hatch for debugging or explicit manual control.
 
 ## Quality Gates
 
 - `validate-agent-plan` is the minimum gate, not the only gate.
-- `validate-authoring-plan` is the minimum gate for `authoring-plan.yaml` before compile.
-- If later phases are requested, treat render/review/compile warnings as authoring defects to fix back in `authoring-plan.yaml` or compiled `agent-plan.json`, not as acceptable follow-up manual cleanup.
+- `validate-authoring-plan` is the minimum gate for `artifacts/agent/generation/<run_id>/authoring-plan.yaml` before compile.
+- If later phases are requested, treat render/review/compile warnings as authoring defects to fix back in the bundle-local `authoring-plan.yaml` or compiled `agent-plan.json`, not as acceptable follow-up manual cleanup.
 - Do not treat drafts with unresolved `data_setup`, `assertion_detail`, `environment`, `auth_strategy`, or `executable_detail` gaps as close to runnable or promotable. Return to the source authoring artifact instead.
 - If a rendered standalone case still depends on seeded IDs, missing machine-readable variables, or undeclared setup fixtures, rewrite it as a self-contained workflow case or keep it deferred on purpose.
 
@@ -121,6 +123,7 @@ Draft rendering is authored-route-first:
 
 - Do not run or modify `scenario_runner` from this skill.
 - Do not author `authoring-plan.yaml` from scratch in this skill when `agent-plan-authoring` is the correct branch.
+- Do not scaffold a new authoring bundle here unless the user explicitly bypassed routing and asked to start with downstream CLI primitives.
 - Do not expand coverage scope or invent new cases unless the user explicitly asks for downstream rewriting.
 - Do not skip `--validate-agent-plan` after manually editing structured input.
 - Do not treat generated draft markdown as executable or reviewed scenarios.

@@ -7,6 +7,7 @@ Canonical request bundle:
 ```text
 artifacts/agent/generation/<run_id>/
   manifest.json
+  authoring-plan.yaml
   agent-plan.json
   context.json
   source-input.json
@@ -44,6 +45,9 @@ authoring-plan.yaml
 -> NormalizedTestPlan
 ```
 
+When scaffolded through the CLI, `authoring-plan.yaml` lives inside the generation run bundle at
+`artifacts/agent/generation/<run_id>/authoring-plan.yaml`.
+
 `defaults.actor` in `authoring-plan.yaml` is not just descriptive metadata. It compiles into a
 rendered scenario variable `actor = literal:<value>` and acts as an execution profile selector for
 actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
@@ -70,12 +74,24 @@ qa-entrypoint
 
 Preferred CLI flow
 
+Authoring-plan scaffold:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --init-authoring-plan `
+  --output artifacts/agent/generation `
+  --source-id users-api `
+  --project code/demo `
+  --name "Users API" `
+  --goal "Cover user API behavior."
+```
+
 Authoring-plan validate-only:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
   --validate-authoring-plan `
-  --authoring-plan-file .agents/skills/agent-plan-authoring/assets/examples/users-authoring-plan.yaml `
+  --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --output-format text
 ```
 
@@ -84,7 +100,7 @@ Authoring-plan compile:
 ```powershell
 <project-venv-python> -m tools.generation.cli `
   --compile-authoring-plan `
-  --authoring-plan-file .agents/skills/agent-plan-authoring/assets/examples/users-authoring-plan.yaml `
+  --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --output artifacts/agent/generation `
   --output-format text
 ```
@@ -93,7 +109,7 @@ Direct generation from authoring-plan:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --authoring-plan-file .agents/skills/agent-plan-authoring/assets/examples/users-authoring-plan.yaml `
+  --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --workspace-root .
 ```
 

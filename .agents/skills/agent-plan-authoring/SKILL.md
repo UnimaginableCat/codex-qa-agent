@@ -69,6 +69,7 @@ understand scope -> define entities/templates -> author cases -> validate author
 Default completion point:
 
 - `authoring-plan.yaml` exists or was updated
+- when scaffolded from CLI, it lives under `artifacts/agent/generation/<run_id>/authoring-plan.yaml`
 - `--validate-authoring-plan` was run
 - authoring-level diagnostics were resolved or explicitly reported
 - downstream compile/render/promote work is left to `test-plan-generation`
@@ -94,12 +95,14 @@ start inside the authoring branch rather than being classified first.
 
 # CLI Flow
 
+- Scaffold authoring DSL bundle:
+  `<venv-python> -m tools.generation.cli --init-authoring-plan --output artifacts/agent/generation --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
 - Validate authoring DSL:
-  `<venv-python> -m tools.generation.cli --validate-authoring-plan --authoring-plan-file <file> --output-format text`
+  `<venv-python> -m tools.generation.cli --validate-authoring-plan --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --output-format text`
 - Compile to managed bundle:
-  `<venv-python> -m tools.generation.cli --compile-authoring-plan --authoring-plan-file <file> --output artifacts/agent/generation --output-format text`
+  `<venv-python> -m tools.generation.cli --compile-authoring-plan --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --output artifacts/agent/generation --output-format text`
 - Generate downstream plan directly:
-  `<venv-python> -m tools.generation.cli --authoring-plan-file <file> --workspace-root .`
+  `<venv-python> -m tools.generation.cli --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --workspace-root .`
 
 Use only the validate step by default inside this skill. Compile/generate commands are downstream handoff points unless the user explicitly asks to continue.
 

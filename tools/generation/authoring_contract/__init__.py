@@ -4,6 +4,7 @@ from .compiler import AuthoringPlanCompiler
 from .diagnostics import AUTHORING_BLOCKING_CODES
 from .loaders import AuthoringPlanLoader
 from .models import AuthoringPlan, AuthoringPlanCompileResult, AuthoringPlanLoadResult
+from .template import AuthoringPlanTemplateService
 
 __all__ = [
     "AUTHORING_BLOCKING_CODES",
@@ -12,4 +13,5 @@ __all__ = [
     "AuthoringPlanCompileResult",
     "AuthoringPlanLoadResult",
     "AuthoringPlanLoader",
+    "AuthoringPlanTemplateService",
 ]

@@ -3,7 +3,7 @@
 ## Primary Rule
 
 Use `authoring_plan` when authored DSL already exists or the upstream skill just produced
-`authoring-plan.yaml`.
+`artifacts/agent/generation/<run_id>/authoring-plan.yaml`.
 
 Use `agent_plan` only as a low-level fallback when you are debugging, repairing, or intentionally
 driving generation from a compiled bundle.
@@ -22,7 +22,8 @@ Recommended flow:
 request
 -> qa-entrypoint
 -> agent-plan-authoring
--> authoring-plan.yaml
+-> scaffold artifacts/agent/generation/<run_id>/authoring-plan.yaml
+-> authoring-plan.yaml refinement
 -> validate
 -> compile or generate
 ```
@@ -35,18 +36,26 @@ Commands:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
+  --init-authoring-plan `
+  --output artifacts/agent/generation `
+  --source-id <id> `
+  --project code/<project> `
+  --name "<title>" `
+  --goal "<goal>"
+
+<venv-python> -m tools.generation.cli `
   --validate-authoring-plan `
-  --authoring-plan-file <file> `
+  --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --output-format text
 
 <venv-python> -m tools.generation.cli `
   --compile-authoring-plan `
-  --authoring-plan-file <file> `
+  --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --output artifacts/agent/generation `
   --output-format text
 
 <venv-python> -m tools.generation.cli `
-  --authoring-plan-file <file> `
+  --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --workspace-root .
 ```
 

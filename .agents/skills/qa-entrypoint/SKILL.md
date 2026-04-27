@@ -116,8 +116,8 @@ Do not start with broad code analysis for a runnable scenario unless the user ex
 
 - Prefer one primary skill for the main branch and add secondary skills only when the branch requires them.
 - Prefer `runner-execution` over manual API/DB replay when a runnable scenario exists.
-- Prefer `agent-plan-authoring` when the request is about decomposition, coverage design, or writing `authoring-plan.yaml`.
-- Prefer `test-plan-generation` when the request starts from existing authored input and asks for compile, generate, render, review, promote, or validate.
+- Prefer `agent-plan-authoring` when the request is about decomposition, coverage design, or creating/filling the bundle-local `artifacts/agent/generation/<run_id>/authoring-plan.yaml`.
+- Prefer `test-plan-generation` when the request starts from an existing generation bundle and asks for compile, generate, render, review, promote, or validate.
 - Do not route broad coverage-authoring requests directly into `test-plan-generation`.
 - Use `env-resolution` before manual API or DB work if config is unclear.
 - Use `reporting` after execution/investigation when the user needs a final QA report or consolidated result.
@@ -128,7 +128,7 @@ When this skill is used, the agent should make the routing decision explicit:
 - target project if known
 - chosen primary branch
 - chosen primary skill
-- authoring artifact when relevant: `authoring-plan.yaml`
+- authoring artifact when relevant: `artifacts/agent/generation/<run_id>/authoring-plan.yaml`
 - downstream artifact when relevant: compiled `agent-plan.json`
 - secondary skills that may be needed later
 - reason this branch was selected
@@ -153,14 +153,14 @@ Examples:
 Use skill: qa-entrypoint
 
 project: code/LeadFlow
-request: Сгенерируй authoring-plan.yaml для полного покрытия InternalUserController.
+request: Scaffold and author authoring-plan.yaml for full InternalUserController coverage.
 ```
 
 ```text
 Use skill: qa-entrypoint
 
 project: code/LeadFlow
-request: Возьми существующий authoring-plan.yaml и запусти downstream generation до draft scenarios.
+request: Take the existing authoring-plan.yaml from the generation bundle and run downstream generation to draft scenarios.
 ```
 
 # Guardrails

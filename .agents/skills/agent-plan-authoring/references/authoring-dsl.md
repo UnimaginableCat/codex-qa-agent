@@ -2,6 +2,9 @@
 
 `authoring-plan.yaml` is the LLM-facing contract for test-plan authoring.
 
+In the managed workflow, the editable DSL source normally lives at
+`artifacts/agent/generation/<run_id>/authoring-plan.yaml`.
+
 MVP decisions:
 
 - YAML first

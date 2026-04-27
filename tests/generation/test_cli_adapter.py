@@ -64,6 +64,41 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertTrue(output_path.parent.name.startswith("gen-"))
         self.assertNotIn("users-api", output_path.parent.name)
 
+    def test_init_authoring_plan_scaffolds_template_bundle(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            output_path = Path(payload["output_path"])
+            output_text = output_path.read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["input_mode"], "authoring_plan")
+        self.assertEqual(output_path.name, "authoring-plan.yaml")
+        self.assertEqual(output_path.parent, Path(payload["bundle_dir"]))
+        self.assertTrue(output_path.parent.name.startswith("gen-"))
+        self.assertIn("source_id: users-api", output_text)
+        self.assertIn("project: code/demo", output_text)
+
     def test_validate_agent_plan_returns_pass_for_valid_file(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -258,6 +293,49 @@ cases:
         self.assertEqual(payload["input_mode"], "authoring_plan")
         self.assertEqual(output_path.name, "agent-plan.json")
         self.assertEqual(output_path.parent, Path(payload["bundle_dir"]))
+
+    def test_compile_authoring_plan_reuses_existing_bundle_when_source_file_is_inside_it(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                init_exit_code = cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            init_payload = json.loads(init_stdout.getvalue())
+            authoring_plan_path = Path(init_payload["output_path"])
+
+            compile_stdout = io.StringIO()
+            with redirect_stdout(compile_stdout):
+                compile_exit_code = cli.main(
+                    [
+                        "--compile-authoring-plan",
+                        "--authoring-plan-file",
+                        str(authoring_plan_path),
+                        "--output",
+                        str(output_root),
+                    ]
+                )
+            compile_payload = json.loads(compile_stdout.getvalue())
+
+        self.assertEqual(init_exit_code, 0)
+        self.assertEqual(compile_exit_code, 0)
+        self.assertEqual(Path(compile_payload["bundle_dir"]), authoring_plan_path.parent)
+        self.assertEqual(compile_payload["output_path"], str(authoring_plan_path.parent / "agent-plan.json"))
 
     def test_authoring_plan_file_generates_plan_via_compiler(self) -> None:
         with TemporaryDirectory() as tmp:
