@@ -1,0 +1,72 @@
+"""Diagnostics and status helpers for authoring-plan compilation."""
+
+from __future__ import annotations
+
+from tools.common.statuses import StepStatus
+from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
+
+AUTHORING_BLOCKING_CODES = {
+    "authoring_missing_source_id",
+    "authoring_missing_project",
+    "authoring_missing_title",
+    "authoring_missing_goal",
+    "authoring_missing_scope",
+    "authoring_missing_cases",
+    "authoring_case_missing_id",
+    "authoring_case_missing_kind",
+    "authoring_case_missing_objective",
+    "authoring_case_missing_oracle",
+    "authoring_case_missing_state_change",
+    "authoring_unknown_state_change",
+    "authoring_missing_route_hint",
+    "authoring_unknown_case_kind",
+    "authoring_duplicate_case_id",
+    "authoring_unknown_entity",
+    "authoring_unknown_entity_operation",
+    "authoring_setup_reference_unresolved",
+    "authoring_persisted_state_template_missing",
+    "authoring_state_change_without_persistence_check",
+    "authoring_case_kind_incompatible_with_setup",
+    "authoring_capture_required_but_missing",
+}
+
+
+def authoring_diagnostic(
+    code: str,
+    message: str,
+    *,
+    severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
+    source_ref: str | None = None,
+    details: dict[str, object] | None = None,
+) -> GenerationDiagnostic:
+    return GenerationDiagnostic(
+        code=code,
+        message=message,
+        severity=severity,
+        source_ref=source_ref,
+        details={} if details is None else dict(details),
+    )
+
+
+def derive_authoring_status(diagnostics: list[GenerationDiagnostic]) -> StepStatus:
+    if any(diagnostic.code in AUTHORING_BLOCKING_CODES for diagnostic in diagnostics):
+        return StepStatus.BLOCKED
+    if any(diagnostic.severity == DiagnosticSeverity.ERROR for diagnostic in diagnostics):
+        return StepStatus.ERROR
+    return StepStatus.PASS
+
+
+def build_authoring_message(
+    status: StepStatus,
+    diagnostics: list[GenerationDiagnostic],
+    *,
+    compiled: bool,
+) -> str:
+    if status == StepStatus.PASS:
+        if compiled:
+            return "Authoring plan compiled into AgentTestPlanInput."
+        return "Authoring plan is structurally valid and compilable."
+    if status == StepStatus.BLOCKED:
+        return "Authoring plan is present but blocked by missing or unresolved authoring contract details."
+    error_count = sum(1 for diagnostic in diagnostics if diagnostic.severity == DiagnosticSeverity.ERROR)
+    return f"Authoring plan validation failed with {error_count} error(s)."

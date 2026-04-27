@@ -14,6 +14,23 @@ from tools.generation import cli
 
 
 class GenerationCliAdapterTests(unittest.TestCase):
+    def test_parser_help_prefers_authoring_dsl_over_low_level_agent_plan(self) -> None:
+        parser = cli.build_parser()
+        help_by_option = {
+            option_string: action.help
+            for action in parser._actions
+            for option_string in action.option_strings
+            if action.help
+        }
+
+        self.assertEqual(
+            parser.description,
+            "Compile authoring DSL into a NormalizedTestPlan and optionally render markdown draft scenarios.",
+        )
+        self.assertIn("low-level AgentTestPlanInput template", help_by_option["--init-agent-plan"])
+        self.assertIn("Prefer --authoring-plan-file", help_by_option["--agent-plan-file"])
+        self.assertIn("preferred DSL input", help_by_option["--authoring-plan-file"])
+
     def test_init_agent_plan_scaffolds_template_bundle(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -124,6 +141,176 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(payload["input_mode"], "agent_plan")
         self.assertEqual(payload["test_case_count"], 2)
+
+    def test_validate_authoring_plan_returns_pass_for_valid_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            authoring_plan_path = root / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover user API behavior.
+scope:
+  surface: users-controller
+entities:
+  user:
+    operations:
+      verify_exists:
+        sql: SELECT id FROM users WHERE id = :user_id
+        params:
+          user_id: "{{user_id}}"
+        expected_outcomes:
+          - one row exists
+cases:
+  - id: create-user
+    kind: api
+    objective: Verify user creation.
+    state_change: create
+    execute:
+      route:
+        method: POST
+        path: /users
+      body:
+        email: "{{generated_email}}"
+    oracle:
+      status_code: 201
+      captures:
+        - response.json.id -> user_id
+      persisted_state:
+        entity: user
+        operation: verify_exists
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-authoring-plan", "--authoring-plan-file", str(authoring_plan_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["input_mode"], "authoring_plan")
+        self.assertEqual(payload["case_count"], 1)
+
+    def test_compile_authoring_plan_writes_managed_agent_plan_bundle(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+            authoring_plan_path = root / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover user API behavior.
+scope:
+  surface: users-controller
+entities:
+  user:
+    operations:
+      verify_exists:
+        sql: SELECT id FROM users WHERE id = :user_id
+        params:
+          user_id: "{{user_id}}"
+        expected_outcomes:
+          - one row exists
+cases:
+  - id: create-user
+    kind: api
+    objective: Verify user creation.
+    state_change: create
+    execute:
+      route:
+        method: POST
+        path: /users
+      body:
+        email: "{{generated_email}}"
+    oracle:
+      status_code: 201
+      captures:
+        - response.json.id -> user_id
+      persisted_state:
+        entity: user
+        operation: verify_exists
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--compile-authoring-plan",
+                        "--authoring-plan-file",
+                        str(authoring_plan_path),
+                        "--output",
+                        str(output_root),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            output_path = Path(payload["output_path"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["input_mode"], "authoring_plan")
+        self.assertEqual(output_path.name, "agent-plan.json")
+        self.assertEqual(output_path.parent, Path(payload["bundle_dir"]))
+
+    def test_authoring_plan_file_generates_plan_via_compiler(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            authoring_plan_path = root / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover user API behavior.
+scope:
+  surface: users-controller
+entities:
+  user:
+    operations:
+      verify_exists:
+        sql: SELECT id FROM users WHERE id = :user_id
+        params:
+          user_id: "{{user_id}}"
+        expected_outcomes:
+          - one row exists
+cases:
+  - id: create-user
+    kind: api
+    objective: Verify user creation.
+    state_change: create
+    execute:
+      route:
+        method: POST
+        path: /users
+      body:
+        email: "{{generated_email}}"
+    oracle:
+      status_code: 201
+      captures:
+        - response.json.id -> user_id
+      persisted_state:
+        entity: user
+        operation: verify_exists
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--authoring-plan-file", str(authoring_plan_path), "--workspace-root", str(root)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        self.assertEqual(payload["input_mode"], "authoring_plan")
+        self.assertEqual(payload["test_case_count"], 1)
 
     def test_plan_only_mode_generates_plan_and_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:

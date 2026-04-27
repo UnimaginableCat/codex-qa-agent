@@ -26,11 +26,27 @@ artifacts/agent/generation/<run_id>/
 
 Treat this bundle as the single source of truth for one generation request.
 
-Primary flow:
+Skill routing:
 
 ```text
-agent-authored plan input -> GenerateTestPlanUseCase -> NormalizedTestPlan
+broad workspace request -> qa-entrypoint
+coverage decomposition / authoring DSL -> agent-plan-authoring
+compile / generate / render / review / promote / validate -> test-plan-generation
 ```
+
+Preferred DSL flow:
+
+```text
+authoring-plan.yaml
+-> compiler
+-> agent-plan.json
+-> GenerateTestPlanUseCase
+-> NormalizedTestPlan
+```
+
+`defaults.actor` in `authoring-plan.yaml` is not just descriptive metadata. It compiles into a
+rendered scenario variable `actor = literal:<value>` and acts as an execution profile selector for
+actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
 
 Prose remains a fallback/bootstrap path:
 
@@ -45,25 +61,45 @@ add persisted-state verification with case-level `db_verification` or a `db` wor
 Authoring helper workflow:
 
 ```text
-agent reasoning
--> scaffold AgentTestPlanInput
--> validate AgentTestPlanInput
--> run generation
+qa-entrypoint
+-> agent-plan-authoring
+-> author or refine authoring-plan.yaml
+-> test-plan-generation
+-> validate / compile / generate
 ```
 
-CLI scaffold:
+Preferred CLI flow
+
+Authoring-plan validate-only:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
-  --init-agent-plan `
-  --output artifacts/agent/generation `
-  --source-id users-api `
-  --project code/demo `
-  --name "Users API" `
-  --goal "Cover user API behavior."
+  --validate-authoring-plan `
+  --authoring-plan-file .agents/skills/agent-plan-authoring/assets/examples/users-authoring-plan.yaml `
+  --output-format text
 ```
 
-CLI validate-only:
+Authoring-plan compile:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --compile-authoring-plan `
+  --authoring-plan-file .agents/skills/agent-plan-authoring/assets/examples/users-authoring-plan.yaml `
+  --output artifacts/agent/generation `
+  --output-format text
+```
+
+Direct generation from authoring-plan:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --authoring-plan-file .agents/skills/agent-plan-authoring/assets/examples/users-authoring-plan.yaml `
+  --workspace-root .
+```
+
+Compiled bundle flow
+
+Validate compiled bundle:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
@@ -72,21 +108,11 @@ CLI validate-only:
   --output-format text
 ```
 
-Structured generation:
+Generate from compiled bundle:
 
 ```powershell
 <project-venv-python> -m tools.generation.cli `
   --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
-  --workspace-root .
-```
-
-Fallback prose generation:
-
-```powershell
-<project-venv-python> -m tools.generation.cli `
-  --source-id users-api `
-  --project code/demo `
-  --prose "Verify create user" `
   --workspace-root .
 ```
 
@@ -103,6 +129,9 @@ Rendering is conservative: it emits parser-validated markdown previews only for 
 route details (`planned_route`) or complete `workflow_steps[]`. Unsupported cases are written to
 deferred/unsupported artifacts. No scenario execution, compile, preflight, API workflow, or DB
 workflow is triggered.
+
+When rendered drafts include `actor = literal:<value>`, downstream execution uses that value to
+select actor-scoped env profiles before falling back to base `API_*` or `DATABASE_*` keys.
 
 Review and promotion:
 
@@ -129,3 +158,30 @@ Review and promotion:
 Promotion is explicit, never overwrites existing files, and writes `promotion-result.json` under the
 generation artifact bundle. When using the default `scenarios/generated` root, promoted drafts are
 written under a run-scoped subdirectory such as `scenarios/generated/<source>-<run_id>/`.
+
+Low-level escape hatches
+
+Use these only for manual repair, debugging, or explicit direct control. They are not the default
+skill-routed path.
+
+CLI scaffold:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --init-agent-plan `
+  --output artifacts/agent/generation `
+  --source-id users-api `
+  --project code/demo `
+  --name "Users API" `
+  --goal "Cover user API behavior."
+```
+
+Fallback prose generation:
+
+```powershell
+<project-venv-python> -m tools.generation.cli `
+  --source-id users-api `
+  --project code/demo `
+  --prose "Verify create user" `
+  --workspace-root .
+```

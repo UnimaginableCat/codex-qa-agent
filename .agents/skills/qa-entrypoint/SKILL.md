@@ -12,6 +12,8 @@ Use it first when the user request is broad, ambiguous, or expressed in workspac
 - inspect a failed run
 - explain which skill flow to use
 - generate a test plan
+- decompose coverage into authoring DSL
+- compile or promote generated plan artifacts
 - investigate env, API, DB, or reporting issues without naming the exact skill
 
 Do not treat this skill as a replacement for the specialized skills. Its job is to choose the right path and keep the sequence consistent.
@@ -77,11 +79,15 @@ Choose one primary branch first:
    Use when the request targets a runnable scenario under `scenarios/` or asks to execute, validate, resume, inspect, debug, or report a scenario run.
    Primary skill: `runner-execution`
 
-2. Test-plan generation branch
-   Use when the desired output is a `NormalizedTestPlan`, planned test cases, generation diagnostics, or authored coverage rather than runtime scenario execution.
+2. Authoring branch
+   Use when the request is about coverage decomposition, feature breakdown, controller CRUD coverage, workflow coverage design, or writing the compact authoring DSL.
+   Primary skill: `agent-plan-authoring`
+
+3. Downstream generation branch
+   Use when the desired output is a compiled `agent-plan.json`, `NormalizedTestPlan`, rendered drafts, review output, promoted scenarios, or generation diagnostics from existing authored input.
    Primary skill: `test-plan-generation`
 
-3. Focused investigation branch
+4. Focused investigation branch
    Use only when the user explicitly asks for a narrow investigation or when runner artifacts show a real need for deeper inspection.
    Primary skill depends on the question:
    - `env-resolution` for env/config/auth readiness
@@ -89,7 +95,7 @@ Choose one primary branch first:
    - `api-workflow` for manual HTTP execution
    - `db-verification` for read-only persistence checks
 
-4. Final synthesis branch
+5. Final synthesis branch
    Use when execution/investigation already happened and the main remaining task is consolidating outcome and evidence.
    Primary skill: `reporting`
 
@@ -110,7 +116,9 @@ Do not start with broad code analysis for a runnable scenario unless the user ex
 
 - Prefer one primary skill for the main branch and add secondary skills only when the branch requires them.
 - Prefer `runner-execution` over manual API/DB replay when a runnable scenario exists.
-- Prefer `test-plan-generation` over scenario execution when the request is about authoring coverage rather than validating a live behavior.
+- Prefer `agent-plan-authoring` when the request is about decomposition, coverage design, or writing `authoring-plan.yaml`.
+- Prefer `test-plan-generation` when the request starts from existing authored input and asks for compile, generate, render, review, promote, or validate.
+- Do not route broad coverage-authoring requests directly into `test-plan-generation`.
 - Use `env-resolution` before manual API or DB work if config is unclear.
 - Use `reporting` after execution/investigation when the user needs a final QA report or consolidated result.
 
@@ -120,6 +128,8 @@ When this skill is used, the agent should make the routing decision explicit:
 - target project if known
 - chosen primary branch
 - chosen primary skill
+- authoring artifact when relevant: `authoring-plan.yaml`
+- downstream artifact when relevant: compiled `agent-plan.json`
 - secondary skills that may be needed later
 - reason this branch was selected
 
@@ -129,6 +139,7 @@ When this skill is used, the agent should make the routing decision explicit:
 - Do not bypass `runner-execution` for runnable scenarios without saying why.
 - Do not use API or DB fallback first when the runner can provide the same evidence.
 - Do not expand into multi-skill work without a concrete reason.
+- Do not send coverage-authoring requests straight to downstream generation when `agent-plan-authoring` is the correct first step.
 
 # Completion criteria
 

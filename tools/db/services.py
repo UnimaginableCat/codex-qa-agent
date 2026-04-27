@@ -42,6 +42,8 @@ class DatabaseQueryService:
                 ),
                 details={
                     "sql": step.sql,
+                    "actor": env.actor,
+                    "database_url_key": env.database_url_key,
                     "runtime_signal": _db_connection_configuration_signal().to_dict(),
                 },
             )
@@ -54,6 +56,8 @@ class DatabaseQueryService:
                 message=str(exc),
                 details={
                     "sql": step.sql,
+                    "actor": env.actor,
+                    "database_url_key": env.database_url_key,
                     "runtime_signal": _db_connection_configuration_signal().to_dict(),
                 },
             )
@@ -74,6 +78,8 @@ class DatabaseQueryService:
                 details={
                     "sql": step.sql,
                     "executed_sql": prepared_sql.sql,
+                    "actor": env.actor,
+                    "database_url_key": env.database_url_key,
                     "query": QueryData(row_count=len(rows), rows=rows),
                 },
             )
@@ -84,6 +90,8 @@ class DatabaseQueryService:
                 details={
                     "sql": step.sql,
                     "executed_sql": prepared_sql.sql,
+                    "actor": env.actor,
+                    "database_url_key": env.database_url_key,
                     "runtime_signal": _db_connection_failure_signal().to_dict(),
                 },
             )
@@ -94,6 +102,8 @@ class DatabaseQueryService:
                 details={
                     "sql": step.sql,
                     "executed_sql": prepared_sql.sql,
+                    "actor": env.actor,
+                    "database_url_key": env.database_url_key,
                     "runtime_signal": _runtime_tool_failure_signal().to_dict(),
                 },
             )
@@ -116,8 +126,8 @@ class DatabaseQueryRunner:
 
     def run(self, env_file: Path, step_file: Path) -> ExecutionResult:
         try:
-            env = self._env_loader.load(env_file)
             step = self._step_loader.load(step_file)
+            env = self._env_loader.load(env_file, actor=step.actor)
         except (EnvFileLoadError, JsonFileLoadError) as exc:
             return ExecutionResult(status=StepStatus.ERROR, message=str(exc))
         except ValidationError as exc:

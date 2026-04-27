@@ -47,17 +47,23 @@ class GenerateTestPlanUseCase:
         diagnostics = self._validate_request(request)
 
         source_input_for_persistence = request.source_input
-        if request.input_mode == GenerationInputMode.AGENT_PLAN:
+        if request.input_mode in {GenerationInputMode.AGENT_PLAN, GenerationInputMode.AUTHORING_PLAN}:
             if request.agent_plan is None:
                 normalized_source = _empty_agent_plan_source_projection(request)
                 normalized_plan = _empty_agent_plan(request)
                 traceability_map = TraceabilityMap(source_id=request.source_input.source_id)
             else:
-                source_input_for_persistence = _source_input_from_agent_plan(
-                    request.source_input,
+                if request.input_mode == GenerationInputMode.AUTHORING_PLAN:
+                    source_input_for_persistence = request.source_input
+                else:
+                    source_input_for_persistence = _source_input_from_agent_plan(
+                        request.source_input,
+                        request.agent_plan,
+                    )
+                normalized_source = _normalized_source_from_agent_plan(
                     request.agent_plan,
+                    input_mode=request.input_mode.value,
                 )
-                normalized_source = _normalized_source_from_agent_plan(request.agent_plan)
                 normalized_plan = self.plan_assembler.assemble_from_agent_plan(request.agent_plan)
                 traceability_map = self.plan_assembler.build_agent_plan_traceability_map(
                     request.agent_plan,
@@ -65,8 +71,16 @@ class GenerateTestPlanUseCase:
                 )
                 diagnostics.append(
                     GenerationDiagnostic(
-                        code="agent_plan_input_captured",
-                        message="Agent-authored plan input accepted as a typed generation model.",
+                        code=(
+                            "authoring_plan_compiled"
+                            if request.input_mode == GenerationInputMode.AUTHORING_PLAN
+                            else "agent_plan_input_captured"
+                        ),
+                        message=(
+                            "Authoring plan compiled into the typed generation model."
+                            if request.input_mode == GenerationInputMode.AUTHORING_PLAN
+                            else "Agent-authored plan input accepted as a typed generation model."
+                        ),
                         severity=DiagnosticSeverity.INFO,
                         source_ref=request.agent_plan.source_id,
                     )
@@ -165,7 +179,7 @@ class GenerateTestPlanUseCase:
     @staticmethod
     def _validate_request(request: GenerateTestPlanRequest) -> list[GenerationDiagnostic]:
         diagnostics: list[GenerationDiagnostic] = []
-        if request.input_mode == GenerationInputMode.AGENT_PLAN:
+        if request.input_mode in {GenerationInputMode.AGENT_PLAN, GenerationInputMode.AUTHORING_PLAN}:
             diagnostics.extend(validate_agent_plan_input(request.agent_plan, request.source_input.source_id))
         elif request.input_mode == GenerationInputMode.PROSE:
             pass
@@ -173,7 +187,7 @@ class GenerateTestPlanUseCase:
             diagnostics.append(
                 GenerationDiagnostic(
                     code="unsupported_input_mode",
-                    message="Only agent_plan and prose input modes are supported.",
+                    message="Only authoring_plan, agent_plan, and prose input modes are supported.",
                     severity=DiagnosticSeverity.ERROR,
                     source_ref=request.source_input.source_id,
                     details={"input_mode": str(request.input_mode)},
@@ -210,6 +224,8 @@ def _scenario_rendering_state(request: GenerateTestPlanRequest, render_result: o
 
 
 def _generation_phase(request: GenerateTestPlanRequest) -> str:
+    if request.input_mode == GenerationInputMode.AUTHORING_PLAN:
+        return "authoring_plan_generation"
     if request.input_mode == GenerationInputMode.AGENT_PLAN:
         return "agent_plan_generation"
     return "prose_plan_generation"
@@ -233,7 +249,11 @@ def _source_input_from_agent_plan(
     )
 
 
-def _normalized_source_from_agent_plan(agent_plan: AgentTestPlanInput) -> NormalizedProseSource:
+def _normalized_source_from_agent_plan(
+    agent_plan: AgentTestPlanInput,
+    *,
+    input_mode: str = "agent_plan",
+) -> NormalizedProseSource:
     """Project agent-authored input into the existing normalized-source artifact slot."""
 
     return NormalizedProseSource(
@@ -246,7 +266,7 @@ def _normalized_source_from_agent_plan(agent_plan: AgentTestPlanInput) -> Normal
         open_questions=list(agent_plan.open_questions),
         metadata={
             "normalizer": "agent-plan-adapter-v1",
-            "input_mode": "agent_plan",
+            "input_mode": input_mode,
             "planned_case_count": len(agent_plan.planned_test_cases),
         },
     )

@@ -1,0 +1,80 @@
+version: 1
+source_id: users-controller-plan
+project: code/demo-project
+title: Admin users controller coverage
+goal: Verify admin user-management flows through the admin API client profile
+
+scope:
+  surface: users-controller
+  style: api-first
+  include:
+    - admin creates user
+    - admin gets user
+    - validation errors
+
+defaults:
+  environment: env/demo.env
+  auth: bearer
+  actor: admin-api-client
+
+entities:
+  user:
+    operations:
+      create:
+        route:
+          method: POST
+          path: /users
+        request_body:
+          email: "{{generated_email}}"
+          name: Admin Provisioned User
+        oracle:
+          status_code: 201
+          business_checks:
+            - response JSON exists
+        captures:
+          - response.json.id -> user_id
+      verify_exists:
+        sql: SELECT id, email FROM users WHERE id = :user_id
+        params:
+          user_id: "{{user_id}}"
+        expected_outcomes:
+          - one row exists
+
+cases:
+  - id: create-user-success
+    kind: api
+    objective: Admin creates user successfully
+    state_change: create
+    execute:
+      route:
+        method: POST
+        path: /users
+      body:
+        email: "{{generated_email}}"
+        name: Admin Provisioned User
+    oracle:
+      status_code: 201
+      business_checks:
+        - response JSON exists
+        - response contains field `id`
+      captures:
+        - response.json.id -> user_id
+      persisted_state:
+        entity: user
+        operation: verify_exists
+
+  - id: get-user-success
+    kind: workflow
+    objective: Admin reads created user
+    state_change: none
+    setup:
+      - use_entity: user
+        operation: create
+    execute:
+      route:
+        method: GET
+        path: /users/{{user_id}}
+    oracle:
+      status_code: 200
+      business_checks:
+        - response contains field `id`

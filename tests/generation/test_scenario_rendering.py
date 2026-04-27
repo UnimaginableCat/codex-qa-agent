@@ -42,6 +42,39 @@ class ScenarioRenderingTests(unittest.TestCase):
 
         self.assertFalse(parse_result.has_errors)
 
+    def test_renderer_uses_explicit_environment_and_actor_variable(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-actor-001",
+                    title="Create user",
+                    objective="Verify create user.",
+                    expected_results=["HTTP 201"],
+                    planned_route=PlannedRouteIntent(http_method="POST", endpoint_path="/users", path_kind="collection"),
+                    metadata={
+                        "default_environment": "env/custom.env",
+                        "default_actor": "api-client",
+                    },
+                )
+            ]
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("## Environment\nenv/custom.env", draft.markdown)
+        self.assertIn("## Variables\n- actor = literal:api-client", draft.markdown)
+        self.assertEqual(draft.metadata["environment"], "env/custom.env")
+        self.assertEqual(draft.metadata["actor"], "api-client")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "draft.md"
+            path.write_text(draft.markdown, encoding="utf-8")
+            scenario = MarkdownScenarioParser().parse(path)
+
+        self.assertEqual(scenario.environment, "env/custom.env")
+        self.assertEqual(len(scenario.variables), 1)
+        self.assertEqual(scenario.variables[0].name, "actor")
+
     def test_renderer_defers_case_without_authored_route(self) -> None:
         plan = _plan([PlannedTestCase(case_id="tc-001", title="Create user", objective="Verify create user.")])
 

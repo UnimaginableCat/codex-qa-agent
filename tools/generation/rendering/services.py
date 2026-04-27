@@ -167,6 +167,13 @@ class DraftScenarioRenderer:
                             "renderer": "draft-scenario-renderer-v1",
                             "preview_only": True,
                             "route_binding": draft_route_binding,
+                            "environment": _resolved_environment_path(
+                                plan,
+                                test_case,
+                                self.environment_template,
+                                Path(plan.project).name or _slugify(plan.project),
+                            ),
+                            "actor": _resolved_actor(plan, test_case),
                             "workflow_route_bindings": _workflow_route_bindings(test_case),
                             "workflow_step_count": len(test_case.workflow_steps),
                             "case_support": _draft_case_support(test_case, draft_route_binding),
@@ -242,6 +249,13 @@ class DraftScenarioRenderer:
                         "renderer": "draft-scenario-renderer-v1",
                         "preview_only": True,
                         "route_binding": support,
+                        "environment": _resolved_environment_path(
+                            plan,
+                            test_case,
+                            self.environment_template,
+                            Path(plan.project).name or _slugify(plan.project),
+                        ),
+                        "actor": _resolved_actor(plan, test_case),
                         "case_support": _draft_case_support(test_case, support),
                         "expected_assertions_present": _test_case_has_authored_expectations(test_case),
                         "capture_rules_present": _test_case_has_capture_rules(test_case),
@@ -274,6 +288,9 @@ class DraftScenarioRenderer:
         title: str,
     ) -> str:
         project_name = Path(plan.project).name or _slugify(plan.project)
+        environment_path = _resolved_environment_path(plan, test_case, self.environment_template, project_name)
+        scenario_variables = _rendered_scenario_variables(plan, test_case)
+        actor = _resolved_actor(plan, test_case)
         method = str(support["http_method"]).upper()
         endpoint_path = str(support["endpoint_path"])
         route_source = str(support.get("route_source") or "planned_route")
@@ -341,6 +358,8 @@ class DraftScenarioRenderer:
             notes.append(f"Observable outcome: {outcome}")
         for item in auth_strategy:
             notes.append(f"Auth strategy: {item}")
+        if actor:
+            notes.append(f"Actor: {actor}")
         for question in test_case.open_questions:
             notes.append(f"Open question: {question}")
         for assumption in test_case.assumptions:
@@ -354,7 +373,7 @@ class DraftScenarioRenderer:
             plan.project,
             "",
             "## Environment",
-            self.environment_template.format(project_name=project_name),
+            environment_path,
             "",
             "## Goal",
             _escape_block(test_case.objective or test_case.title),
@@ -365,6 +384,8 @@ class DraftScenarioRenderer:
             "API base URL, auth, and required data are configured before execution."
         ]
         lines.extend(f"- {_escape_line(item)}" for item in preconditions)
+        if scenario_variables:
+            lines.extend(["", "## Variables", *(f"- {_escape_line(item)}" for item in scenario_variables)])
         lines.extend(
             [
                 "",
@@ -470,6 +491,9 @@ class DraftScenarioRenderer:
         title: str,
     ) -> str:
         project_name = Path(plan.project).name or _slugify(plan.project)
+        environment_path = _resolved_environment_path(plan, test_case, self.environment_template, project_name)
+        scenario_variables = _rendered_scenario_variables(plan, test_case)
+        actor = _resolved_actor(plan, test_case)
         typed_gap_notes = _typed_gap_notes(test_case)
         typed_gap_summary = _typed_gap_summary_lines(test_case)
         db_verification_required = _test_case_requires_db_verification(test_case)
@@ -481,7 +505,7 @@ class DraftScenarioRenderer:
             plan.project,
             "",
             "## Environment",
-            self.environment_template.format(project_name=project_name),
+            environment_path,
             "",
             "## Goal",
             _escape_block(test_case.objective or test_case.title),
@@ -501,6 +525,8 @@ class DraftScenarioRenderer:
                 f"DB verification required: {'yes' if db_verification_required else 'no'}.",
             ]
         )
+        if actor:
+            lines.append(f"Actor: {actor}")
         if db_verification_required and not db_verification_present:
             lines.append("Persisted-state verification is required for this workflow but is not authored yet.")
         for outcome in test_case.observable_outcomes:
@@ -510,6 +536,8 @@ class DraftScenarioRenderer:
         for assumption in test_case.assumptions:
             lines.append(f"Assumption: {assumption}")
         lines.extend(_escape_line(item) for item in typed_gap_notes)
+        if scenario_variables:
+            lines.extend(["", "## Variables", *(_escape_line(item) for item in scenario_variables)])
         lines.extend(["", "## Steps", ""])
 
         for step_number, workflow_step in enumerate(test_case.workflow_steps, start=1):
@@ -908,6 +936,40 @@ def _draft_case_support(test_case: PlannedTestCase, support: dict[str, Any]) -> 
 
 def _json_block(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def _resolved_environment_path(
+    plan: NormalizedTestPlan,
+    test_case: PlannedTestCase,
+    environment_template: str,
+    project_name: str,
+) -> str:
+    for raw_value in (
+        test_case.metadata.get("default_environment"),
+        plan.metadata.get("default_environment"),
+        (plan.metadata.get("defaults") or {}).get("environment") if isinstance(plan.metadata.get("defaults"), dict) else None,
+    ):
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value.strip()
+    return environment_template.format(project_name=project_name)
+
+
+def _resolved_actor(plan: NormalizedTestPlan, test_case: PlannedTestCase) -> str:
+    for raw_value in (
+        test_case.metadata.get("default_actor"),
+        plan.metadata.get("default_actor"),
+        (plan.metadata.get("defaults") or {}).get("actor") if isinstance(plan.metadata.get("defaults"), dict) else None,
+    ):
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value.strip()
+    return ""
+
+
+def _rendered_scenario_variables(plan: NormalizedTestPlan, test_case: PlannedTestCase) -> list[str]:
+    actor = _resolved_actor(plan, test_case)
+    if not actor:
+        return []
+    return [f"actor = literal:{actor}"]
 
 
 def _has_auth_header_signal(headers: dict[str, Any]) -> bool:

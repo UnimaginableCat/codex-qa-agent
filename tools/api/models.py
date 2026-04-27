@@ -27,11 +27,18 @@ class EnvConfig:
     api_bearer_token: str | None = None
     api_username: str | None = None
     api_password: str | None = None
+    actor: str | None = None
     api_base_url_key: str = "API_BASE_URL"
     api_base_url_raw: str | None = None
 
     @classmethod
-    def from_mapping(cls, values: dict[str, str | None]) -> "EnvConfig":
+    def from_mapping(
+        cls,
+        values: dict[str, str | None],
+        *,
+        actor: str | None = None,
+        api_base_url_key: str = "API_BASE_URL",
+    ) -> "EnvConfig":
         raw_auth_type = _normalize_env_value(values.get("API_AUTH_TYPE")) or "none"
         raw_auth_type = raw_auth_type.lower()
 
@@ -48,7 +55,8 @@ class EnvConfig:
             api_bearer_token=_normalize_env_value(values.get("API_BEARER_TOKEN")),
             api_username=_first_present(values, "API_USERNAME", "API_BASIC_USERNAME", "BASIC_AUTH_USERNAME"),
             api_password=_first_present(values, "API_PASSWORD", "API_BASIC_PASSWORD", "BASIC_AUTH_PASSWORD"),
-            api_base_url_key="API_BASE_URL",
+            actor=_normalize_env_value(actor),
+            api_base_url_key=api_base_url_key,
             api_base_url_raw=values.get("__RAW_API_BASE_URL") or values.get("API_BASE_URL"),
         )
 
@@ -81,6 +89,7 @@ class RequestStep:
     headers: dict[str, str] = field(default_factory=dict)
     body: Any = None
     query_params: dict[str, Any] = field(default_factory=dict)
+    actor: str | None = None
     timeout_seconds: int = 30
     retry_policy: "RequestRetryPolicy" = field(default_factory=lambda: RequestRetryPolicy(configured=False))
 
@@ -117,6 +126,7 @@ class RequestStep:
             headers={str(key): str(value) for key, value in headers_raw.items()},
             body=payload.get("body"),
             query_params=query_params_raw,
+            actor=_normalize_env_value(payload.get("actor")),
             timeout_seconds=timeout_seconds,
             retry_policy=RequestRetryPolicy.from_mapping(payload.get("retry")),
         )

@@ -21,7 +21,7 @@ from tools.scenario_runner.domain.models import (
 from tools.scenario_runner.orchestration.preflight import PreflightCheckResult, PreflightResult
 from tools.scenario_runner.orchestration.services import ScenarioRunnerService
 from tools.scenario_runner.parser import MarkdownScenarioParser
-from tools.scenario_runner.runtime.executors import ApiStepExecutor
+from tools.scenario_runner.runtime.executors import ApiStepExecutor, DbStepExecutor
 from tools.scenario_runner.runtime.interpolator import PlaceholderInterpolator
 
 
@@ -228,6 +228,88 @@ class ScenarioVariableTests(unittest.TestCase):
             f"Item {executor.run_variables['unique_suffix']}",
         )
         self.assertIn("/companies/company-table/items/", executor.step_payload["path"])
+
+    def test_actor_variable_flows_into_api_step_payload(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Actor Payload
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - actor = literal:api-client
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: actor check
+                Method: GET
+                Path: /health
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.run_variables["actor"], "api-client")
+        self.assertEqual(executor.step_payload["actor"], "api-client")
+
+    def test_actor_variable_flows_into_db_step_payload(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Actor DB Payload
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - actor = literal:admin
+
+                ## Steps
+
+                ### Step 1
+                Type: db
+                Name: actor db check
+                SQL:
+                ```sql
+                select 1
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory(tool_results=[self._db_result([{"value": 1}])])
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.run_variables["actor"], "admin")
+        self.assertEqual(executor.step_payload["actor"], "admin")
 
     def test_variables_section_supports_generated_template_and_derived_transforms(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -663,6 +745,14 @@ class ScenarioVariableTests(unittest.TestCase):
         }
 
     @staticmethod
+    def _db_result(rows: list[dict]) -> dict:
+        return {
+            "status": StepStatus.PASS.value,
+            "message": "ok",
+            "query": {"row_count": len(rows), "rows": rows},
+        }
+
+    @staticmethod
     def _prepare_env(root: Path, content: str) -> None:
         (root / "env").mkdir(parents=True, exist_ok=True)
         (root / "env" / "demo.env").write_text(content, encoding="utf-8")
@@ -692,7 +782,9 @@ class _CapturingExecutorFactory:
             ]
         )
 
-    def create(self, step: ScenarioStep, workspace_root: Path) -> "_CapturingApiStepExecutor":
+    def create(self, step: ScenarioStep, workspace_root: Path) -> "_CapturingStepExecutor":
+        if step.step_type == ScenarioStepType.DB:
+            return _CapturingDbStepExecutor(workspace_root, self)
         return _CapturingApiStepExecutor(workspace_root, self)
 
     def next_tool_result(self) -> dict:
@@ -720,6 +812,28 @@ class _CapturingApiStepExecutor(ApiStepExecutor):
         self._owner.step_payloads.append(self._owner.step_payload)
         return {
             "command": ["test-api"],
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "result": self._owner.next_tool_result(),
+        }
+
+
+class _CapturingDbStepExecutor(DbStepExecutor):
+    def __init__(self, workspace_root: Path, owner: _CapturingExecutorFactory) -> None:
+        super().__init__(workspace_root=workspace_root, interpolator=PlaceholderInterpolator())
+        self._owner = owner
+
+    def execute(self, run_context, scenario_definition, step: ScenarioStep):
+        self._owner.execute_count += 1
+        self._owner.run_variables = dict(run_context.variables)
+        return super().execute(run_context, scenario_definition, step)
+
+    def _invoke_cli(self, env_path: Path, step_file: Path) -> dict:
+        self._owner.step_payload = json.loads(step_file.read_text(encoding="utf-8"))
+        self._owner.step_payloads.append(self._owner.step_payload)
+        return {
+            "command": ["test-db"],
             "returncode": 0,
             "stdout": "",
             "stderr": "",

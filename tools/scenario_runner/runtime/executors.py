@@ -399,6 +399,7 @@ class ApiStepExecutor(_BaseStepExecutor):
             "headers": self._interpolator.interpolate(step.api.headers, run_context.variables),
             "query_params": self._interpolator.interpolate(step.api.params, run_context.variables),
             "body": self._interpolator.interpolate(step.api.body, run_context.variables),
+            "actor": run_context.variables.get("actor"),
             "retry": self._interpolator.interpolate(step.api.retry, run_context.variables),
         }
 
@@ -418,6 +419,7 @@ class DbStepExecutor(_BaseStepExecutor):
         return {
             "sql": self._interpolator.interpolate(step.db.sql, run_context.variables),
             "params": self._interpolator.interpolate(step.db.params, run_context.variables),
+            "actor": run_context.variables.get("actor"),
         }
 
     def _capture_rules(self, step: ScenarioStep) -> list[str]:

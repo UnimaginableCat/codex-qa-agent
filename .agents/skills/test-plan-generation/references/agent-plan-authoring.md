@@ -1,17 +1,18 @@
-# Agent Plan Authoring
+# Compiled Plan Escape Hatch
 
-## Standard Workflow
+## Primary Rule
 
-1. Scaffold a starter JSON.
-2. Fill top-level plan fields.
-3. Author `1-2` representative seed cases first.
-4. Validate before scaling the rest of `planned_test_cases[]`.
-5. Expand the remaining cases only after the seed cases are structurally executable.
-6. Add assumptions and open questions explicitly.
-7. Validate before generation.
-8. Run generation with `--agent-plan-file`.
+The normal skill-routed path is:
 
-## Scaffold
+1. use `qa-entrypoint` when the request is broad
+2. author or refine `authoring-plan.yaml` through `agent-plan-authoring`
+3. validate authoring DSL
+4. compile or generate through `test-plan-generation`
+
+Use direct `agent-plan.json` work only when the user explicitly wants manual structured control or
+when you are debugging or repairing a compiled bundle.
+
+## Direct Structured Workflow
 
 ```powershell
 <venv-python> -m tools.generation.cli `
@@ -23,14 +24,25 @@
   --goal "Cover user API behavior."
 ```
 
-## Validate
+Fill the scaffolded `agent-plan.json`, then validate and generate from it:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
   --validate-agent-plan `
   --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --output-format text
+
+<venv-python> -m tools.generation.cli `
+  --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
+  --workspace-root .
 ```
+
+## When To Use This Path
+
+- repairing one compiled bundle without going back to authoring DSL
+- inspecting compiler output directly
+- reproducing a low-level generation defect
+- fulfilling an explicit user request for `agent-plan.json`
 
 ## Canonical Shape
 
@@ -87,6 +99,13 @@ Each case should contain:
 
 ## Authoring Guidance
 
+- Treat `defaults.actor` as an execution profile selector. It should represent the concrete client,
+  role, or subject whose env-scoped credentials/base URLs should be used at runtime.
+- Use stable actor names because they map into env keys by uppercasing and replacing non-alphanumeric
+  characters with `_`, for example `api-client -> API_CLIENT`.
+- Do not author `defaults.actor` as prose-only business commentary; if it is present, downstream
+  runtime will use it to select actor-scoped `API_*` and `DATABASE_*` keys before falling back to
+  base env values.
 - Keep `actions[]` at planning level, not runner-step level.
 - Use `workflow_steps[]` for true cross-endpoint lifecycle coverage.
 - For successful mutating workflows, include persisted-state verification.
@@ -102,7 +121,8 @@ Each case should contain:
 
 ## Seed-Case Gate
 
-Before expanding a broad controller or feature request into the full case set, make sure the first `1-2` authored cases already satisfy all of the following:
+Before expanding a broad controller or feature request into the full case set, make sure the first
+`1-2` authored cases already satisfy all of the following:
 
 - deterministic `expected_outcomes[]` using supported DSL
 - complete `route` or `workflow_steps[]`

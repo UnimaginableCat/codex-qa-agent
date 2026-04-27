@@ -19,6 +19,7 @@ class GenerationInputMode(StrEnum):
     """Supported first-stage input paths for test-plan generation."""
 
     AGENT_PLAN = "agent_plan"
+    AUTHORING_PLAN = "authoring_plan"
     PROSE = "prose"
 
 

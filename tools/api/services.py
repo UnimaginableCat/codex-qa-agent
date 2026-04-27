@@ -86,6 +86,9 @@ class ApiRequestBuilder:
             timeout_seconds=step.timeout_seconds,
         )
         prepared_request.request_debug = build_request_debug(prepared_request)
+        if env.actor:
+            prepared_request.request_debug["actor"] = env.actor
+            prepared_request.request_debug["api_base_url_key"] = env.api_base_url_key
 
         auth_strategy = self._auth_strategy_factory.create(env)
         auth_strategy.apply(env, prepared_request)
@@ -714,8 +717,8 @@ class ApiRequestRunner:
 
     def run(self, env_file: Path, step_file: Path) -> ExecutionResult:
         try:
-            env = self._env_loader.load(env_file)
             step = self._step_loader.load(step_file)
+            env = self._env_loader.load(env_file, actor=step.actor)
         except (EnvFileLoadError, JsonFileLoadError) as exc:
             return ExecutionResult(status=StepStatus.ERROR, message=str(exc))
         except ValidationError as exc:

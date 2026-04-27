@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 from tools.generation.authoring import AgentPlanAuthoringService
+from tools.generation.authoring_contract import AuthoringPlanCompiler
 from tools.generation.application import GenerateTestPlanOptions, GenerateTestPlanRequest, GenerationInputMode
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.gaps import format_case_gap_note, project_case_gap
@@ -50,11 +51,29 @@ MANAGED_AGENT_PLAN_ROOT = ("artifacts", "agent", "generation")
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tools.generation.cli",
-        description="Generate a NormalizedTestPlan and optionally render markdown draft scenarios.",
+        description="Compile authoring DSL into a NormalizedTestPlan and optionally render markdown draft scenarios.",
     )
     workflow = parser.add_mutually_exclusive_group()
-    workflow.add_argument("--init-agent-plan", action="store_true", help="Write an AgentTestPlanInput template JSON file.")
-    workflow.add_argument("--validate-agent-plan", action="store_true", help="Validate an AgentTestPlanInput file without generation.")
+    workflow.add_argument(
+        "--init-agent-plan",
+        action="store_true",
+        help="Write a low-level AgentTestPlanInput template JSON file. Prefer authoring-plan YAML for the normal DSL flow.",
+    )
+    workflow.add_argument(
+        "--validate-agent-plan",
+        action="store_true",
+        help="Validate a compiled AgentTestPlanInput file without generation.",
+    )
+    workflow.add_argument(
+        "--validate-authoring-plan",
+        action="store_true",
+        help="Validate a compact authoring-plan file without compile or generation.",
+    )
+    workflow.add_argument(
+        "--compile-authoring-plan",
+        action="store_true",
+        help="Compile a compact authoring-plan file into a managed AgentTestPlanInput bundle.",
+    )
     workflow.add_argument("--review-drafts", action="store_true", help="Review generated drafts for a run id.")
     workflow.add_argument("--promote-draft", action="store_true", help="Promote one selected draft into scenarios/.")
     workflow.add_argument("--promote-all-drafts", action="store_true", help="Promote all drafts from one run into scenarios/.")
@@ -63,21 +82,28 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument("--validate-scenario", action="store_true", help="Validate one scenario file without execution.")
 
     source = parser.add_mutually_exclusive_group()
-    source.add_argument("--agent-plan-file", help="Path to a structured agent-authored plan JSON file.")
-    source.add_argument("--prose", help="Inline prose source for test-plan generation.")
+    source.add_argument(
+        "--agent-plan-file",
+        help="Path to a compiled AgentTestPlanInput JSON file. Prefer --authoring-plan-file for the normal DSL flow.",
+    )
+    source.add_argument(
+        "--authoring-plan-file",
+        help="Path to a compact authoring-plan YAML file. This is the preferred DSL input.",
+    )
+    source.add_argument("--prose", help="Inline prose source for fallback/bootstrap test-plan generation.")
     source.add_argument("--source-file", help="Path to a prose source file.")
     parser.add_argument(
         "--input-mode",
         choices=[mode.value for mode in GenerationInputMode],
-        help="Generation input mode. Defaults to agent_plan for --agent-plan-file, otherwise prose.",
+        help="Generation input mode. Defaults to authoring_plan, agent_plan, or prose based on the selected source flag.",
     )
     parser.add_argument("--source-id", help="Stable source id for this generation run.")
     parser.add_argument("--project", help="Project identifier stored in generation contracts.")
     parser.add_argument("--name", default="", help="Optional human-readable source name.")
-    parser.add_argument("--goal", default="", help="Optional goal used when scaffolding an agent plan template.")
+    parser.add_argument("--goal", default="", help="Optional goal used when scaffolding a low-level agent plan template.")
     parser.add_argument(
         "--output",
-        help="Managed generation root hint for --init-agent-plan. The CLI creates a canonical bundle and writes agent-plan.json inside it.",
+        help="Managed generation root hint for --init-agent-plan or --compile-authoring-plan. The CLI writes bundles under artifacts/agent/generation.",
     )
     parser.add_argument("--workspace-root", default=".", help="Workspace root for artifact persistence.")
     parser.add_argument(
@@ -111,7 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--render-drafts",
         action="store_true",
-        help="Render non-executed markdown scenario drafts and parser-validate them.",
+        help="Render non-executed markdown scenario drafts from the generated plan and parser-validate them.",
     )
     return parser
 
@@ -122,8 +148,21 @@ def build_request(args: argparse.Namespace) -> GenerateTestPlanRequest:
         raise GenerationCliInputError(diagnostics)
 
     input_mode = _resolve_input_mode(args)
+    authoring_plan_result = _compile_authoring_plan_file(Path(args.authoring_plan_file)) if args.authoring_plan_file else None
     agent_plan = _load_agent_plan_file(Path(args.agent_plan_file)) if args.agent_plan_file else None
-    if agent_plan is not None:
+    if authoring_plan_result is not None:
+        authoring_plan = authoring_plan_result.authoring_plan
+        agent_plan = authoring_plan_result.compiled_plan
+        source_input = GenerationSourceInput(
+            source_id="" if authoring_plan is None else authoring_plan.source_id,
+            project="" if authoring_plan is None else authoring_plan.project,
+            input_format=SourceInputFormat.STRUCTURED,
+            name="" if authoring_plan is None else authoring_plan.title,
+            content="" if authoring_plan is None else json.dumps(authoring_plan.to_dict(), ensure_ascii=False),
+            source_path=Path(args.authoring_plan_file),
+            metadata={"input_mode": GenerationInputMode.AUTHORING_PLAN.value},
+        )
+    elif agent_plan is not None:
         source_input = GenerationSourceInput(
             source_id=agent_plan.source_id,
             project=agent_plan.project,
@@ -230,6 +269,82 @@ def run_validate_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def run_validate_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _validate_authoring_plan_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    result = AuthoringPlanCompiler().validate_file(Path(args.authoring_plan_file))
+    return to_json_safe(
+        {
+            "status": result.status.value,
+            "message": result.message,
+            "file_path": result.file_path,
+            "input_mode": GenerationInputMode.AUTHORING_PLAN.value,
+            "case_count": result.case_count,
+            "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
+            "authoring_plan": None if result.authoring_plan is None else result.authoring_plan.to_dict(),
+            "agent_plan": None if result.compiled_plan is None else result.compiled_plan.to_dict(),
+        }
+    )
+
+
+def run_compile_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _compile_authoring_plan_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    result = AuthoringPlanCompiler().compile_file(Path(args.authoring_plan_file))
+    payload: dict[str, Any] = {
+        "status": result.status.value,
+        "message": result.message,
+        "file_path": result.file_path,
+        "input_mode": GenerationInputMode.AUTHORING_PLAN.value,
+        "case_count": result.case_count,
+        "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
+        "authoring_plan": None if result.authoring_plan is None else result.authoring_plan.to_dict(),
+        "agent_plan": None if result.compiled_plan is None else result.compiled_plan.to_dict(),
+    }
+    if result.status != StepStatus.PASS or result.compiled_plan is None or result.authoring_plan is None:
+        return to_json_safe(payload)
+
+    requested_output_path = Path(args.output)
+    artifacts_root_dir = managed_generation_artifacts_root_for_path(requested_output_path)
+    if artifacts_root_dir is None:
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_compile_authoring_plan_requires_managed_root",
+                    message="Compiled authoring-plan bundle must be written under artifacts/agent/generation.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(requested_output_path),
+                )
+            ]
+        )
+    workspace_root = artifacts_root_dir.parent.parent.parent
+    artifact_store = FileGenerationArtifactStore()
+    source_input = GenerationSourceInput(
+        source_id=result.authoring_plan.source_id,
+        project=result.authoring_plan.project,
+        input_format=SourceInputFormat.STRUCTURED,
+        name=result.authoring_plan.title,
+        content=json.dumps(result.authoring_plan.to_dict(), ensure_ascii=False),
+        source_path=Path(args.authoring_plan_file),
+        metadata={"input_mode": GenerationInputMode.AUTHORING_PLAN.value},
+    )
+    run_context = initialize_generation_run_context(source_input, workspace_root=workspace_root)
+    artifact_store.write_context(run_context)
+    artifact_store.write_source_input(run_context, source_input)
+    artifact_store.write_diagnostics(run_context, result.diagnostics)
+    output_path = artifact_store.write_agent_plan(run_context, result.compiled_plan)
+    payload.update(
+        {
+            "bundle_dir": run_context.artifact_dir,
+            "output_path": output_path,
+            "requested_output_path": requested_output_path,
+        }
+    )
+    return to_json_safe(payload)
+
+
 def summarize_result(result: Any) -> dict[str, Any]:
     scenario_render_result = result.scenario_render_result
     unresolved_intents = _scenario_unresolved_intents(scenario_render_result)
@@ -272,6 +387,10 @@ def main(argv: list[str] | None = None) -> int:
             payload = run_init_agent_plan(args)
         elif args.validate_agent_plan:
             payload = run_validate_agent_plan(args)
+        elif args.validate_authoring_plan:
+            payload = run_validate_authoring_plan(args)
+        elif args.compile_authoring_plan:
+            payload = run_compile_authoring_plan(args)
         elif args.review_drafts:
             payload = run_review(args)
         elif args.promote_draft or args.promote_all_drafts:
@@ -303,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
 
     workflow = (
         "authoring"
-        if args.init_agent_plan or args.validate_agent_plan
+        if args.init_agent_plan or args.validate_agent_plan or args.validate_authoring_plan or args.compile_authoring_plan
         else "review"
         if args.review_drafts
         else "promotion"
@@ -584,6 +703,8 @@ class GenerationCliInputError(ValueError):
 def _resolve_input_mode(args: argparse.Namespace) -> GenerationInputMode:
     if args.input_mode:
         return GenerationInputMode(args.input_mode)
+    if args.authoring_plan_file:
+        return GenerationInputMode.AUTHORING_PLAN
     if args.agent_plan_file:
         return GenerationInputMode.AGENT_PLAN
     return GenerationInputMode.PROSE
@@ -598,13 +719,31 @@ def _load_agent_plan_file(path: Path) -> AgentTestPlanInput:
     return load_result.agent_plan
 
 
+def _compile_authoring_plan_file(path: Path):
+    compile_result = AuthoringPlanCompiler().compile_file(path)
+    if compile_result.status != StepStatus.PASS or compile_result.compiled_plan is None:
+        raise GenerationCliInputError(
+            compile_result.diagnostics
+        )
+    return compile_result
+
+
 def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
-    if not args.agent_plan_file and not args.prose and not args.source_file:
+    if not args.authoring_plan_file and not args.agent_plan_file and not args.prose and not args.source_file:
         diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_generation_requires_source",
-                message="Generation requires exactly one of --agent-plan-file, --prose, or --source-file.",
+                message="Generation requires exactly one of --authoring-plan-file, --agent-plan-file, --prose, or --source-file.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.source_id,
+            )
+        )
+    if args.input_mode == GenerationInputMode.AUTHORING_PLAN.value and not args.authoring_plan_file:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_authoring_plan_mode_requires_file",
+                message="input_mode=authoring_plan requires --authoring-plan-file.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=args.source_id,
             )
@@ -627,6 +766,33 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
                 source_ref=args.source_id,
             )
         )
+    if args.input_mode == GenerationInputMode.PROSE.value and args.authoring_plan_file:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_prose_mode_rejects_authoring_plan_file",
+                message="input_mode=prose requires --prose or --source-file, not --authoring-plan-file.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.source_id,
+            )
+        )
+    if args.authoring_plan_file and not Path(args.authoring_plan_file).exists():
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_authoring_plan_file_missing",
+                message="Authoring-plan file does not exist.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.authoring_plan_file,
+            )
+        )
+    if args.authoring_plan_file and _path_under_root(Path(args.authoring_plan_file), LEGACY_AGENT_PLAN_ROOT):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_authoring_plan_file_legacy_root_unsupported",
+                message="Legacy artifacts/agent/input is no longer supported. Use artifacts/agent/generation for generated bundles.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.authoring_plan_file,
+            )
+        )
     if args.agent_plan_file and not Path(args.agent_plan_file).exists():
         diagnostics.append(
             GenerationDiagnostic(
@@ -645,7 +811,7 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
                 source_ref=args.agent_plan_file,
             )
         )
-    if not args.agent_plan_file and not args.source_id:
+    if not args.agent_plan_file and not args.authoring_plan_file and not args.source_id:
         diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_generation_requires_source_id",
@@ -653,7 +819,7 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
                 severity=DiagnosticSeverity.ERROR,
             )
         )
-    if not args.agent_plan_file and not args.project:
+    if not args.agent_plan_file and not args.authoring_plan_file and not args.project:
         diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_generation_requires_project",
@@ -727,6 +893,40 @@ def _validate_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[G
             severity=DiagnosticSeverity.ERROR,
         )
     ]
+
+
+def _validate_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if args.authoring_plan_file:
+        return []
+    return [
+        GenerationDiagnostic(
+            code="adapter_validate_authoring_plan_requires_file",
+            message="--validate-authoring-plan requires --authoring-plan-file.",
+            severity=DiagnosticSeverity.ERROR,
+        )
+    ]
+
+
+def _compile_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    diagnostics = _validate_authoring_plan_adapter_diagnostics(args)
+    if not args.output:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_compile_authoring_plan_requires_output",
+                message="--compile-authoring-plan requires --output.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        )
+    elif not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_compile_authoring_plan_requires_managed_root",
+                message="Compiled authoring-plan bundle must be written under artifacts/agent/generation.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.output,
+            )
+        )
+    return diagnostics
 
 
 def _promotion_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:

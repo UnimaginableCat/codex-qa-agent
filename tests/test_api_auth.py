@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import types
 import unittest
 
@@ -74,6 +75,7 @@ except ModuleNotFoundError:
     sys.modules["dotenv"] = dotenv
 
 from tools.api.auth import AuthStrategyFactory
+from tools.api.loaders import ApiEnvLoader
 from tools.api.models import EnvConfig, RequestStep
 from tools.api.services import ApiRequestBuilder, ApiRequestRunner, ApiRequestService
 from tools.common.errors import ValidationError
@@ -243,6 +245,49 @@ class ApiAuthTests(unittest.TestCase):
         self.assertNotIn("auth", session.last_kwargs)
         self.assertNotIn("Authorization", session.last_kwargs["headers"])
 
+    def test_actor_scoped_env_profile_overrides_base_api_settings(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / "demo.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=https://public.example.local",
+                        "API_AUTH_TYPE=none",
+                        "API_BASE_URL__API_CLIENT=https://partner.example.local",
+                        "API_AUTH_TYPE__API_CLIENT=bearer",
+                        "API_BEARER_TOKEN__API_CLIENT=actor-token",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            env = ApiEnvLoader().load(env_path, actor="api-client")
+
+        self.assertEqual(env.actor, "api-client")
+        self.assertEqual(env.api_base_url, "https://partner.example.local")
+        self.assertEqual(env.api_base_url_key, "API_BASE_URL__API_CLIENT")
+        self.assertEqual(env.auth_type.value, "bearer")
+        self.assertEqual(env.api_bearer_token, "actor-token")
+
+    def test_api_request_runner_uses_step_actor_for_env_resolution(self) -> None:
+        env_loader = _RecordingEnvLoader(
+            EnvConfig.from_mapping({"API_BASE_URL": "https://api.example.local"}, actor="admin")
+        )
+        result = ApiRequestRunner(
+            env_loader=env_loader,
+            step_loader=_StaticStepLoader(RequestStep(method="GET", path="/health", actor="admin")),
+            request_builder=self._builder(),
+            request_service=ApiRequestService(
+                session=_RecordingSession(),
+                resolver=_passing_resolver,
+                system_resolver_diagnostics=False,
+            ),
+        ).run(Path("env"), Path("step"))
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertEqual(env_loader.last_actor, "admin")
+
     def _run_with_env(self, env_values: dict[str, str]):
         return ApiRequestRunner(
             env_loader=_StaticEnvLoader(EnvConfig.from_mapping(env_values)),
@@ -285,7 +330,7 @@ class _StaticEnvLoader:
     def __init__(self, env: EnvConfig) -> None:
         self._env = env
 
-    def load(self, env_path: Path) -> EnvConfig:
+    def load(self, env_path: Path, actor: str | None = None) -> EnvConfig:
         return self._env
 
 
@@ -293,8 +338,18 @@ class _FailingEnvLoader:
     def __init__(self, exc: Exception) -> None:
         self._exc = exc
 
-    def load(self, env_path: Path):
+    def load(self, env_path: Path, actor: str | None = None):
         raise self._exc
+
+
+class _RecordingEnvLoader:
+    def __init__(self, env: EnvConfig) -> None:
+        self._env = env
+        self.last_actor: str | None = None
+
+    def load(self, env_path: Path, actor: str | None = None) -> EnvConfig:
+        self.last_actor = actor
+        return self._env
 
 
 class _StaticStepLoader:

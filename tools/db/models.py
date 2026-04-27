@@ -14,9 +14,17 @@ class DbEnvConfig:
     database_url: str
     database_user: str = ""
     database_password: str = ""
+    actor: str | None = None
+    database_url_key: str = "DATABASE_URL"
 
     @classmethod
-    def from_mapping(cls, values: dict[str, str | None]) -> "DbEnvConfig":
+    def from_mapping(
+        cls,
+        values: dict[str, str | None],
+        *,
+        actor: str | None = None,
+        database_url_key: str = "DATABASE_URL",
+    ) -> "DbEnvConfig":
         return cls(
             database_url=(values.get("DATABASE_URL") or "").strip(),
             database_user=cls._first_defined(
@@ -33,6 +41,8 @@ class DbEnvConfig:
                 "PGPASSWORD",
                 "POSTGRES_PASSWORD",
             ),
+            actor=(actor or "").strip() or None,
+            database_url_key=database_url_key,
         )
 
     def is_ready(self) -> bool:
@@ -69,6 +79,7 @@ class DbEnvConfig:
 class QueryStep:
     sql: str
     params: dict[str, Any] | list[Any] = field(default_factory=dict)
+    actor: str | None = None
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "QueryStep":
@@ -86,7 +97,8 @@ class QueryStep:
         else:
             raise ValidationError("Step field 'params' must be an object or an array")
 
-        return cls(sql=sql, params=normalized_params)
+        actor = str(payload.get("actor", "")).strip() or None
+        return cls(sql=sql, params=normalized_params, actor=actor)
 
 
 @dataclass(slots=True)

@@ -49,6 +49,10 @@ Check for fields like:
 - DATABASE_URL
 - optional project-specific variables
 
+If the scenario declares `actor = literal:<value>` in `## Variables`, also check actor-scoped
+variants such as `API_BASE_URL__<ACTOR>`, `API_BEARER_TOKEN__<ACTOR>`, `DATABASE_URL__<ACTOR>`,
+and matching DB credential aliases before falling back to the base keys.
+
 # Output requirements
 
 Produce a concise env-resolution summary containing:

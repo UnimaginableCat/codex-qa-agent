@@ -57,6 +57,7 @@ class NormalizedTestPlanAssembler:
             ],
             assumptions=list(agent_plan.assumptions),
             metadata={
+                **dict(agent_plan.metadata),
                 "generation_phase": "agent_plan_generation",
                 "input_mode": "agent_plan",
                 "normalizer": "agent-plan-adapter-v1",
@@ -168,6 +169,7 @@ class NormalizedTestPlanAssembler:
             "requires_db_verification": case_input.requires_db_verification,
             "requires_request_body": case_input.requires_request_body,
             "authored_actions": list(case_input.actions),
+            **_agent_plan_default_metadata(agent_plan),
             **dict(case_input.metadata),
         }
         case = PlannedTestCase(
@@ -412,4 +414,23 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _agent_plan_default_metadata(agent_plan: AgentTestPlanInput) -> dict[str, str]:
+    defaults = agent_plan.metadata.get("defaults")
+    if not isinstance(defaults, dict):
+        return {}
+    metadata: dict[str, str] = {}
+    for source_key, target_key in (
+        ("default_environment", "default_environment"),
+        ("environment", "default_environment"),
+        ("default_actor", "default_actor"),
+        ("actor", "default_actor"),
+        ("default_auth", "default_auth"),
+        ("auth", "default_auth"),
+    ):
+        value = defaults.get(source_key)
+        if isinstance(value, str) and value.strip() and target_key not in metadata:
+            metadata[target_key] = value.strip()
+    return metadata
 

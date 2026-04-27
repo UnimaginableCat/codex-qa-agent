@@ -2,7 +2,11 @@
 
 ## Primary Rule
 
-Use `agent_plan` whenever the request is decomposable into explicit operations or behaviors.
+Use `authoring_plan` when authored DSL already exists or the upstream skill just produced
+`authoring-plan.yaml`.
+
+Use `agent_plan` only as a low-level fallback when you are debugging, repairing, or intentionally
+driving generation from a compiled bundle.
 
 Use prose only when:
 
@@ -10,24 +14,45 @@ Use prose only when:
 - the user explicitly wants a prose bootstrap
 - structured authoring would add unnecessary overhead
 
-## Structured Path
+## Preferred DSL Path
 
 Recommended flow:
 
 ```text
-request -> agent plan scaffold -> authored cases -> validate -> generate
+request
+-> qa-entrypoint
+-> agent-plan-authoring
+-> authoring-plan.yaml
+-> validate
+-> compile or generate
 ```
+
+If `authoring-plan.yaml` sets `defaults.actor`, preserve it through compile/render. The resulting
+scenario variable `actor = literal:<value>` is the execution-profile hook for actor-scoped env keys
+such as `API_BASE_URL__API_CLIENT` and `DATABASE_URL__API_CLIENT`.
 
 Commands:
 
 ```powershell
 <venv-python> -m tools.generation.cli `
-  --init-agent-plan `
-  --output artifacts/agent/generation `
-  --source-id users-api `
-  --project code/demo `
-  --name "Users API"
+  --validate-authoring-plan `
+  --authoring-plan-file <file> `
+  --output-format text
 
+<venv-python> -m tools.generation.cli `
+  --compile-authoring-plan `
+  --authoring-plan-file <file> `
+  --output artifacts/agent/generation `
+  --output-format text
+
+<venv-python> -m tools.generation.cli `
+  --authoring-plan-file <file> `
+  --workspace-root .
+```
+
+## Compiled Low-Level Path
+
+```powershell
 <venv-python> -m tools.generation.cli `
   --validate-agent-plan `
   --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
