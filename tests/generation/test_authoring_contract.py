@@ -177,6 +177,48 @@ cases:
         self.assertEqual(compiled_plan.planned_test_cases[1].workflow_steps[0].route.endpoint_path, "/users")
         self.assertEqual(compiled_plan.planned_test_cases[1].workflow_steps[1].route.endpoint_path, "/users/{{user_id}}")
 
+    def test_compile_db_check_promotes_db_expected_outcomes_to_case_level(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-schema",
+            project="code/demo",
+            title="Users schema",
+            goal="Verify persisted users schema.",
+            scope=AuthoringScope(surface="users-table"),
+            entities={
+                "user_schema": AuthoringEntitySpec(
+                    operations={
+                        "verify_ready": AuthoringEntityOperation(
+                            sql="SELECT COUNT(*) AS column_count FROM information_schema.columns WHERE table_name = 'users'",
+                            expected_outcomes=["one row exists", "`column_count` = `5`"],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="users-schema-ready",
+                    kind="db-check",
+                    objective="Verify users schema is ready.",
+                    state_change="none",
+                    oracle=AuthoringOracle(
+                        persisted_state=AuthoringPersistedStateRef(entity="user_schema", operation="verify_ready"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        compiled_case = result.compiled_plan.planned_test_cases[0]
+        self.assertEqual(compiled_case.kind, "db")
+        self.assertEqual(compiled_case.expected_outcomes, ["one row exists", "`column_count` = `5`"])
+        self.assertIsNotNone(compiled_case.db_verification)
+        assert compiled_case.db_verification is not None
+        self.assertEqual(compiled_case.db_verification.expected_outcomes, compiled_case.expected_outcomes)
+
     def test_compile_reports_unknown_entity_operation(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "authoring-plan.yaml"

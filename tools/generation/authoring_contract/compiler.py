@@ -435,12 +435,16 @@ class AuthoringPlanCompiler:
             )
 
         if kind == "db-check":
+            db_expected_outcomes = []
+            if persisted_verification is not None:
+                db_expected_outcomes = list(persisted_verification.expected_outcomes)
             return (
                 AgentPlannedTestCaseInput(
                     title=title,
                     objective=case.objective,
                     kind="db",
                     case_id=case.id,
+                    expected_outcomes=db_expected_outcomes,
                     requires_db_verification=persisted_verification is not None,
                     priority=case.priority,
                     tags=list(case.tags),
