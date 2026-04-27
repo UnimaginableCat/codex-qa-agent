@@ -199,6 +199,25 @@ class ApiUrlDiagnosticsTests(unittest.TestCase):
         self.assertEqual(debug["resolver_comparison"]["system_nslookup_status"], StepStatus.PASS.value)
         self.assertEqual(debug["resolver_comparison"]["system_ping_status"], StepStatus.BLOCKED.value)
 
+    def test_custom_resolver_avoids_real_hostname_lookups(self) -> None:
+        env = EnvConfig.from_mapping({"API_BASE_URL": "https://app2.101-group.ru"})
+        step = RequestStep(method="GET", path="/api/price_list/")
+        prepared = self._builder().build(env, step)
+
+        with patch("tools.api.services.socket.gethostbyname", side_effect=AssertionError("unexpected DNS lookup")):
+            with patch("tools.api.services.socket.getfqdn", return_value="local.test"):
+                result = ApiRequestService(
+                    session=_RecordingSession(),
+                    resolver=_passing_resolver,
+                    system_resolver_diagnostics=False,
+                ).execute(step, prepared)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        debug = result.details["request_debug"]
+        self.assertEqual(debug["gethostbyname"]["status"], StepStatus.PASS.value)
+        self.assertEqual(debug["gethostbyname"]["address"], "203.0.113.30")
+        self.assertEqual(debug["getfqdn"]["value"], "app2.101-group.ru")
+
     def test_request_debug_does_not_include_auth_secrets(self) -> None:
         env = EnvConfig.from_mapping(
             {

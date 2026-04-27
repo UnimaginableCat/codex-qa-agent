@@ -103,12 +103,19 @@ class ApiRequestService:
         self,
         session: requests.Session | None = None,
         resolver=None,
+        hostname_resolver=None,
+        fqdn_resolver=None,
         system_resolver_diagnostics: bool = True,
         sleep_func=None,
         jitter_func=None,
     ) -> None:
         self._session = session or requests.Session()
         self._resolver = resolver or socket.getaddrinfo
+        self._hostname_resolver = hostname_resolver or socket.gethostbyname
+        self._fqdn_resolver = fqdn_resolver or socket.getfqdn
+        self._derive_hostname_debug_from_resolver = (
+            resolver is not None and hostname_resolver is None and fqdn_resolver is None
+        )
         self._system_resolver_diagnostics = system_resolver_diagnostics
         self._sleep_func = sleep_func or time.sleep
         self._jitter_func = jitter_func or (lambda upper_bound: random.uniform(0, upper_bound))
@@ -404,34 +411,56 @@ class ApiRequestService:
             }
             overall_status = StepStatus.PASS.value
 
-        try:
-            address = socket.gethostbyname(hostname)
-        except Exception as exc:  # noqa: BLE001
-            gethostbyname_result = {
-                "status": StepStatus.BLOCKED.value,
-                "error_type": type(exc).__name__,
-                "errno": getattr(exc, "errno", None),
-                "message": str(exc),
-                "address": None,
-            }
+        if self._derive_hostname_debug_from_resolver:
+            derived_address = _first_resolved_address(addrinfo_results) if overall_status == StepStatus.PASS.value else None
+            if derived_address is None:
+                gethostbyname_result = {
+                    "status": StepStatus.BLOCKED.value,
+                    "error_type": "ResolutionError",
+                    "errno": None,
+                    "message": "No resolved address available from resolver results.",
+                    "address": None,
+                }
+            else:
+                gethostbyname_result = {
+                    "status": StepStatus.PASS.value,
+                    "error_type": None,
+                    "errno": None,
+                    "message": None,
+                    "address": derived_address,
+                }
         else:
-            gethostbyname_result = {
-                "status": StepStatus.PASS.value,
-                "error_type": None,
-                "errno": None,
-                "message": None,
-                "address": address,
-            }
+            try:
+                address = self._hostname_resolver(hostname)
+            except Exception as exc:  # noqa: BLE001
+                gethostbyname_result = {
+                    "status": StepStatus.BLOCKED.value,
+                    "error_type": type(exc).__name__,
+                    "errno": getattr(exc, "errno", None),
+                    "message": str(exc),
+                    "address": None,
+                }
+            else:
+                gethostbyname_result = {
+                    "status": StepStatus.PASS.value,
+                    "error_type": None,
+                    "errno": None,
+                    "message": None,
+                    "address": address,
+                }
 
-        try:
-            getfqdn_result = {"value": socket.getfqdn(hostname)}
-        except Exception as exc:  # noqa: BLE001
-            getfqdn_result = {
-                "value": None,
-                "error_type": type(exc).__name__,
-                "errno": getattr(exc, "errno", None),
-                "message": str(exc),
-            }
+        if self._derive_hostname_debug_from_resolver:
+            getfqdn_result = {"value": hostname}
+        else:
+            try:
+                getfqdn_result = {"value": self._fqdn_resolver(hostname)}
+            except Exception as exc:  # noqa: BLE001
+                getfqdn_result = {
+                    "value": None,
+                    "error_type": type(exc).__name__,
+                    "errno": getattr(exc, "errno", None),
+                    "message": str(exc),
+                }
 
         return {
             "status": overall_status,
@@ -549,6 +578,11 @@ def _sample_getaddrinfo_results(results: list[Any]) -> list[dict[str, Any]]:
 
 def _resolved_addresses(results: list[Any]) -> list[str]:
     return sorted({str(result[4][0]) for result in results if len(result) >= 5 and result[4]})
+
+
+def _first_resolved_address(results: list[Any]) -> str | None:
+    addresses = _resolved_addresses(results)
+    return addresses[0] if addresses else None
 
 
 def _safe_env_debug_value(key: str) -> str | None:
