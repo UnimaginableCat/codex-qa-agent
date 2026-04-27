@@ -42,6 +42,10 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             root = Path(tmp)
             payload = _generate_workflow_draft_run(root)
             review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+            draft_path = Path(payload["artifact_paths"]["scenario_drafts_dir"]) / (
+                "tc-001-create-and-fetch-session.md"
+            )
+            draft_markdown = draft_path.read_text(encoding="utf-8")
 
         self.assertEqual(len(review_set.items), 1)
         item = review_set.items[0]
@@ -50,6 +54,8 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertNotIn("captures_not_generated", item.gap_summary.gap_codes)
         self.assertFalse(any(target.target_type.value == "add_expected_assertion" for target in item.edit_targets.targets))
         self.assertFalse(any(target.target_type.value == "add_capture" for target in item.edit_targets.targets))
+        self.assertIn("Type: db", draft_markdown)
+        self.assertIn("Name: Verify session row remains readable", draft_markdown)
 
     def test_review_service_reads_case_support_when_route_binding_projection_is_missing(self) -> None:
         with TemporaryDirectory() as tmp:

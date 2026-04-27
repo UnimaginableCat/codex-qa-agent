@@ -438,32 +438,7 @@ class DraftScenarioRenderer:
         lines.append("Expected:")
         lines.extend(f"- {_escape_line(item)}" for item in expected_results)
         if db_verification is not None:
-            db_name = db_verification.name.strip() or f"{test_case.title} persisted-state verification"
-            lines.extend(
-                [
-                    "",
-                    "### Step 2",
-                    "Type: db",
-                    f"Name: {_escape_line(db_name)}",
-                    "SQL:",
-                    "```sql",
-                    db_verification.sql.strip(),
-                    "```",
-                    "Params:",
-                    "```json",
-                    _json_block(db_verification.params),
-                    "```",
-                ]
-            )
-            if db_verification.capture:
-                lines.extend(
-                    [
-                        "Capture:",
-                        *(f"- {_escape_line(item)}" for item in db_verification.capture),
-                    ]
-                )
-            lines.append("Expected:")
-            lines.extend(f"- {_escape_line(item)}" for item in db_verification.expected_outcomes)
+            lines.extend(["", *_render_case_level_db_verification_step(2, test_case)])
         lines.extend(
             [
                 "",
@@ -542,6 +517,14 @@ class DraftScenarioRenderer:
 
         for step_number, workflow_step in enumerate(test_case.workflow_steps, start=1):
             lines.extend(_render_workflow_step_block(step_number, workflow_step, test_case))
+            lines.append("")
+        if test_case.db_verification is not None:
+            lines.extend(
+                _render_case_level_db_verification_step(
+                    len(test_case.workflow_steps) + 1,
+                    test_case,
+                )
+            )
             lines.append("")
 
         lines.extend(
@@ -891,6 +874,35 @@ def _render_workflow_step_block(
     if workflow_step.expected_outcomes:
         lines.append("Expected:")
         lines.extend(f"- {_escape_line(item)}" for item in workflow_step.expected_outcomes)
+    return lines
+
+
+def _render_case_level_db_verification_step(step_number: int, test_case: PlannedTestCase) -> list[str]:
+    db_verification = test_case.db_verification
+    assert db_verification is not None
+    db_name = db_verification.name.strip() or f"{test_case.title} persisted-state verification"
+    lines = [
+        f"### Step {step_number}",
+        "Type: db",
+        f"Name: {_escape_line(db_name)}",
+        "SQL:",
+        "```sql",
+        db_verification.sql.strip(),
+        "```",
+        "Params:",
+        "```json",
+        _json_block(db_verification.params),
+        "```",
+    ]
+    if db_verification.capture:
+        lines.extend(
+            [
+                "Capture:",
+                *(f"- {_escape_line(item)}" for item in db_verification.capture),
+            ]
+        )
+    lines.append("Expected:")
+    lines.extend(f"- {_escape_line(item)}" for item in db_verification.expected_outcomes)
     return lines
 
 

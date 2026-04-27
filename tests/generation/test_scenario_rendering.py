@@ -13,6 +13,7 @@ from tools.generation.domain.models import (
     GenerationRunContext,
     NormalizedTestPlan,
     PlannedCaseGap,
+    PlannedDbVerification,
     PlannedCaseSupport,
     PlannedRouteIntent,
     PlannedTestCase,
@@ -194,6 +195,46 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertIn("### Step 1", draft.markdown)
         self.assertIn("### Step 2", draft.markdown)
         self.assertIn("DB verification required: yes.", draft.markdown)
+
+    def test_renderer_appends_case_level_db_verification_to_workflow_case(self) -> None:
+        render_result = DraftScenarioRenderer().render(
+            _plan(
+                [
+                    PlannedTestCase(
+                        case_id="tc-workflow-db-001",
+                        title="Activate suspended user",
+                        objective="Verify activation updates persisted state.",
+                        expected_results=["HTTP 200"],
+                        requires_db_verification=True,
+                        db_verification=PlannedDbVerification(
+                            name="Verify user status active",
+                            sql="SELECT status FROM users WHERE id = :user_id",
+                            params={"user_id": "{{user_id}}"},
+                            expected_outcomes=["`status` = `ACTIVE`"],
+                        ),
+                        workflow_steps=[
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Activate user",
+                                route=PlannedRouteIntent(
+                                    http_method="POST",
+                                    endpoint_path="/users/{{user_id}}/activate",
+                                ),
+                                expected_outcomes=["HTTP 200"],
+                            )
+                        ],
+                    )
+                ]
+            )
+        )
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("### Step 2", draft.markdown)
+        self.assertIn("Type: db", draft.markdown)
+        self.assertIn("Name: Verify user status active", draft.markdown)
+        self.assertIn("SELECT status FROM users WHERE id = :user_id", draft.markdown)
+        self.assertIn("- `status` = `ACTIVE`", draft.markdown)
 
     def test_preview_service_persists_drafts_and_parse_results(self) -> None:
         with TemporaryDirectory() as tmp:
