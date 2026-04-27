@@ -7,3 +7,4 @@ artifacts/agent/*
 env/*.env
 .idea
 .codex-qa
+/codex_qa_agent_tools.egg-info/
