@@ -226,6 +226,19 @@ class ScenarioRevalidationTests(unittest.TestCase):
         )
         self.assertTrue(any(target.target_type.value == "add_capture" for target in result.edit_targets.targets))
 
+    def test_compile_mode_allows_multi_step_negative_flow_without_capture_when_no_step_depends_on_prior_output(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = _write_scenario(Path(tmp), _missing_tenant_negative_flow_scenario())
+
+            result = ScenarioRevalidationService().validate(
+                ScenarioRevalidationRequest(file_path=scenario_path, validation_mode="compile")
+            )
+
+        self.assertEqual(result.parse_status.value, "valid")
+        self.assertEqual(result.compile_validation.compile_status.value, "success")
+        self.assertEqual(result.execution_readiness_category.value, "compile_valid_runner_ready")
+        self.assertNotIn("captures_not_generated", result.gap_summary.gap_codes)
+
     def test_cli_compile_mode_outputs_readiness_and_compile_issues(self) -> None:
         with TemporaryDirectory() as tmp:
             scenario_path = _write_scenario(Path(tmp), _unsupported_expectation_scenario())
@@ -717,6 +730,53 @@ Expected:
 ## Final expectations
 
 - HTTP 200
+""".lstrip()
+
+
+def _missing_tenant_negative_flow_scenario() -> str:
+    return """
+# Scenario: Missing Tenant Negative Flow
+
+## Project
+code/demo
+
+## Environment
+env/demo.env
+
+## Notes
+Auth strategy required: no.
+Request body required: no.
+DB verification required: yes.
+
+## Steps
+
+### Step 1
+Type: api
+Name: get missing tenant
+Method: GET
+Path: /api/internal/v1/tenants/00000000-0000-4000-8000-000000000404
+Expected:
+- HTTP 404
+
+### Step 2
+Type: db
+Name: verify tenant remains absent
+SQL:
+```sql
+SELECT id
+FROM tenants
+WHERE id = '00000000-0000-4000-8000-000000000404'
+```
+Params:
+```json
+{}
+```
+Expected:
+- no rows exist
+
+## Final expectations
+
+- HTTP 404
 """.lstrip()
 
 

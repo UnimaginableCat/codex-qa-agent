@@ -1217,15 +1217,6 @@ def _revalidation_gap_summary(
         gap_codes.append("db_verification_absent")
         gap_messages.append("DB verification is required for this scenario but no DB step is present.")
 
-    if scenario is not None and len(scenario.steps) > 1:
-        has_capture = any(
-            (step.api is not None and step.api.capture) or (step.db is not None and step.db.capture)
-            for step in scenario.steps
-        )
-        if not has_capture:
-            gap_codes.append("captures_not_generated")
-            gap_messages.append("Multiple-step scenario has no captures; add them only if later steps need prior values.")
-
     return DraftGapSummary(
         gap_codes=_dedupe_preserve_order(gap_codes),
         gap_messages=_dedupe_preserve_order(gap_messages),
