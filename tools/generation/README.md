@@ -52,6 +52,9 @@ When scaffolded through the CLI, `authoring-plan.yaml` lives inside the generati
 rendered scenario variable `actor = literal:<value>` and acts as an execution profile selector for
 actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
 
+`entities.<entity>.id_field` is now executable authoring contract too. It names the canonical entity
+identity variable used across setup chains and persisted-state templates, for example `user_id`.
+
 Prose remains a fallback/bootstrap path:
 
 ```text
@@ -169,11 +172,29 @@ Review and promotion:
   --run-id <generation-run-id> `
   --workspace-root . `
   --target-dir scenarios/generated
+
+<project-venv-python> -m tools.generation.cli `
+  --promote-all-drafts `
+  --run-id <generation-run-id> `
+  --workspace-root . `
+  --target-dir scenarios/generated `
+  --purge-target-dir
+
+<project-venv-python> -m tools.generation.cli `
+  --validate-scenario-dir `
+  --path scenarios/generated/<source>-<run_id> `
+  --mode compile `
+  --output-format text
 ```
 
 Promotion is explicit, never overwrites existing files, and writes `promotion-result.json` under the
 generation artifact bundle. When using the default `scenarios/generated` root, promoted drafts are
-written under a run-scoped subdirectory such as `scenarios/generated/<source>-<run_id>/`.
+written under a run-scoped subdirectory such as `scenarios/generated/<source>-<run_id>/`. Use
+`--purge-target-dir` only for deliberate rerender/re-promote cycles when the resolved target directory
+should be deleted before writing the refreshed scenario set.
+
+Use `--validate-scenario-dir --mode compile` as the normal post-promotion gate when you want one
+summary verdict for a whole promoted scenario directory without writing shell loops.
 
 Low-level escape hatches
 

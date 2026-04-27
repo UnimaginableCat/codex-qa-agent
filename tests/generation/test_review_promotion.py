@@ -112,6 +112,26 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             self.assertEqual(result.promoted_count, 2)
             self.assertEqual(result.error_count, 0)
 
+    def test_batch_promotion_can_purge_target_dir_before_rerun(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            first_result = ScenarioDraftBatchPromotionService().promote(
+                ScenarioPromotionBatchRequest(run_id=payload["run_id"], workspace_root=root)
+            )
+            second_result = ScenarioDraftBatchPromotionService().promote(
+                ScenarioPromotionBatchRequest(
+                    run_id=payload["run_id"],
+                    workspace_root=root,
+                    purge_target_dir=True,
+                )
+            )
+
+            self.assertEqual(first_result.status.value, "PASS")
+            self.assertEqual(second_result.status.value, "PASS")
+            self.assertEqual(second_result.promoted_count, 1)
+            self.assertEqual(second_result.error_count, 0)
+
     def test_cli_review_and_promote_commands(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -142,6 +162,43 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             self.assertEqual(review_payload["draft_count"], 1)
             self.assertEqual(promote_code, 0)
             self.assertTrue(Path(promote_payload["target_path"]).exists())
+
+    def test_cli_promote_all_can_purge_target_dir(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+
+            first_stdout = io.StringIO()
+            with redirect_stdout(first_stdout):
+                first_code = cli.main(
+                    [
+                        "--promote-all-drafts",
+                        "--run-id",
+                        payload["run_id"],
+                        "--workspace-root",
+                        str(root),
+                    ]
+                )
+            second_stdout = io.StringIO()
+            with redirect_stdout(second_stdout):
+                second_code = cli.main(
+                    [
+                        "--promote-all-drafts",
+                        "--run-id",
+                        payload["run_id"],
+                        "--workspace-root",
+                        str(root),
+                        "--purge-target-dir",
+                    ]
+                )
+            first_payload = json.loads(first_stdout.getvalue())
+            second_payload = json.loads(second_stdout.getvalue())
+
+            self.assertEqual(first_code, 0)
+            self.assertEqual(first_payload["status"], "PASS")
+            self.assertEqual(second_code, 0)
+            self.assertEqual(second_payload["status"], "PASS")
+            self.assertEqual(second_payload["promoted_count"], 1)
 
     def test_cli_review_text_output_includes_checklist(self) -> None:
         with TemporaryDirectory() as tmp:

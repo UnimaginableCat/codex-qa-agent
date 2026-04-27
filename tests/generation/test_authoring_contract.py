@@ -278,6 +278,85 @@ cases:
         self.assertEqual(duplicate_diagnostics[0].details["first_case_index"], 1)
         self.assertEqual(duplicate_diagnostics[0].details["duplicate_case_index"], 2)
 
+    def test_compile_blocks_setup_operation_with_unresolved_entity_id_field(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            entities={
+                "user": AuthoringEntitySpec(
+                    id_field="user_id",
+                    operations={
+                        "suspend": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users/{{user_id}}/suspend"),
+                            oracle=AuthoringOracle(status_code=200),
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="suspend-user",
+                    kind="workflow",
+                    objective="Suspend user",
+                    state_change="none",
+                    setup=[AuthoringSetupStep(use_entity="user", operation="suspend")],
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/users")),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertIn("authoring_setup_entity_id_field_unresolved", codes)
+
+    def test_compile_blocks_persisted_state_template_missing_entity_id_field(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            entities={
+                "user": AuthoringEntitySpec(
+                    id_field="user_id",
+                    operations={
+                        "verify_active": AuthoringEntityOperation(
+                            sql="SELECT COUNT(*) AS row_count FROM users WHERE status = 'ACTIVE'",
+                            expected_outcomes=["one row exists"],
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="create-user",
+                    kind="api",
+                    objective="Create user",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/users")),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> user_id"],
+                        persisted_state=AuthoringPersistedStateRef(entity="user", operation="verify_active"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertIn("authoring_persisted_state_id_field_missing", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

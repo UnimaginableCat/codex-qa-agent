@@ -33,6 +33,8 @@ from tools.generation.review import (
     ScenarioDraftBatchPromotionService,
     ScenarioDraftPromotionService,
     ScenarioDraftReviewService,
+    ScenarioDirectoryRevalidationRequest,
+    ScenarioDirectoryRevalidationService,
     ScenarioPromotionBatchRequest,
     ScenarioPromotionRequest,
     ScenarioRevalidationRequest,
@@ -85,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument("--list-patch-templates", action="store_true", help="List deterministic draft edit templates.")
     workflow.add_argument("--show-patch-template", action="store_true", help="Show one draft edit template by target type.")
     workflow.add_argument("--validate-scenario", action="store_true", help="Validate one scenario file without execution.")
+    workflow.add_argument("--validate-scenario-dir", action="store_true", help="Validate all scenario markdown files in one directory.")
 
     source = parser.add_mutually_exclusive_group()
     source.add_argument(
@@ -120,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-persist", action="store_true", help="Do not persist generation artifacts.")
     parser.add_argument("--run-id", help="Generation run id for review or promotion.")
     parser.add_argument("--draft-id", help="Draft id selected for promotion.")
-    parser.add_argument("--path", help="Scenario markdown path for --validate-scenario.")
+    parser.add_argument("--path", help="Scenario markdown file or directory path for validation commands.")
     parser.add_argument(
         "--mode",
         choices=["parser", "compile", "preflight"],
@@ -133,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Edit target type for --show-patch-template.",
     )
     parser.add_argument("--allow-invalid", action="store_true", help="Allow promotion of parser-invalid drafts.")
+    parser.add_argument(
+        "--purge-target-dir",
+        action="store_true",
+        help="Delete the resolved promotion target directory before promotion. Use for rerender/re-promote cycles.",
+    )
     parser.add_argument(
         "--target-dir",
         default="scenarios/generated",
@@ -459,6 +467,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = run_show_patch_template(args)
         elif args.validate_scenario:
             payload = run_validate_scenario(args)
+        elif args.validate_scenario_dir:
+            payload = run_validate_scenario_dir(args)
         else:
             payload = run_generation(args)
     except GenerationCliInputError as exc:
@@ -487,6 +497,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.promote_draft or args.promote_all_drafts
         else "template"
         if args.list_patch_templates or args.show_patch_template
+        else "revalidation_dir"
+        if args.validate_scenario_dir
         else "revalidation"
         if args.validate_scenario
         else "generation"
@@ -629,6 +641,7 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
                 workspace_root=Path(args.workspace_root),
                 target_dir=Path(args.target_dir),
                 allow_invalid=args.allow_invalid,
+                purge_target_dir=args.purge_target_dir,
             )
         )
         return to_json_safe(
@@ -651,6 +664,7 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
             workspace_root=Path(args.workspace_root),
             target_dir=Path(args.target_dir),
             allow_invalid=args.allow_invalid,
+            purge_target_dir=args.purge_target_dir,
         )
     )
     return to_json_safe(
@@ -748,6 +762,31 @@ def run_validate_scenario(args: argparse.Namespace) -> dict[str, Any]:
             "based_on_generated_draft": result.based_on_generated_draft,
             "generation_run_id": result.generation_run_id,
             "draft_id": result.draft_id,
+        }
+    )
+
+
+def run_validate_scenario_dir(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _revalidation_dir_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    result = ScenarioDirectoryRevalidationService().validate(
+        ScenarioDirectoryRevalidationRequest(
+            directory_path=Path(args.path),
+            validation_mode=args.mode,
+            workspace_root=Path(args.workspace_root),
+        )
+    )
+    return to_json_safe(
+        {
+            "status": result.status.value,
+            "directory_path": result.directory_path,
+            "validation_mode": result.validation_mode,
+            "scenario_count": result.scenario_count,
+            "failure_count": result.failure_count,
+            "readiness_counts": result.readiness_counts,
+            "failure_items": result.failure_items,
+            "results": [item.to_dict() for item in result.results],
         }
     )
 
@@ -1055,6 +1094,37 @@ def _revalidation_adapter_diagnostics(args: argparse.Namespace) -> list[Generati
     ]
 
 
+def _revalidation_dir_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if not args.path:
+        return [
+            GenerationDiagnostic(
+                code="adapter_revalidation_dir_requires_path",
+                message="--validate-scenario-dir requires --path.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        ]
+    path = Path(args.path)
+    if not path.exists():
+        return [
+            GenerationDiagnostic(
+                code="adapter_revalidation_dir_path_missing",
+                message="--validate-scenario-dir path does not exist.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.path,
+            )
+        ]
+    if path.exists() and not path.is_dir():
+        return [
+            GenerationDiagnostic(
+                code="adapter_revalidation_dir_requires_directory",
+                message="--validate-scenario-dir requires a directory path.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.path,
+            )
+        ]
+    return []
+
+
 def _error_payload(diagnostics: list[GenerationDiagnostic]) -> dict[str, Any]:
     return to_json_safe(
         {
@@ -1084,6 +1154,9 @@ def _print_payload(payload: dict[str, Any], *, output_format: str = "json", work
         return
     if output_format == "text" and workflow == "revalidation":
         print(_render_revalidation_text(payload))
+        return
+    if output_format == "text" and workflow == "revalidation_dir":
+        print(_render_revalidation_dir_text(payload))
         return
     print(json.dumps(payload, ensure_ascii=False))
 
@@ -1389,6 +1462,32 @@ def _render_revalidation_text(payload: dict[str, Any]) -> str:
         lines.append("Parser diagnostics:")
         for diagnostic in diagnostics:
             lines.append(f"  - {diagnostic.get('severity', '')}: {diagnostic.get('message', '')}")
+    return "\n".join(lines).rstrip()
+
+
+def _render_revalidation_dir_text(payload: dict[str, Any]) -> str:
+    lines = [
+        f"Status: {payload['status']}",
+        f"Directory: {payload['directory_path']}",
+        f"Validation mode: {payload.get('validation_mode', 'parser')}",
+        f"Scenarios: {payload.get('scenario_count', 0)}",
+        f"Failures: {payload.get('failure_count', 0)}",
+    ]
+    readiness_counts = payload.get("readiness_counts") or {}
+    if readiness_counts:
+        lines.append("Readiness counts:")
+        for key, value in sorted(readiness_counts.items()):
+            lines.append(f"  - {key}: {value}")
+    failure_items = payload.get("failure_items") or []
+    if failure_items:
+        lines.append("Failures:")
+        for item in failure_items:
+            lines.append(
+                f"  - {item.get('file_path', '')}: parse={item.get('parse_status', '')} readiness={item.get('readiness_category', '')}"
+            )
+            gap_codes = item.get("gap_codes") or []
+            if gap_codes:
+                lines.append(f"    Gaps: {', '.join(str(code) for code in gap_codes)}")
     return "\n".join(lines).rstrip()
 
 

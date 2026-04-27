@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -45,6 +46,8 @@ from .models import (
     ScenarioDraftParseStatus,
     ScenarioDraftReviewItem,
     ScenarioDraftReviewSet,
+    ScenarioDirectoryRevalidationRequest,
+    ScenarioDirectoryRevalidationResult,
     ScenarioPromotionBatchRequest,
     ScenarioPromotionBatchResult,
     ScenarioPromotionRequest,
@@ -213,6 +216,8 @@ class ScenarioDraftPromotionService:
                 source_path=source_path,
             )
         target_dir = _promotion_target_dir(target_dir, run_context)
+        if request.purge_target_dir:
+            _purge_target_dir(target_dir)
         target_path = target_dir / f"{_slugify(run_context.source_id)}-{_slugify(request.draft_id)}.md"
         if target_path.exists():
             diagnostics.append(
@@ -264,7 +269,6 @@ class ScenarioDraftPromotionService:
         )
         promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)
         result.promotion_result_path = promotion_result_path
-        self.artifact_store.write_promotion_result(run_context, result)
         return result
 
 
@@ -312,26 +316,6 @@ class ScenarioDraftBatchPromotionService:
                 results=[],
             )
 
-        results = [
-            self.promotion_service.promote(
-                ScenarioPromotionRequest(
-                    run_id=request.run_id,
-                    draft_id=draft_id,
-                    workspace_root=request.workspace_root,
-                    target_dir=request.target_dir,
-                    allow_invalid=request.allow_invalid,
-                )
-            )
-            for draft_id in draft_ids
-        ]
-        promoted_count = sum(1 for item in results if item.status == StepStatus.PASS)
-        error_count = sum(1 for item in results if item.status == StepStatus.ERROR)
-        status = StepStatus.ERROR if error_count else StepStatus.PASS
-        diagnostics.extend(
-            diagnostic
-            for item in results
-            for diagnostic in item.diagnostics
-        )
         try:
             target_dir = _promotion_target_dir(_resolve_target_dir(request.workspace_root, request.target_dir), run_context)
         except ValueError as exc:
@@ -345,6 +329,39 @@ class ScenarioDraftBatchPromotionService:
             )
             target_dir = None
             status = StepStatus.ERROR
+            return self._finalize(
+                run_context,
+                request,
+                status,
+                diagnostics=diagnostics,
+                results=[],
+                target_dir=target_dir,
+                promoted_count=0,
+                error_count=0,
+            )
+        if request.purge_target_dir:
+            _purge_target_dir(target_dir)
+        results = [
+            self.promotion_service.promote(
+                ScenarioPromotionRequest(
+                    run_id=request.run_id,
+                    draft_id=draft_id,
+                    workspace_root=request.workspace_root,
+                    target_dir=request.target_dir,
+                    allow_invalid=request.allow_invalid,
+                    purge_target_dir=False,
+                )
+            )
+            for draft_id in draft_ids
+        ]
+        promoted_count = sum(1 for item in results if item.status == StepStatus.PASS)
+        error_count = sum(1 for item in results if item.status == StepStatus.ERROR)
+        status = StepStatus.ERROR if error_count else StepStatus.PASS
+        diagnostics.extend(
+            diagnostic
+            for item in results
+            for diagnostic in item.diagnostics
+        )
         return self._finalize(
             run_context,
             request,
@@ -380,7 +397,6 @@ class ScenarioDraftBatchPromotionService:
         )
         promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)
         result.promotion_result_path = promotion_result_path
-        self.artifact_store.write_promotion_result(run_context, result)
         return result
 
 
@@ -501,6 +517,69 @@ class ScenarioRevalidationService:
             preflight_validation=preflight_validation,
             execution_readiness_category=execution_readiness,
             environment_readiness_category=environment_readiness,
+        )
+
+
+@dataclass(slots=True)
+class ScenarioDirectoryRevalidationService:
+    """Batch revalidation for one promoted/generated scenario directory."""
+
+    file_service: ScenarioRevalidationService = field(default_factory=ScenarioRevalidationService)
+
+    def validate(self, request: ScenarioDirectoryRevalidationRequest) -> ScenarioDirectoryRevalidationResult:
+        directory_path = Path(request.directory_path)
+        scenario_files = sorted(directory_path.glob("*.md"))
+        if not scenario_files:
+            return ScenarioDirectoryRevalidationResult(
+                directory_path=directory_path,
+                validation_mode=request.validation_mode,
+                status=StepStatus.ERROR,
+                scenario_count=0,
+                failure_count=0,
+                readiness_counts={},
+                failure_items=[],
+                results=[],
+            )
+        results = [
+            self.file_service.validate(
+                ScenarioRevalidationRequest(
+                    file_path=path,
+                    validation_mode=request.validation_mode,
+                    workspace_root=request.workspace_root,
+                )
+            )
+            for path in scenario_files
+        ]
+        readiness_counts: dict[str, int] = {}
+        failure_items: list[dict[str, object]] = []
+        for result in results:
+            readiness = _batch_revalidation_readiness_key(result)
+            readiness_counts[readiness] = readiness_counts.get(readiness, 0) + 1
+            if _batch_revalidation_is_failure(result, request.validation_mode):
+                failure_items.append(
+                    {
+                        "file_path": result.file_path,
+                        "parse_status": result.parse_status.value,
+                        "readiness_category": readiness,
+                        "compile_status": (
+                            None if result.compile_validation is None else result.compile_validation.compile_status.value
+                        ),
+                        "preflight_status": (
+                            None if result.preflight_validation is None else result.preflight_validation.preflight_status.value
+                        ),
+                        "gap_codes": list(result.gap_summary.gap_codes),
+                    }
+                )
+        status = StepStatus.PASS if not failure_items else StepStatus.ERROR
+        return ScenarioDirectoryRevalidationResult(
+            directory_path=directory_path,
+            validation_mode=request.validation_mode,
+            status=status,
+            scenario_count=len(results),
+            failure_count=len(failure_items),
+            readiness_counts=readiness_counts,
+            failure_items=failure_items,
+            results=results,
         )
 
 
@@ -2123,6 +2202,25 @@ def _revalidation_title(scenario: ScenarioDefinition | None, file_path: Path) ->
     return file_path.stem
 
 
+def _batch_revalidation_readiness_key(result: ScenarioRevalidationResult) -> str:
+    if result.environment_readiness_category is not None:
+        return result.environment_readiness_category.value
+    return result.execution_readiness_category.value
+
+
+def _batch_revalidation_is_failure(result: ScenarioRevalidationResult, validation_mode: str) -> bool:
+    if result.parse_status != ScenarioDraftParseStatus.VALID:
+        return True
+    if validation_mode == "compile":
+        return result.execution_readiness_category != ExecutionReadinessCategory.COMPILE_VALID_RUNNER_READY
+    if validation_mode == "preflight":
+        return (
+            result.environment_readiness_category
+            != ExecutionEnvironmentReadinessCategory.PREFLIGHT_READY
+        )
+    return False
+
+
 def _promotion_metadata(markdown: str) -> dict[str, str]:
     metadata: dict[str, str] = {}
     if not markdown.lstrip().startswith("<!--"):
@@ -2156,6 +2254,11 @@ def _promotion_target_dir(base_target_dir: Path, run_context: GenerationRunConte
     if normalized_parts[-2:] != ("scenarios", "generated"):
         return base_target_dir
     return base_target_dir / f"{_slugify(run_context.source_id)}-{_slugify(run_context.run_id)}"
+
+
+def _purge_target_dir(target_dir: Path) -> None:
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
 
 
 def _promotion_header(run_id: str, draft_id: str) -> str:

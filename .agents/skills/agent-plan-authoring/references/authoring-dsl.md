@@ -42,6 +42,10 @@ cases: []
 The example actor `admin-api-client` maps to actor-scoped env keys such as
 `API_BASE_URL__ADMIN_API_CLIENT` and `DATABASE_URL__ADMIN_API_CLIENT`.
 
+If an entity defines `id_field`, treat it as the canonical variable name for that entity instance,
+for example `user_id`. Setup chains should capture it before later setup operations reuse it, and
+persisted-state DB templates should reference it so verification stays scoped to the authored entity.
+
 Compiler behavior:
 
 - expands `setup[]` via `entities.*.operations.*`

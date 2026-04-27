@@ -26,6 +26,8 @@ from .models import (
     ScenarioDraftParseStatus,
     ScenarioDraftReviewItem,
     ScenarioDraftReviewSet,
+    ScenarioDirectoryRevalidationRequest,
+    ScenarioDirectoryRevalidationResult,
     ScenarioPromotionBatchRequest,
     ScenarioPromotionBatchResult,
     ScenarioPromotionRequest,
@@ -39,6 +41,7 @@ from .models import (
 )
 from .services import (
     ScenarioCompileValidationService,
+    ScenarioDirectoryRevalidationService,
     ScenarioDraftBatchPromotionService,
     ScenarioDraftPromotionService,
     ScenarioDraftReviewService,
@@ -77,6 +80,8 @@ __all__ = [
     "ScenarioDraftReviewItem",
     "ScenarioDraftReviewService",
     "ScenarioDraftReviewSet",
+    "ScenarioDirectoryRevalidationRequest",
+    "ScenarioDirectoryRevalidationResult",
     "ScenarioPromotionBatchRequest",
     "ScenarioPromotionBatchResult",
     "ScenarioPromotionRequest",
@@ -87,6 +92,7 @@ __all__ = [
     "ScenarioPreflightStatus",
     "ScenarioPreflightValidationResult",
     "ScenarioPreflightValidationService",
+    "ScenarioDirectoryRevalidationService",
     "ScenarioRevalidationRequest",
     "ScenarioRevalidationResult",
     "ScenarioRevalidationService",

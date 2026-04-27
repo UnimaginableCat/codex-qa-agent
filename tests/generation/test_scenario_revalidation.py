@@ -12,7 +12,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.generation import cli
-from tools.generation.review import ScenarioRevalidationRequest, ScenarioRevalidationService
+from tools.generation.review import (
+    ScenarioDirectoryRevalidationRequest,
+    ScenarioDirectoryRevalidationService,
+    ScenarioRevalidationRequest,
+    ScenarioRevalidationService,
+)
 
 
 class ScenarioRevalidationTests(unittest.TestCase):
@@ -421,6 +426,66 @@ class ScenarioRevalidationTests(unittest.TestCase):
         self.assertIn("Preflight: failed", text_output)
         self.assertIn("Preflight issues:", text_output)
 
+    def test_directory_revalidation_compile_mode_summarizes_runner_ready_and_failures(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            good = root / "good.md"
+            bad = root / "bad.md"
+            good.write_text(_compile_runner_ready_get_scenario(), encoding="utf-8")
+            bad.write_text(_unsupported_expectation_scenario(), encoding="utf-8")
+
+            result = ScenarioDirectoryRevalidationService().validate(
+                ScenarioDirectoryRevalidationRequest(
+                    directory_path=root,
+                    validation_mode="compile",
+                    workspace_root=root,
+                )
+            )
+
+        self.assertEqual(result.status.value, "ERROR")
+        self.assertEqual(result.scenario_count, 2)
+        self.assertEqual(result.failure_count, 1)
+        self.assertEqual(result.readiness_counts["compile_valid_runner_ready"], 1)
+        self.assertEqual(result.readiness_counts["compile_blocked"], 1)
+        self.assertTrue(any(str(item["file_path"]).endswith("bad.md") for item in result.failure_items))
+
+    def test_cli_validate_scenario_dir_outputs_json_and_text(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "good.md").write_text(_compile_runner_ready_get_scenario(), encoding="utf-8")
+            (root / "bad.md").write_text(_unsupported_expectation_scenario(), encoding="utf-8")
+
+            json_stdout = io.StringIO()
+            with redirect_stdout(json_stdout):
+                json_code = cli.main(
+                    ["--validate-scenario-dir", "--path", str(root), "--mode", "compile"]
+                )
+            json_payload = json.loads(json_stdout.getvalue())
+
+            text_stdout = io.StringIO()
+            with redirect_stdout(text_stdout):
+                text_code = cli.main(
+                    [
+                        "--validate-scenario-dir",
+                        "--path",
+                        str(root),
+                        "--mode",
+                        "compile",
+                        "--output-format",
+                        "text",
+                    ]
+                )
+            text_output = text_stdout.getvalue()
+
+        self.assertEqual(json_code, 1)
+        self.assertEqual(json_payload["status"], "ERROR")
+        self.assertEqual(json_payload["scenario_count"], 2)
+        self.assertEqual(json_payload["failure_count"], 1)
+        self.assertIn("Status: ERROR", text_output)
+        self.assertIn("Validation mode: compile", text_output)
+        self.assertIn("Failures:", text_output)
+        self.assertEqual(text_code, 1)
+
 
 def _write_scenario(root: Path, content: str) -> Path:
     path = root / "scenario.md"
@@ -521,6 +586,37 @@ Expected:
 ## Final expectations
 
 - HTTP 201
+""".lstrip()
+
+
+def _compile_runner_ready_get_scenario() -> str:
+    return """
+# Scenario: Get User
+
+## Project
+code/demo
+
+## Environment
+env/demo.env
+
+## Notes
+Auth strategy required: no.
+Request body required: no.
+DB verification required: no.
+
+## Steps
+
+### Step 1
+Type: api
+Name: get user
+Method: GET
+Path: /users/1
+Expected:
+- HTTP 200
+
+## Final expectations
+
+- HTTP 200
 """.lstrip()
 
 

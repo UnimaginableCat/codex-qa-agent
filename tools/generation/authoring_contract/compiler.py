@@ -28,6 +28,7 @@ from .models import (
 )
 
 _PLACEHOLDER_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
+_VARIABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _MUTATING_STATE_CHANGES = {"create", "update", "delete", "mutate"}
 _READ_ONLY_STATE_CHANGES = {"none", "read_only", "readonly"}
 _SUPPORTED_STATE_CHANGES = _MUTATING_STATE_CHANGES | _READ_ONLY_STATE_CHANGES
@@ -191,6 +192,17 @@ class AuthoringPlanCompiler:
                     source_ref=source_ref,
                 )
             )
+        for entity_name, entity_spec in authoring_plan.entities.items():
+            normalized_id_field = entity_spec.id_field.strip()
+            if normalized_id_field and not _VARIABLE_NAME_PATTERN.fullmatch(normalized_id_field):
+                diagnostics.append(
+                    authoring_diagnostic(
+                        "authoring_invalid_entity_id_field",
+                        "Entity id_field must be a machine-readable variable name such as user_id.",
+                        source_ref=entity_name,
+                        details={"entity": entity_name, "id_field": entity_spec.id_field},
+                    )
+                )
         seen_case_ids: dict[str, int] = {}
         for index, case in enumerate(authoring_plan.cases, start=1):
             normalized_case_id = case.id.strip()
@@ -481,6 +493,22 @@ class AuthoringPlanCompiler:
             diagnostics.extend(lookup_diagnostics)
             if operation is None:
                 continue
+            entity_spec = authoring_plan.entities.get(setup_step.use_entity.strip())
+            entity_id_field = "" if entity_spec is None else entity_spec.id_field.strip()
+            if entity_id_field and _operation_uses_placeholder(operation, entity_id_field) and entity_id_field not in available_captures:
+                diagnostics.append(
+                    authoring_diagnostic(
+                        "authoring_setup_entity_id_field_unresolved",
+                        "Setup operation depends on the entity id_field, but no earlier setup step captured it.",
+                        source_ref=case_ref,
+                        details={
+                            "entity": setup_step.use_entity,
+                            "operation": setup_step.operation,
+                            "step_index": step_index,
+                            "id_field": entity_id_field,
+                        },
+                    )
+                )
             if operation.route is not None:
                 workflow_steps.append(
                     PlannedWorkflowStep(
@@ -595,8 +623,22 @@ class AuthoringPlanCompiler:
             )
             return None, diagnostics, set()
         placeholders = set(_extract_placeholders(operation.sql))
-        for value in operation.params.values():
-            placeholders.update(_extract_placeholders(value))
+        placeholders.update(_extract_placeholders_from_value(operation.params))
+        entity_id_field = entity_spec.id_field.strip()
+        if entity_id_field and entity_id_field not in placeholders:
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_persisted_state_id_field_missing",
+                    "Persisted-state template must reference the entity id_field so verification is scoped to the authored entity instance.",
+                    source_ref=case_ref,
+                    details={
+                        "entity": entity_name,
+                        "operation": operation_name,
+                        "id_field": entity_id_field,
+                    },
+                )
+            )
+            return None, diagnostics, set()
         return (
             PlannedDbVerification(
                 name=f"Verify {entity_name}.{operation_name}",
@@ -710,6 +752,36 @@ def _extract_placeholders(value: Any) -> set[str]:
     if not isinstance(value, str):
         return set()
     return {match.group(1).strip() for match in _PLACEHOLDER_PATTERN.finditer(value)}
+
+
+def _extract_placeholders_from_value(value: Any) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        return _extract_placeholders(value)
+    if isinstance(value, dict):
+        placeholders: set[str] = set()
+        for nested_value in value.values():
+            placeholders.update(_extract_placeholders_from_value(nested_value))
+        return placeholders
+    if isinstance(value, (list, tuple, set)):
+        placeholders: set[str] = set()
+        for nested_value in value:
+            placeholders.update(_extract_placeholders_from_value(nested_value))
+        return placeholders
+    return set()
+
+
+def _operation_uses_placeholder(operation: AuthoringEntityOperation, variable_name: str) -> bool:
+    placeholders: set[str] = set()
+    if operation.route is not None:
+        placeholders.update(_extract_placeholders(operation.route.path))
+    placeholders.update(_extract_placeholders_from_value(operation.request_headers))
+    placeholders.update(_extract_placeholders_from_value(operation.request_params))
+    placeholders.update(_extract_placeholders_from_value(operation.request_body))
+    placeholders.update(_extract_placeholders(operation.sql))
+    placeholders.update(_extract_placeholders_from_value(operation.params))
+    return variable_name in placeholders
 
 
 def _requires_persistence(state_change: str) -> bool:

@@ -439,6 +439,7 @@ class ScenarioPromotionRequest:
     workspace_root: Path = Path(".")
     target_dir: Path = Path("scenarios/generated")
     allow_invalid: bool = False
+    purge_target_dir: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -450,6 +451,7 @@ class ScenarioPromotionBatchRequest:
     workspace_root: Path = Path(".")
     target_dir: Path = Path("scenarios/generated")
     allow_invalid: bool = False
+    purge_target_dir: bool = False
     draft_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -459,6 +461,16 @@ class ScenarioPromotionBatchRequest:
 @dataclass(slots=True)
 class ScenarioRevalidationRequest:
     file_path: Path
+    validation_mode: str = "parser"
+    workspace_root: Path = Path(".")
+
+    def to_dict(self) -> dict[str, Any]:
+        return to_json_safe(asdict(self))
+
+
+@dataclass(slots=True)
+class ScenarioDirectoryRevalidationRequest:
+    directory_path: Path
     validation_mode: str = "parser"
     workspace_root: Path = Path(".")
 
@@ -651,6 +663,37 @@ class ScenarioRevalidationResult:
                 if not payload.get("environment_readiness_category")
                 else ExecutionEnvironmentReadinessCategory(str(payload["environment_readiness_category"]))
             ),
+        )
+
+
+@dataclass(slots=True)
+class ScenarioDirectoryRevalidationResult:
+    directory_path: Path
+    validation_mode: str
+    status: StepStatus
+    scenario_count: int = 0
+    failure_count: int = 0
+    readiness_counts: dict[str, int] = field(default_factory=dict)
+    failure_items: list[dict[str, Any]] = field(default_factory=list)
+    results: list[ScenarioRevalidationResult] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = to_json_safe(asdict(self))
+        payload["status"] = self.status.value
+        payload["results"] = [item.to_dict() for item in self.results]
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ScenarioDirectoryRevalidationResult":
+        return cls(
+            directory_path=Path(str(payload["directory_path"])),
+            validation_mode=str(payload["validation_mode"]),
+            status=StepStatus(str(payload["status"])),
+            scenario_count=int(payload.get("scenario_count", 0)),
+            failure_count=int(payload.get("failure_count", 0)),
+            readiness_counts={str(key): int(value) for key, value in dict(payload.get("readiness_counts") or {}).items()},
+            failure_items=[dict(item) for item in payload.get("failure_items", [])],
+            results=[ScenarioRevalidationResult.from_dict(item) for item in payload.get("results", [])],
         )
 
 
