@@ -1160,10 +1160,6 @@ def _revalidation_gap_summary(
     if not validation.parse_valid:
         gap_codes.append("parser_invalid")
         gap_messages.append("Scenario file is not parser-valid.")
-    if scenario is not None:
-        expectation_contract_gaps = _expectation_contract_gap_summary_from_scenario(scenario)
-        gap_codes.extend(expectation_contract_gaps.gap_codes)
-        gap_messages.extend(expectation_contract_gaps.gap_messages)
 
     api_step = _first_api_step(scenario)
     method = str(route_binding.get("http_method") or "").upper()
@@ -1921,7 +1917,7 @@ def _build_edit_targets(
             )
         )
 
-    if not targets and str(route_binding.get("readiness") or "") == "route_resolved":
+    if not targets and "non_route_requirements_remaining" in gap_codes and str(route_binding.get("readiness") or "") == "route_resolved":
         targets.append(
             _edit_target(
                 draft_id=draft.draft_id,
