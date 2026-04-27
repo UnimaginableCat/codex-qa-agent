@@ -73,6 +73,13 @@ Default completion point:
 - authoring-level diagnostics were resolved or explicitly reported
 - downstream compile/render/promote work is left to `test-plan-generation`
 
+# Invocation
+
+The normal user-facing entry point is `qa-entrypoint`.
+
+Call this skill directly only when the routing decision is already explicit and the request should
+start inside the authoring branch rather than being classified first.
+
 # Authoring Rules
 
 - Keep the DSL compact and declarative.

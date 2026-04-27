@@ -133,6 +133,36 @@ When this skill is used, the agent should make the routing decision explicit:
 - secondary skills that may be needed later
 - reason this branch was selected
 
+# Invocation Pattern
+
+Use a short, consistent request envelope:
+
+```text
+Use skill: qa-entrypoint
+
+project: code/<project-name>
+request: <what needs to be done>
+```
+
+This is the canonical team-facing entry point. Prefer this format unless there is a deliberate need
+to bypass routing and invoke a specialized skill directly.
+
+Examples:
+
+```text
+Use skill: qa-entrypoint
+
+project: code/LeadFlow
+request: Сгенерируй authoring-plan.yaml для полного покрытия InternalUserController.
+```
+
+```text
+Use skill: qa-entrypoint
+
+project: code/LeadFlow
+request: Возьми существующий authoring-plan.yaml и запусти downstream generation до draft scenarios.
+```
+
 # Guardrails
 
 - Do not invent a hybrid flow when one primary branch is clearly dominant.

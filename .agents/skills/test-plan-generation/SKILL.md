@@ -27,6 +27,13 @@ Lifecycle:
 authored input -> compile -> normalized plan -> drafts -> review -> promoted scenarios -> validation
 ```
 
+# Invocation
+
+The normal user-facing entry point is `qa-entrypoint`.
+
+Call this skill directly only when authored input already exists and the request should start inside
+the downstream generation branch rather than being classified first.
+
 # Operating Modes
 
 - `compile`: compile `authoring-plan.yaml` into managed `agent-plan.json`.
