@@ -193,6 +193,8 @@ class ScenarioStepValidator:
             if comparison_rule is None:
                 comparison_rule = self._raw_api_typed_comparison_rule(raw_expectation, variables)
             if comparison_rule is not None:
+                if self._is_ambiguous_root_length_comparison(comparison_rule):
+                    return self._unsupported_result(expectation, "API")
                 field_path = self._parse_field_path(comparison_rule.left)
                 raw_rhs = self._raw_api_comparison_rhs(raw_expectation, comparison_rule.operator)
                 expected_value = self._parse_api_expected_value(comparison_rule.right, raw_rhs, variables)
@@ -336,7 +338,13 @@ class ScenarioStepValidator:
                 (
                     (_RESPONSE_VALUE_RE.fullmatch(expectation) is not None)
                     and (
-                        self._split_comparison_rule(_RESPONSE_VALUE_RE.fullmatch(expectation).group(1)) is not None
+                        (
+                            comparison_rule := self._split_comparison_rule(
+                                _RESPONSE_VALUE_RE.fullmatch(expectation).group(1)
+                            )
+                        )
+                        is not None
+                        and not self._is_ambiguous_root_length_comparison(comparison_rule)
                     )
                 ),
             )
@@ -515,6 +523,10 @@ class ScenarioStepValidator:
     @staticmethod
     def _is_non_bool_number(value: Any) -> bool:
         return isinstance(value, Number) and not isinstance(value, bool)
+
+    @classmethod
+    def _is_ambiguous_root_length_comparison(cls, comparison_rule: _ComparisonRule) -> bool:
+        return cls._normalize_keyword(comparison_rule.left) == "length"
 
     @classmethod
     def _split_comparison_rule(cls, rule: str) -> _ComparisonRule | None:

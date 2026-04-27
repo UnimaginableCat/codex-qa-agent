@@ -89,6 +89,24 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertIn("data_setup_unresolved", review_set.deferred_items[0].gap_summary.gap_codes)
         self.assertEqual(review_set.deferred_items[0].promotion_advisory.value, "not_recommended_for_promotion")
 
+    def test_review_service_blocks_draft_with_ambiguous_assertion_dsl(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
+            draft_text = draft_path.read_text(encoding="utf-8")
+            draft_text = draft_text.replace("HTTP 201", "response length >= 1", 1)
+            draft_path.write_text(draft_text, encoding="utf-8")
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        self.assertEqual(len(review_set.items), 1)
+        item = review_set.items[0]
+        self.assertIn("compile_unsupported_expectation", item.gap_summary.gap_codes)
+        self.assertEqual(item.readiness_category.value, "parser_valid_partial")
+        self.assertEqual(item.promotion_advisory.value, "not_recommended_for_promotion")
+        self.assertTrue(any("response length >= 1" in message for message in item.gap_summary.gap_messages))
+
     def test_promotion_promotes_one_draft(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

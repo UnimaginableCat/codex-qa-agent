@@ -844,6 +844,13 @@ def _merge_compile_gaps(
     )
 
 
+def _merge_gap_summaries(primary: DraftGapSummary, secondary: DraftGapSummary) -> DraftGapSummary:
+    return DraftGapSummary(
+        gap_codes=_dedupe_preserve_order([*primary.gap_codes, *secondary.gap_codes]),
+        gap_messages=_dedupe_preserve_order([*primary.gap_messages, *secondary.gap_messages]),
+    )
+
+
 def _preflight_issue_from_check(check: object) -> PreflightIssue:
     payload = check.to_dict()
     name = str(payload.get("name", "preflight_check"))
@@ -954,6 +961,7 @@ def _build_review_item(
     deferred_item: object | None,
     render_diagnostics: list[GenerationDiagnostic],
 ) -> ScenarioDraftReviewItem:
+    source_path = run_context.artifact_dir / draft.relative_path
     parse_status = (
         ScenarioDraftParseStatus.VALID
         if validation is not None and validation.parse_valid
@@ -973,6 +981,7 @@ def _build_review_item(
         has_unsupported_items=bool(unsupported_checks),
         has_deferred_items=deferred_item is not None,
     )
+    gap_summary = _merge_gap_summaries(gap_summary, _expectation_contract_gap_summary_from_file(source_path))
     diagnostics_details = DraftReviewDiagnosticsSummary(
         parse_diagnostics_count=0 if validation is None else len(validation.diagnostics),
         render_diagnostics_count=len(render_diagnostics),
@@ -1005,7 +1014,7 @@ def _build_review_item(
         draft_id=draft.draft_id,
         case_id=draft.case_id,
         title=draft.title,
-        file_path=run_context.artifact_dir / draft.relative_path,
+        file_path=source_path,
         parse_status=parse_status,
         diagnostics_summary=diagnostics_summary,
         has_unsupported_items=bool(unsupported_checks),
@@ -1151,6 +1160,10 @@ def _revalidation_gap_summary(
     if not validation.parse_valid:
         gap_codes.append("parser_invalid")
         gap_messages.append("Scenario file is not parser-valid.")
+    if scenario is not None:
+        expectation_contract_gaps = _expectation_contract_gap_summary_from_scenario(scenario)
+        gap_codes.extend(expectation_contract_gaps.gap_codes)
+        gap_messages.extend(expectation_contract_gaps.gap_messages)
 
     api_step = _first_api_step(scenario)
     method = str(route_binding.get("http_method") or "").upper()
@@ -1291,9 +1304,34 @@ def _has_execution_blocking_gaps(gap_summary: DraftGapSummary) -> bool:
         "environment_unresolved",
         "data_setup_unresolved",
         "assertion_detail_unresolved",
+        "compile_unsupported_expectation",
         "executable_detail_unresolved",
     }
     return any(code in blocking_codes for code in gap_summary.gap_codes)
+
+
+def _expectation_contract_gap_summary_from_file(file_path: Path) -> DraftGapSummary:
+    parse_result = MarkdownScenarioParser().parse_result(file_path)
+    if parse_result.has_errors or parse_result.scenario is None:
+        return DraftGapSummary(gap_codes=[], gap_messages=[])
+    return _expectation_contract_gap_summary_from_scenario(parse_result.scenario)
+
+
+def _expectation_contract_gap_summary_from_scenario(scenario: ScenarioDefinition) -> DraftGapSummary:
+    validator = ScenarioStepValidator()
+    unsupported_messages: list[str] = []
+
+    for step in scenario.steps:
+        for diagnostic in validator.inspect_contract(step):
+            if not diagnostic.supported:
+                unsupported_messages.append(diagnostic.detail)
+
+    if not unsupported_messages:
+        return DraftGapSummary(gap_codes=[], gap_messages=[])
+    return DraftGapSummary(
+        gap_codes=["compile_unsupported_expectation"],
+        gap_messages=_dedupe_preserve_order(unsupported_messages),
+    )
 
 
 def _route_status(route_binding: dict[str, object]) -> str:

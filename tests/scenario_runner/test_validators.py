@@ -290,6 +290,22 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
 
+    def test_response_length_without_field_is_blocked_as_ambiguous(self) -> None:
+        results = self.validator.validate(
+            self._api_step(["response length >= 1"]),
+            {"response": {"http_status": 200, "body": [{"id": 123}]}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.BLOCKED)
+        self.assertIn("Unsupported expectation rule: response length >= 1", results[0].detail)
+
+    def test_contract_inspection_rejects_ambiguous_root_response_length_assertion(self) -> None:
+        diagnostics = self.validator.inspect_contract(self._api_step(["response length >= 1"]))
+
+        self.assertEqual(len(diagnostics), 1)
+        self.assertFalse(diagnostics[0].supported)
+        self.assertIn("Unsupported expectation rule: response length >= 1", diagnostics[0].detail)
+
     def test_db_supported_expectations_use_first_row(self) -> None:
         payload = {
             "query": {

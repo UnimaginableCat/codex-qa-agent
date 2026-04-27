@@ -399,6 +399,245 @@ cases:
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertIn("authoring_persisted_state_id_field_missing", codes)
 
+    def test_compile_blocks_string_too_long_case_when_body_does_not_exceed_stated_boundary(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="update-user-name-too-long",
+                    kind="api",
+                    objective="Reject tenant names longer than 255 characters.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="PATCH", path="/users/1"),
+                        body={"name": "A" * 255},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        mismatch_diagnostics = [
+            diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_case_boundary_mismatch"
+        ]
+        self.assertEqual(len(mismatch_diagnostics), 1)
+        self.assertEqual(mismatch_diagnostics[0].details["threshold"], 255)
+        self.assertEqual(mismatch_diagnostics[0].details["actual_max_length"], 255)
+
+    def test_compile_allows_string_too_long_case_when_body_exceeds_stated_boundary(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="update-user-name-too-long",
+                    kind="api",
+                    objective="Reject tenant names longer than 255 characters.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="PATCH", path="/users/1"),
+                        body={"name": "A" * 256},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(any(diagnostic.code == "authoring_case_boundary_mismatch" for diagnostic in result.diagnostics))
+
+    def test_compile_blocks_numeric_greater_than_case_when_param_does_not_exceed_threshold(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="list-users-limit-over-max",
+                    kind="api",
+                    objective="Reject list requests with limit greater than 100.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/users"),
+                        params={"limit": 100, "offset": 0},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        mismatch = next(diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_case_boundary_mismatch")
+        self.assertEqual(mismatch.details["rule"], "greater_than")
+        self.assertEqual(mismatch.details["field"], "limit")
+        self.assertEqual(mismatch.details["threshold"], 100)
+        self.assertEqual(mismatch.details["actual_values"], [100])
+
+    def test_compile_allows_numeric_greater_than_case_when_param_exceeds_threshold(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="list-users-limit-over-max",
+                    kind="api",
+                    objective="Reject list requests with limit greater than 100.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/users"),
+                        params={"limit": 101, "offset": 0},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(any(diagnostic.code == "authoring_case_boundary_mismatch" for diagnostic in result.diagnostics))
+
+    def test_compile_blocks_negative_offset_case_when_param_is_not_negative(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="list-users-negative-offset",
+                    kind="api",
+                    objective="Reject list request with negative offset.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/users"),
+                        params={"limit": 10, "offset": 0},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        mismatch = next(diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_case_boundary_mismatch")
+        self.assertEqual(mismatch.details["rule"], "negative")
+        self.assertEqual(mismatch.details["field"], "offset")
+        self.assertEqual(mismatch.details["actual_values"], [0])
+
+    def test_compile_allows_negative_offset_case_when_param_is_negative(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="list-users-negative-offset",
+                    kind="api",
+                    objective="Reject list request with negative offset.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/users"),
+                        params={"limit": 10, "offset": -1},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(any(diagnostic.code == "authoring_case_boundary_mismatch" for diagnostic in result.diagnostics))
+
+    def test_compile_blocks_zero_limit_case_when_param_is_not_zero(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="list-users-zero-limit",
+                    kind="api",
+                    objective="Reject list request with zero limit.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/users"),
+                        params={"limit": 1, "offset": 0},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        mismatch = next(diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_case_boundary_mismatch")
+        self.assertEqual(mismatch.details["rule"], "zero")
+        self.assertEqual(mismatch.details["field"], "limit")
+        self.assertEqual(mismatch.details["actual_values"], [1])
+
+    def test_compile_allows_zero_limit_case_when_param_is_zero(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="list-users-zero-limit",
+                    kind="api",
+                    objective="Reject list request with zero limit.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/users"),
+                        params={"limit": 0, "offset": 0},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(any(diagnostic.code == "authoring_case_boundary_mismatch" for diagnostic in result.diagnostics))
+
 
 if __name__ == "__main__":
     unittest.main()
