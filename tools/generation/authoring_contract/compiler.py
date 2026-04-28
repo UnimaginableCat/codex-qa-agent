@@ -385,6 +385,7 @@ class AuthoringPlanCompiler:
                 persisted_verification=persisted_verification,
             )
         )
+        diagnostics.extend(_workflow_setup_state_mismatch_diagnostics(case=case, case_ref=case_ref))
 
         if case.execute is not None and case.execute.route is not None:
             unresolved_placeholders = sorted(
@@ -1161,6 +1162,38 @@ def _numeric_path_has_placeholder(path: str) -> bool:
     return bool(_extract_placeholders(path))
 
 
+def _workflow_setup_state_mismatch_diagnostics(
+    *,
+    case: AuthoringCase,
+    case_ref: str,
+) -> list[GenerationDiagnostic]:
+    if case.kind.strip().lower() != "workflow" or not case.setup or case.execute is None or case.execute.route is None:
+        return []
+    actual_state = _infer_setup_state(case.setup)
+    if actual_state is None:
+        return []
+    expected_state = _expected_precondition_state(case)
+    if expected_state is None or expected_state == actual_state:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_workflow_setup_state_mismatch",
+            (
+                "Workflow setup appears to leave the entity in a different lifecycle state than the case objective "
+                "or execute route expects. This often produces the wrong HTTP status at execution time."
+            ),
+            severity=DiagnosticSeverity.WARNING,
+            source_ref=case_ref,
+            details={
+                "expected_state": expected_state,
+                "actual_state": actual_state,
+                "setup_operations": [step.operation for step in case.setup],
+                "route_path": case.execute.route.path,
+            },
+        )
+    ]
+
+
 def _normalized_email_expectation_diagnostics(
     *,
     authoring_plan: AuthoringPlan,
@@ -1351,3 +1384,44 @@ def _variable_guarantees_lowercase(
     if definition.source == ScenarioVariableSource.GENERATED:
         return definition.raw_value.strip().lower().endswith(":uuid")
     return False
+
+
+def _infer_setup_state(setup_steps: list[AuthoringSetupStep]) -> str | None:
+    state: str | None = None
+    for step in setup_steps:
+        hinted_state = _operation_state_hint(step.operation)
+        if hinted_state is not None:
+            state = hinted_state
+    return state
+
+
+def _operation_state_hint(operation_name: str) -> str | None:
+    normalized = operation_name.strip().lower()
+    if not normalized:
+        return None
+    if "archive" in normalized:
+        return "archived"
+    if "suspend" in normalized:
+        return "suspended"
+    if "activate" in normalized:
+        return "active"
+    if "create" in normalized:
+        return "active"
+    return None
+
+
+def _expected_precondition_state(case: AuthoringCase) -> str | None:
+    route_path = "" if case.execute is None or case.execute.route is None else case.execute.route.path.strip().lower()
+    expected_status = case.oracle.status_code if case.oracle is not None else None
+    if route_path.endswith("/activate") and isinstance(expected_status, int) and 200 <= expected_status < 300:
+        return "suspended"
+    if route_path.endswith("/suspend") and isinstance(expected_status, int) and 200 <= expected_status < 300:
+        return "active"
+    case_text = " ".join(part.strip().lower() for part in (case.title, case.objective) if part and part.strip())
+    if "archived user" in case_text or "for archived user" in case_text:
+        return "archived"
+    if "suspended user" in case_text or "already suspended" in case_text:
+        return "suspended"
+    if "active user" in case_text or "already active" in case_text:
+        return "active"
+    return None

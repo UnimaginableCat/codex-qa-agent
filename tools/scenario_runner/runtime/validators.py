@@ -422,10 +422,10 @@ class ScenarioStepValidator:
             return False
         if lowered == "null":
             return None
+        if normalized.startswith("`") and normalized.endswith("`"):
+            return ScenarioStepValidator._parse_literal(normalized[1:-1])
         if (normalized.startswith('"') and normalized.endswith('"')) or (
             normalized.startswith("'") and normalized.endswith("'")
-        ) or (
-            normalized.startswith("`") and normalized.endswith("`")
         ):
             return normalized[1:-1]
         if re.fullmatch(r"-?\d+", normalized):

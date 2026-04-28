@@ -1024,6 +1024,112 @@ cases:
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertFalse(any(diagnostic.code == "authoring_expected_value_case_ambiguous" for diagnostic in result.diagnostics))
 
+    def test_compile_warns_when_activate_success_setup_ends_archived(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            entities={
+                "user": AuthoringEntitySpec(
+                    id_field="user_id",
+                    operations={
+                        "create": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users"),
+                            captures=["response.json.id -> user_id"],
+                        ),
+                        "archive": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users/{{user_id}}/archive"),
+                        ),
+                        "verify_active": AuthoringEntityOperation(
+                            sql="SELECT status FROM users WHERE id = :user_id",
+                            params={"user_id": "{{user_id}}"},
+                            expected_outcomes=["one row exists", "`status` = `ACTIVE`"],
+                        ),
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="activate-user-success",
+                    kind="workflow",
+                    title="Activate suspended user",
+                    objective="Activate a suspended user successfully.",
+                    state_change="none",
+                    setup=[
+                        AuthoringSetupStep(use_entity="user", operation="create"),
+                        AuthoringSetupStep(use_entity="user", operation="archive"),
+                    ],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users/{{user_id}}/activate"),
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        persisted_state=AuthoringPersistedStateRef(entity="user", operation="verify_active"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        warnings = [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_workflow_setup_state_mismatch"]
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].details["expected_state"], "suspended")
+        self.assertEqual(warnings[0].details["actual_state"], "archived")
+
+    def test_compile_warns_when_archived_user_case_setup_is_only_suspended(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            entities={
+                "user": AuthoringEntitySpec(
+                    operations={
+                        "create": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users"),
+                            captures=["response.json.id -> user_id"],
+                        ),
+                        "suspend": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users/{{user_id}}/suspend"),
+                        ),
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="update-archived-user-bad-request",
+                    kind="workflow",
+                    title="Reject archived user update",
+                    objective="Reject profile update for archived user.",
+                    state_change="none",
+                    setup=[
+                        AuthoringSetupStep(use_entity="user", operation="create"),
+                        AuthoringSetupStep(use_entity="user", operation="suspend"),
+                    ],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="PATCH", path="/users/{{user_id}}"),
+                        body={"displayName": "Updated"},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        warnings = [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_workflow_setup_state_mismatch"]
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].details["expected_state"], "archived")
+        self.assertEqual(warnings[0].details["actual_state"], "suspended")
+
 
 if __name__ == "__main__":
     unittest.main()

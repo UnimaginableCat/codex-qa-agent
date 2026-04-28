@@ -412,6 +412,30 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
 
+    def test_db_backticked_numeric_expected_value_is_compared_as_number(self) -> None:
+        payload = {
+            "query": {
+                "row_count": 1,
+                "rows": [
+                    {
+                        "invalid_user_count": 0,
+                    }
+                ],
+            }
+        }
+
+        results = self.validator.validate(
+            self._db_step(
+                [
+                    "one row exists",
+                    "`invalid_user_count` = `0`",
+                ]
+            ),
+            payload,
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
     def test_db_expectation_with_inner_backticks_is_parsed_as_comparison_not_unsupported(self) -> None:
         payload = {
             "query": {
