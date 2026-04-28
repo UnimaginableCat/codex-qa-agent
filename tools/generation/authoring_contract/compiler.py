@@ -10,11 +10,14 @@ from tools.generation.authoring import validate_agent_plan_input
 from tools.generation.domain.models import (
     AgentPlannedTestCaseInput,
     AgentTestPlanInput,
+    DiagnosticSeverity,
     GenerationDiagnostic,
     PlannedDbVerification,
     PlannedRouteIntent,
     PlannedWorkflowStep,
 )
+from tools.scenario_runner.domain.models import ScenarioVariableDefinition, ScenarioVariableSource
+from tools.scenario_runner.parsing.variables.validation import build_variable_definition
 
 from .diagnostics import authoring_diagnostic, build_authoring_message, derive_authoring_status
 from .loaders import AuthoringPlanLoader
@@ -28,7 +31,12 @@ from .models import (
 )
 
 _PLACEHOLDER_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
+_EXACT_PLACEHOLDER_PATTERN = re.compile(r"^\s*{{\s*([A-Za-z_][A-Za-z0-9_]*)\s*}}\s*$")
 _VARIABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_EXPECTATION_COMPARISON_RE = re.compile(
+    r"^\s*(?:response\s+)?(?P<left>.+?)\s*(?P<operator>=|!=)\s*(?P<right>.+?)\s*$",
+    re.IGNORECASE,
+)
 _STRING_LENGTH_OVERFLOW_PATTERN = re.compile(
     r"\b(?:longer than|more than|over|above)\s+(\d+)\s+characters?\b",
     re.IGNORECASE,
@@ -368,6 +376,15 @@ class AuthoringPlanCompiler:
             case_ref,
         )
         diagnostics.extend(persistence_diagnostics)
+        diagnostics.extend(
+            _normalized_email_expectation_diagnostics(
+                authoring_plan=authoring_plan,
+                case=case,
+                case_ref=case_ref,
+                setup_steps=setup_steps,
+                persisted_verification=persisted_verification,
+            )
+        )
 
         if case.execute is not None and case.execute.route is not None:
             unresolved_placeholders = sorted(
@@ -1142,3 +1159,195 @@ def _normalize_case_field_name(value: str) -> str:
 
 def _numeric_path_has_placeholder(path: str) -> bool:
     return bool(_extract_placeholders(path))
+
+
+def _normalized_email_expectation_diagnostics(
+    *,
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    setup_steps: list[PlannedWorkflowStep],
+    persisted_verification: PlannedDbVerification | None,
+) -> list[GenerationDiagnostic]:
+    request_email_variables = set()
+    if case.execute is not None:
+        request_email_variables.update(_collect_email_placeholders(case.execute.body))
+    for step in setup_steps:
+        if step.step_type.strip().lower() != "api":
+            continue
+        request_email_variables.update(_collect_email_placeholders(step.request_body))
+    if not request_email_variables:
+        return []
+
+    variable_definitions = _scenario_variable_definitions(authoring_plan, case)
+    risky_bindings: list[dict[str, Any]] = []
+    for expectation in [] if case.oracle is None else case.oracle.business_checks:
+        binding = _email_expectation_binding(expectation)
+        if binding is None:
+            continue
+        variable_name, field_path = binding
+        if variable_name not in request_email_variables:
+            continue
+        if _variable_guarantees_lowercase(variable_name, variable_definitions):
+            continue
+        risky_bindings.append(
+            {
+                "scope": "api",
+                "field": field_path,
+                "variable": variable_name,
+                "rule": expectation,
+            }
+        )
+    if persisted_verification is not None:
+        for expectation in persisted_verification.expected_outcomes:
+            binding = _email_expectation_binding(expectation)
+            if binding is None:
+                continue
+            variable_name, field_path = binding
+            if variable_name not in request_email_variables:
+                continue
+            if _variable_guarantees_lowercase(variable_name, variable_definitions):
+                continue
+            risky_bindings.append(
+                {
+                    "scope": "db",
+                    "field": field_path,
+                    "variable": variable_name,
+                    "rule": expectation,
+                }
+            )
+    if not risky_bindings:
+        return []
+
+    variables = sorted({str(item["variable"]) for item in risky_bindings})
+    return [
+        authoring_diagnostic(
+            "authoring_expected_value_case_ambiguous",
+            (
+                "Expected email checks reuse the same placeholder as request input, but that variable is not "
+                "guaranteed lowercase. If the system normalizes email casing, author separate submitted and expected "
+                "variables, for example `submitted_email` plus `expected_email = derived:submitted_email|lower`."
+            ),
+            severity=DiagnosticSeverity.WARNING,
+            source_ref=case_ref,
+            details={
+                "variables": variables,
+                "bindings": risky_bindings,
+            },
+        )
+    ]
+
+
+def _scenario_variable_definitions(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+) -> dict[str, ScenarioVariableDefinition]:
+    definitions: dict[str, ScenarioVariableDefinition] = {}
+    for entry in [*authoring_plan.defaults.scenario_variables, *case.scenario_variables]:
+        if "=" not in entry:
+            continue
+        variable_name, raw_value = entry.split("=", 1)
+        variable_name = variable_name.strip()
+        if not variable_name or not _VARIABLE_NAME_PATTERN.fullmatch(variable_name):
+            continue
+        try:
+            definitions[variable_name] = build_variable_definition(variable_name, raw_value.strip())
+        except Exception:
+            continue
+    return definitions
+
+
+def _collect_email_placeholders(value: Any, *, path: str = "") -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        return set(_extract_placeholders(value)) if _path_targets_email(path) else set()
+    if isinstance(value, dict):
+        names: set[str] = set()
+        for key, nested_value in value.items():
+            nested_path = f"{path}.{key}" if path else str(key)
+            names.update(_collect_email_placeholders(nested_value, path=nested_path))
+        return names
+    if isinstance(value, (list, tuple, set)):
+        names: set[str] = set()
+        for index, nested_value in enumerate(value):
+            nested_path = f"{path}[{index}]" if path else f"[{index}]"
+            names.update(_collect_email_placeholders(nested_value, path=nested_path))
+        return names
+    return set()
+
+
+def _path_targets_email(path: str) -> bool:
+    if not path.strip():
+        return False
+    last_part = _numeric_path_parts(path)[-1] if _numeric_path_parts(path) else path
+    normalized = _normalize_case_field_name(last_part)
+    return "email" in normalized
+
+
+def _email_expectation_binding(expectation: str) -> tuple[str, str] | None:
+    match = _EXPECTATION_COMPARISON_RE.fullmatch(expectation.strip())
+    if match is None:
+        return None
+    field_path = _strip_wrapping_quotes(match.group("left").strip()).strip()
+    if not _path_targets_email(field_path):
+        return None
+    placeholder_name = _exact_placeholder_name(match.group("right"))
+    if placeholder_name is None:
+        return None
+    return placeholder_name, field_path
+
+
+def _exact_placeholder_name(value: str) -> str | None:
+    normalized = _strip_wrapping_quotes(value.strip()).strip()
+    match = _EXACT_PLACEHOLDER_PATTERN.fullmatch(normalized)
+    return match.group(1) if match is not None else None
+
+
+def _strip_wrapping_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'", "`"}:
+        return value[1:-1]
+    return value
+
+
+def _variable_guarantees_lowercase(
+    variable_name: str,
+    definitions: dict[str, ScenarioVariableDefinition],
+    *,
+    _stack: set[str] | None = None,
+) -> bool:
+    definition = definitions.get(variable_name)
+    if definition is None:
+        return False
+    stack = set() if _stack is None else set(_stack)
+    if variable_name in stack:
+        return False
+    stack.add(variable_name)
+    if definition.source == ScenarioVariableSource.LITERAL:
+        return definition.raw_value == definition.raw_value.lower()
+    if definition.source == ScenarioVariableSource.TEMPLATE:
+        literal_text = _PLACEHOLDER_PATTERN.sub("", definition.raw_value)
+        if literal_text != literal_text.lower():
+            return False
+        dependencies = _extract_placeholders(definition.raw_value)
+        return all(_variable_guarantees_lowercase(dependency, definitions, _stack=stack) for dependency in dependencies)
+    if definition.source == ScenarioVariableSource.DERIVED:
+        guaranteed = (
+            _variable_guarantees_lowercase(definition.source_name, definitions, _stack=stack)
+            if definition.source_name
+            else False
+        )
+        for transform in definition.transforms:
+            normalized = transform.strip().lower()
+            if normalized == "lower":
+                guaranteed = True
+            elif normalized == "upper":
+                guaranteed = False
+            elif normalized == "trim":
+                continue
+            else:
+                return False
+        return guaranteed
+    if definition.source == ScenarioVariableSource.GENERATED:
+        return definition.raw_value.strip().lower().endswith(":uuid")
+    return False

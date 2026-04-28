@@ -95,6 +95,7 @@ start inside the authoring branch rather than being classified first.
 - Use `defaults.headers` for shared request headers that should be applied across authored API and workflow requests.
 - Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
 - Keep variable definitions in first-class `scenario_variables` fields. Do not hide them under `metadata`.
+- For normalized fields such as `email`, separate submitted input variables from expected output variables. Prefer patterns like `submitted_email` plus `expected_email = derived:submitted_email|lower` instead of reusing one placeholder in both request and expectation.
 - Prefer `defaults.headers` plus env-backed variables for custom tokens such as `X-Leadflow-Internal-Token`; do not encode custom header semantics as fake auth types.
 - For controller or endpoint full-coverage plans, prefer API and workflow cases plus persisted-state DB verification inside those cases.
 - Do not add standalone schema-readiness `db-check` cases by default when the expected downstream path includes render, review, and promote.

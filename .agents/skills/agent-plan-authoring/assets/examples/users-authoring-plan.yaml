@@ -20,7 +20,9 @@ defaults:
     X-Internal-Token: "{{internal_api_token}}"
   scenario_variables:
     - run_suffix = generated:run_suffix
-    - generated_email = template:autotest.{{run_suffix}}@example.com
+    - email_suffix = derived:run_suffix|lower
+    - submitted_email = template:AUTOTEST.{{email_suffix}}@Example.COM
+    - expected_email = derived:submitted_email|lower
     - internal_api_token = env:INTERNAL_API_TOKEN
 
 entities:
@@ -31,7 +33,7 @@ entities:
           method: POST
           path: /users
         request_body:
-          email: "{{generated_email}}"
+          email: "{{submitted_email}}"
           name: Admin Provisioned User
         oracle:
           status_code: 201
@@ -51,20 +53,19 @@ cases:
     kind: api
     objective: Admin creates user successfully
     state_change: create
-    scenario_variables:
-      - expected_email = derived:generated_email|lower
     execute:
       route:
         method: POST
         path: /users
       body:
-        email: "{{generated_email}}"
+        email: "{{submitted_email}}"
         name: Admin Provisioned User
     oracle:
       status_code: 201
       business_checks:
         - response JSON exists
         - response contains field `id`
+        - response `email` = `{{expected_email}}`
       captures:
         - response.json.id -> user_id
       persisted_state:

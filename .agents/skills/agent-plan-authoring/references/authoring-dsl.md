@@ -83,6 +83,16 @@ Supported API checks include:
 - `response \`createdAt\` is not null`
 - `response \`items\` length >= 1`
 
+Normalized-field guidance:
+
+- when the request intentionally sends mixed-case or padded input that the product may normalize, do not reuse the same placeholder in output expectations
+- for fields like `email`, author separate variables for submitted input and expected stored/returned value
+- example:
+  - `submitted_email = template:AUTOTEST.User.{{email_suffix}}@Example.COM`
+  - `expected_email = derived:submitted_email|lower`
+  - request body: `email: "{{submitted_email}}"`
+  - expectation: `response \`email\` = \`{{expected_email}}\``
+
 Supported DB checks include:
 
 - `one row exists`

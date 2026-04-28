@@ -49,7 +49,10 @@ class AuthoringPlanTemplateService:
                 auth="bearer",
                 actor="api-client",
                 headers={"X-Internal-Token": "{{internal_api_token}}"},
-                scenario_variables=["run_suffix = generated:run_suffix"],
+                scenario_variables=[
+                    "run_suffix = generated:run_suffix",
+                    "email_suffix = derived:run_suffix|lower",
+                ],
             ),
             entities={
                 "primary_entity": AuthoringEntitySpec(
@@ -69,14 +72,21 @@ class AuthoringPlanTemplateService:
                     title="Create primary entity",
                     objective="Replace with case objective.",
                     state_change="create",
-                    scenario_variables=["primary_email = template:autotest.{{run_suffix}}@example.com"],
+                    scenario_variables=[
+                        "submitted_email = template:AUTOTEST.{{email_suffix}}@Example.COM",
+                        "expected_email = derived:submitted_email|lower",
+                    ],
                     execute=AuthoringExecute(
                         route=AuthoringRoute(method="POST", path="/replace/path"),
-                        body={"field": "value", "email": "{{primary_email}}"},
+                        body={"field": "value", "email": "{{submitted_email}}"},
                     ),
                     oracle=AuthoringOracle(
                         status_code=201,
-                        business_checks=["response JSON exists", "response contains field `id`"],
+                        business_checks=[
+                            "response JSON exists",
+                            "response contains field `id`",
+                            "response `email` = `{{expected_email}}`",
+                        ],
                         captures=["response.json.id -> entity_id"],
                         persisted_state=AuthoringPersistedStateRef(
                             entity="primary_entity",

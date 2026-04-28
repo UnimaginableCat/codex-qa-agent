@@ -919,6 +919,111 @@ cases:
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertFalse(any(diagnostic.code == "authoring_case_boundary_mismatch" for diagnostic in result.diagnostics))
 
+    def test_compile_warns_when_email_expectation_reuses_non_lowercase_request_placeholder(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "run_suffix = generated:run_suffix",
+                    "submitted_email = template:AUTOTEST.User.{{run_suffix}}@Example.COM",
+                ]
+            ),
+            entities={
+                "user": AuthoringEntitySpec(
+                    operations={
+                        "verify_exists": AuthoringEntityOperation(
+                            sql="SELECT email FROM users WHERE id = :user_id",
+                            params={"user_id": "{{user_id}}"},
+                            expected_outcomes=["one row exists", "`email` = `{{submitted_email}}`"],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="create-user-success",
+                    kind="api",
+                    objective="Create user successfully.",
+                    state_change="create",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users"),
+                        body={"email": "{{submitted_email}}"},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        business_checks=["response `email` = `{{submitted_email}}`"],
+                        captures=["response.json.id -> user_id"],
+                        persisted_state=AuthoringPersistedStateRef(entity="user", operation="verify_exists"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        warnings = [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_expected_value_case_ambiguous"]
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(str(warnings[0].severity).lower(), "warning")
+        self.assertEqual(warnings[0].details["variables"], ["submitted_email"])
+
+    def test_compile_skips_email_case_warning_when_expected_variable_is_lowercased(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "run_suffix = generated:run_suffix",
+                    "email_suffix = derived:run_suffix|lower",
+                    "submitted_email = template:AUTOTEST.User.{{email_suffix}}@Example.COM",
+                    "expected_email = derived:submitted_email|lower",
+                ]
+            ),
+            entities={
+                "user": AuthoringEntitySpec(
+                    operations={
+                        "verify_exists": AuthoringEntityOperation(
+                            sql="SELECT email FROM users WHERE id = :user_id",
+                            params={"user_id": "{{user_id}}"},
+                            expected_outcomes=["one row exists", "`email` = `{{expected_email}}`"],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="create-user-success",
+                    kind="api",
+                    objective="Create user successfully.",
+                    state_change="create",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users"),
+                        body={"email": "{{submitted_email}}"},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        business_checks=["response `email` = `{{expected_email}}`"],
+                        captures=["response.json.id -> user_id"],
+                        persisted_state=AuthoringPersistedStateRef(entity="user", operation="verify_exists"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(any(diagnostic.code == "authoring_expected_value_case_ambiguous" for diagnostic in result.diagnostics))
+
 
 if __name__ == "__main__":
     unittest.main()
