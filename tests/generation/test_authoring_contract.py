@@ -1130,6 +1130,58 @@ cases:
         self.assertEqual(warnings[0].details["expected_state"], "archived")
         self.assertEqual(warnings[0].details["actual_state"], "suspended")
 
+    def test_compile_warns_when_same_state_lifecycle_behavior_is_only_inferred(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            entities={
+                "user": AuthoringEntitySpec(
+                    operations={
+                        "create": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users"),
+                            captures=["response.json.id -> user_id"],
+                        ),
+                        "archive": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users/{{user_id}}/archive"),
+                        ),
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="archive-archived-user",
+                    kind="workflow",
+                    title="Reject archiving archived user",
+                    objective="Verify archive for archived user is handled correctly.",
+                    state_change="none",
+                    setup=[
+                        AuthoringSetupStep(use_entity="user", operation="create"),
+                        AuthoringSetupStep(use_entity="user", operation="archive"),
+                    ],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users/{{user_id}}/archive"),
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        warnings = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_same_state_lifecycle_contract_unconfirmed"
+        ]
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].details["actual_state"], "archived")
+        self.assertEqual(warnings[0].details["target_state"], "archived")
+
     def test_compile_file_blocks_when_authored_entity_is_missing_from_entity_inventory(self) -> None:
         with TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0001"
@@ -1365,6 +1417,191 @@ cases:
         self.assertEqual(len(diagnostics), 1)
         self.assertEqual(diagnostics[0].details["expected_state"], "suspended")
         self.assertEqual(diagnostics[0].details["actual_state"], "archived")
+
+    def test_compile_file_blocks_when_same_state_lifecycle_contract_is_missing_from_inventory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0004"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    states: [ACTIVE, SUSPENDED, ARCHIVED]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create
+    effect_state: ACTIVE
+  - entity: user
+    operation: archive
+    effect_state: ARCHIVED
+routes:
+  - method: POST
+    path: /users/{{user_id}}/archive
+    success_status: 200
+    failure_statuses: [400, 404]
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      create:
+        route:
+          method: POST
+          path: /users
+      archive:
+        route:
+          method: POST
+          path: /users/{{user_id}}/archive
+cases:
+  - id: archive-archived-user
+    kind: workflow
+    title: Reject archiving archived user
+    objective: Reject archiving archived user.
+    state_change: none
+    setup:
+      - use_entity: user
+        operation: create
+      - use_entity: user
+        operation: archive
+    execute:
+      route:
+        method: POST
+        path: /users/{{user_id}}/archive
+    oracle:
+      status_code: 400
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_stage_inventory_same_state_behavior_missing"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertIn("same_state_behavior", diagnostics[0].details["missing_fields"])
+        self.assertIn("same_state_status", diagnostics[0].details["missing_fields"])
+
+    def test_compile_file_blocks_when_same_state_lifecycle_status_conflicts_with_inventory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0005"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    states: [ACTIVE, SUSPENDED, ARCHIVED]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create
+    effect_state: ACTIVE
+  - entity: user
+    operation: archive
+    effect_state: ARCHIVED
+routes:
+  - method: POST
+    path: /users/{{user_id}}/archive
+    success_status: 200
+    failure_statuses: [400, 404]
+    target_state: ARCHIVED
+    same_state_behavior: idempotent_success
+    same_state_status: 200
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      create:
+        route:
+          method: POST
+          path: /users
+      archive:
+        route:
+          method: POST
+          path: /users/{{user_id}}/archive
+cases:
+  - id: archive-archived-user
+    kind: workflow
+    title: Reject archiving archived user
+    objective: Reject archiving archived user.
+    state_change: none
+    setup:
+      - use_entity: user
+        operation: create
+      - use_entity: user
+        operation: archive
+    execute:
+      route:
+        method: POST
+        path: /users/{{user_id}}/archive
+    oracle:
+      status_code: 400
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_stage_inventory_same_state_mismatch"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].details["inventory_same_state_status"], 200)
+        self.assertEqual(diagnostics[0].details["authored_status"], 400)
 
 
 if __name__ == "__main__":

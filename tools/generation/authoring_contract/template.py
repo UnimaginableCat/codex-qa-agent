@@ -118,6 +118,7 @@ class AuthoringPlanTemplateService:
             "notes": [
                 "Record the expected success HTTP code per route here instead of inferring it later from memory.",
                 "For lifecycle routes, record both precondition_state and effect_state before writing workflow cases.",
+                "For same-state lifecycle coverage, add target_state plus same_state_behavior and same_state_status before authoring cases such as archive archived or activate active.",
             ],
             "metadata": {
                 "template_version": AUTHORING_OPERATION_INVENTORY_TEMPLATE_VERSION,

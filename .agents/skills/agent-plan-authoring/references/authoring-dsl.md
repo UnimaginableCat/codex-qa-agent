@@ -82,9 +82,12 @@ Recommended staged workflow:
    - setup operations
    - effect states
    - route to success/failure HTTP status expectations
+   - lifecycle route target state
+   - same-state lifecycle behavior and status when reissuing the same command matters
    - DB verification templates
 3. write `authoring-plan.yaml`
    - cases should reference the first two inventories instead of inventing lifecycle and status assumptions ad hoc
+   - same-state lifecycle cases such as `archive archived`, `activate active`, and `suspend suspended` should not be authored until the route inventory explicitly says whether they reject or return an idempotent success
 
 Recommended CLI stages:
 

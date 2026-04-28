@@ -63,6 +63,7 @@ _MUTATING_STATE_CHANGES = {"create", "update", "delete", "mutate"}
 _READ_ONLY_STATE_CHANGES = {"none", "read_only", "readonly"}
 _SUPPORTED_STATE_CHANGES = _MUTATING_STATE_CHANGES | _READ_ONLY_STATE_CHANGES
 _SUPPORTED_CASE_KINDS = {"api", "workflow", "db-check"}
+_SUPPORTED_SAME_STATE_BEHAVIORS = {"reject", "idempotent_success"}
 
 
 class AuthoringPlanCompiler:
@@ -404,6 +405,7 @@ class AuthoringPlanCompiler:
             )
         )
         diagnostics.extend(_workflow_setup_state_mismatch_diagnostics(case=case, case_ref=case_ref))
+        diagnostics.extend(_workflow_same_state_contract_warning(case=case, case_ref=case_ref))
 
         if case.execute is not None and case.execute.route is not None:
             unresolved_placeholders = sorted(
@@ -1494,8 +1496,17 @@ def _cross_check_authoring_plan_against_stage_inventories(
                 )
         if case.kind.strip().lower() != "workflow" or not case.setup:
             continue
-        expected_state = _normalized_inventory_state(route_spec.get("precondition_state")) or _expected_precondition_state(case)
         actual_state = _infer_setup_state_from_inventory(case.setup, entity_operation_specs)
+        diagnostics.extend(
+            _same_state_inventory_contract_diagnostics(
+                case=case,
+                case_ref=case_ref,
+                route_spec=route_spec,
+                route_key=route_key,
+                actual_state=actual_state,
+            )
+        )
+        expected_state = _normalized_inventory_state(route_spec.get("precondition_state")) or _expected_precondition_state(case)
         if expected_state is None or actual_state is None or expected_state == actual_state:
             continue
         diagnostics.append(
@@ -1612,6 +1623,37 @@ def _workflow_setup_state_mismatch_diagnostics(
                 "actual_state": actual_state,
                 "setup_operations": [step.operation for step in case.setup],
                 "route_path": case.execute.route.path,
+            },
+        )
+    ]
+
+
+def _workflow_same_state_contract_warning(
+    *,
+    case: AuthoringCase,
+    case_ref: str,
+) -> list[GenerationDiagnostic]:
+    if case.kind.strip().lower() != "workflow" or not case.setup or case.execute is None or case.execute.route is None:
+        return []
+    actual_state = _infer_setup_state(case.setup)
+    target_state = _inferred_route_target_state(case.execute.route.path)
+    if actual_state is None or target_state is None or actual_state != target_state:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_same_state_lifecycle_contract_unconfirmed",
+            (
+                "Workflow case appears to invoke a lifecycle command when the entity is already in the target state. "
+                "Do not assume rejection or idempotent success from route names alone; confirm same-state behavior in "
+                "code/tests and record it explicitly in operation-inventory.yaml."
+            ),
+            severity=DiagnosticSeverity.WARNING,
+            source_ref=case_ref,
+            details={
+                "actual_state": actual_state,
+                "target_state": target_state,
+                "route_path": case.execute.route.path,
+                "setup_operations": [step.operation for step in case.setup],
             },
         )
     ]
@@ -1847,4 +1889,90 @@ def _expected_precondition_state(case: AuthoringCase) -> str | None:
         return "suspended"
     if "active user" in case_text or "already active" in case_text:
         return "active"
+    return None
+
+
+def _inferred_route_target_state(route_path: str) -> str | None:
+    normalized_path = route_path.strip().lower()
+    if normalized_path.endswith("/activate"):
+        return "active"
+    if normalized_path.endswith("/suspend"):
+        return "suspended"
+    if normalized_path.endswith("/archive"):
+        return "archived"
+    return None
+
+
+def _same_state_inventory_contract_diagnostics(
+    *,
+    case: AuthoringCase,
+    case_ref: str,
+    route_spec: dict[str, Any],
+    route_key: tuple[str, str],
+    actual_state: str | None,
+) -> list[GenerationDiagnostic]:
+    if actual_state is None or case.oracle is None or not isinstance(case.oracle.status_code, int):
+        return []
+
+    explicit_target_state = _normalized_inventory_state(route_spec.get("target_state"))
+    inferred_target_state = _inferred_route_target_state(route_key[1])
+    target_state = explicit_target_state or inferred_target_state
+    if target_state is None or actual_state != target_state:
+        return []
+
+    details = {
+        "route_path": route_key[1],
+        "actual_state": actual_state,
+        "target_state": target_state,
+        "setup_operations": [step.operation for step in case.setup],
+    }
+    missing_fields: list[str] = []
+    if explicit_target_state is None:
+        missing_fields.append("target_state")
+
+    same_state_behavior = _normalized_inventory_same_state_behavior(route_spec.get("same_state_behavior"))
+    same_state_status = _maybe_int(route_spec.get("same_state_status"))
+    if same_state_behavior is None:
+        missing_fields.append("same_state_behavior")
+    if same_state_status is None:
+        missing_fields.append("same_state_status")
+    if missing_fields:
+        return [
+            authoring_diagnostic(
+                "authoring_stage_inventory_same_state_behavior_missing",
+                (
+                    "Same-state lifecycle case is authored, but operation-inventory.yaml does not fully document the "
+                    "route contract for reissuing the command on an entity already in the target state."
+                ),
+                source_ref=case_ref,
+                details={**details, "missing_fields": missing_fields},
+            )
+        ]
+
+    if case.oracle.status_code != same_state_status:
+        return [
+            authoring_diagnostic(
+                "authoring_stage_inventory_same_state_mismatch",
+                (
+                    "Authoring case HTTP status for a same-state lifecycle command does not match the explicit "
+                    "same-state contract recorded in operation-inventory.yaml."
+                ),
+                source_ref=case_ref,
+                details={
+                    **details,
+                    "same_state_behavior": same_state_behavior,
+                    "authored_status": case.oracle.status_code,
+                    "inventory_same_state_status": same_state_status,
+                },
+            )
+        ]
+    return []
+
+
+def _normalized_inventory_same_state_behavior(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in _SUPPORTED_SAME_STATE_BEHAVIORS:
+        return normalized
     return None

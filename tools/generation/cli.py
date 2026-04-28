@@ -1297,6 +1297,7 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
     payload, diagnostics = _load_yaml_inventory_file(path, inventory_kind="operation_inventory")
     if payload is None:
         return None, diagnostics
+    allowed_same_state_behaviors = {"reject", "idempotent_success"}
     required_fields = ("version", "source_id", "project", "surface", "entity_operations", "routes")
     missing_fields = [field_name for field_name in required_fields if field_name not in payload]
     if missing_fields:
@@ -1407,6 +1408,100 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
                     severity=DiagnosticSeverity.ERROR,
                     source_ref=str(path),
                     details={"route_index": index},
+                )
+            )
+        target_state = item.get("target_state")
+        if target_state is not None and not isinstance(target_state, str):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_target_state_invalid",
+                    message="Route target_state must be a string when present.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index},
+                )
+            )
+        same_state_behavior = item.get("same_state_behavior")
+        normalized_same_state_behavior = (
+            str(same_state_behavior).strip().lower()
+            if isinstance(same_state_behavior, str)
+            else ""
+        )
+        if same_state_behavior is not None and normalized_same_state_behavior not in allowed_same_state_behaviors:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_same_state_behavior_invalid",
+                    message="Route same_state_behavior must be `reject` or `idempotent_success` when present.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index, "same_state_behavior": same_state_behavior},
+                )
+            )
+        same_state_status = item.get("same_state_status")
+        if same_state_status is not None and not isinstance(same_state_status, int):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_same_state_status_invalid",
+                    message="Route same_state_status must be an integer when present.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index},
+                )
+            )
+        if same_state_behavior is not None and same_state_status is None:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_same_state_contract_incomplete",
+                    message="Route same_state_behavior requires same_state_status.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index, "same_state_behavior": same_state_behavior},
+                )
+            )
+        if same_state_behavior is not None and not str(target_state or "").strip():
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_same_state_contract_incomplete",
+                    message="Route same_state_behavior requires target_state so same-state lifecycle cases have an explicit source of truth.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index, "same_state_behavior": same_state_behavior},
+                )
+            )
+        if isinstance(same_state_status, int) and normalized_same_state_behavior == "idempotent_success" and not (200 <= same_state_status < 300):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_same_state_contract_inconsistent",
+                    message="same_state_behavior=idempotent_success requires a 2xx same_state_status.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index, "same_state_status": same_state_status},
+                )
+            )
+        if isinstance(same_state_status, int) and normalized_same_state_behavior == "reject" and 200 <= same_state_status < 300:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_same_state_contract_inconsistent",
+                    message="same_state_behavior=reject must not use a 2xx same_state_status.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index, "same_state_status": same_state_status},
+                )
+            )
+        if (
+            isinstance(same_state_status, int)
+            and normalized_same_state_behavior == "reject"
+            and isinstance(failure_statuses, list)
+            and failure_statuses
+            and same_state_status not in failure_statuses
+        ):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_same_state_contract_inconsistent",
+                    message="Rejecting same-state behavior must list same_state_status in failure_statuses.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index, "same_state_status": same_state_status},
                 )
             )
     for index, item in enumerate(payload.get("db_verifications", []), start=1):

@@ -1060,6 +1060,58 @@ cases:
         self.assertEqual(exit_code, 1)
         self.assertTrue(any(diagnostic["code"] == "adapter_render_drafts_requires_persistence" for diagnostic in payload["diagnostics"]))
 
+    def test_validate_operation_inventory_blocks_incomplete_same_state_contract(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entity_inventory_path = root / "entity-inventory.yaml"
+            entity_inventory_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: archive
+    effect_state: ARCHIVED
+routes:
+  - method: POST
+    path: /users/{{user_id}}/archive
+    success_status: 200
+    failure_statuses: [400, 404]
+    same_state_behavior: idempotent_success
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--validate-operation-inventory",
+                        "--operation-inventory-file",
+                        str(operation_inventory_path),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_same_state_contract_incomplete", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

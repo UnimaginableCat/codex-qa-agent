@@ -120,6 +120,8 @@ Use the scaffolded bundle in this order:
    - setup operations and their effect state
    - controller routes
    - expected success/failure HTTP codes
+   - lifecycle route `target_state`
+   - lifecycle route `same_state_behavior` and `same_state_status` when the command can be invoked on an entity already in the target state
    - DB verification templates
 3. `authoring-plan.yaml`
    - only after the first two files are coherent
@@ -149,6 +151,13 @@ In managed bundles, validation is now inventory-backed rather than inventory-adj
 - setup and persisted-state operations must match `operation-inventory.yaml`
 - case routes and HTTP status codes must match `operation-inventory.yaml`
 - workflow setup state must satisfy the staged precondition for the route
+- same-state lifecycle cases such as `archive archived`, `activate active`, or `suspend suspended` must be backed by explicit staged route semantics instead of inferred rejection assumptions
+
+For lifecycle routes, do not author same-state negative or idempotency cases until `operation-inventory.yaml` records:
+
+- `target_state`
+- `same_state_behavior`: `reject` or `idempotent_success`
+- `same_state_status`
 
 ## Strict DSL Gate
 
