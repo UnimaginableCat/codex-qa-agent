@@ -407,17 +407,21 @@ def run_sync_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
     )
     _write_synced_authoring_plan(bundle_dir, synced_plan)
     validation_result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+    followup_message = (
+        "Authoring-plan synced from staged inventories, but follow-up validation is still blocked. "
+        "Author or fix cases next, then run --validate-authoring-plan."
+        if validation_result.status != StepStatus.PASS
+        else "Authoring-plan synced from staged inventories and follow-up validation passed."
+    )
     return to_json_safe(
         {
             "status": StepStatus.PASS.value,
-            "message": (
-                "Authoring-plan synced from staged inventories. Author or review cases next, then run "
-                "--validate-authoring-plan."
-            ),
+            "message": followup_message,
             "bundle_dir": str(bundle_dir),
             "output_path": str(authoring_plan_path),
             "case_count": len(synced_plan.cases),
             "validation_status_after_sync": validation_result.status.value,
+            "next_status": validation_result.status.value,
             "validation_diagnostics_after_sync": [
                 diagnostic.to_dict() for diagnostic in validation_result.diagnostics
             ],

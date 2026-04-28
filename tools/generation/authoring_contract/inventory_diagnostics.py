@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from tools.generation.domain.models import GenerationDiagnostic
@@ -20,6 +21,8 @@ from .case_diagnostics import (
 )
 from .diagnostics import authoring_diagnostic
 from .models import AuthoringPlan, AuthoringSetupStep, _maybe_int
+
+_ROUTE_PLACEHOLDER_PATTERN = re.compile(r"{{\s*[^{}]+?\s*}}")
 
 
 def _required_stage_inventory_diagnostics(file_path: Path) -> list[GenerationDiagnostic]:
@@ -285,10 +288,8 @@ def _cross_check_authoring_plan_against_stage_inventories(
                 )
         if case.execute is None or case.execute.route is None:
             continue
-        route_key = (
-            case.execute.route.method.strip().upper(),
-            case.execute.route.path.strip(),
-        )
+        authored_route_path = case.execute.route.path.strip()
+        route_key = _route_inventory_key(case.execute.route.method, authored_route_path)
         route_spec = route_specs.get(route_key)
         if route_spec is None:
             diagnostics.append(
@@ -296,15 +297,17 @@ def _cross_check_authoring_plan_against_stage_inventories(
                     "authoring_stage_inventory_route_mismatch",
                     "Authoring case route is not declared in operation-inventory.yaml.",
                     source_ref=case_ref,
-                    details={"method": route_key[0], "path": route_key[1]},
+                    details={"method": route_key[0], "path": authored_route_path, "route_shape": route_key[1]},
                 )
             )
             continue
         expected_status = None if case.oracle is None else case.oracle.status_code
+        failure_statuses: set[int] = set()
         if isinstance(expected_status, int):
             success_status = _maybe_int(route_spec.get("success_status"))
-            failure_statuses = {_maybe_int(item) for item in route_spec.get("failure_statuses", [])}
-            failure_statuses.discard(None)
+            raw_failure_statuses = {_maybe_int(item) for item in route_spec.get("failure_statuses", [])}
+            raw_failure_statuses.discard(None)
+            failure_statuses = {item for item in raw_failure_statuses if item is not None}
             if 200 <= expected_status < 300:
                 if success_status is not None and expected_status != success_status:
                     diagnostics.append(
@@ -314,7 +317,8 @@ def _cross_check_authoring_plan_against_stage_inventories(
                             source_ref=case_ref,
                             details={
                                 "method": route_key[0],
-                                "path": route_key[1],
+                                "path": authored_route_path,
+                                "route_shape": route_key[1],
                                 "authored_status": expected_status,
                                 "inventory_success_status": success_status,
                             },
@@ -328,7 +332,8 @@ def _cross_check_authoring_plan_against_stage_inventories(
                         source_ref=case_ref,
                         details={
                             "method": route_key[0],
-                            "path": route_key[1],
+                            "path": authored_route_path,
+                            "route_shape": route_key[1],
                             "authored_status": expected_status,
                             "inventory_failure_statuses": sorted(failure_statuses),
                         },
@@ -348,6 +353,8 @@ def _cross_check_authoring_plan_against_stage_inventories(
         )
         if _is_same_state_inventory_case(route_spec=route_spec, route_key=route_key, actual_state=actual_state):
             continue
+        if _is_declared_failure_status(expected_status, failure_statuses):
+            continue
         expected_state = _normalized_inventory_state(route_spec.get("precondition_state")) or _expected_precondition_state(case)
         if expected_state is None or actual_state is None or expected_state == actual_state:
             continue
@@ -359,7 +366,8 @@ def _cross_check_authoring_plan_against_stage_inventories(
                 details={
                     "expected_state": expected_state,
                     "actual_state": actual_state,
-                    "route_path": route_key[1],
+                    "route_path": authored_route_path,
+                    "route_shape": route_key[1],
                     "setup_operations": [step.operation for step in case.setup],
                 },
             )
@@ -401,7 +409,7 @@ def _route_inventory_specs(operation_inventory: dict[str, Any]) -> dict[tuple[st
         path = str(item.get("path") or "").strip()
         if not method or not path:
             continue
-        specs[(method, path)] = item
+        specs[_route_inventory_key(method, path)] = item
     return specs
 
 
@@ -429,3 +437,15 @@ def _infer_setup_state_from_inventory(
             continue
         state = _normalized_inventory_state(operation_spec.get("effect_state")) or state
     return state
+
+
+def _route_inventory_key(method: Any, path: Any) -> tuple[str, str]:
+    return (str(method or "").strip().upper(), _route_path_shape(str(path or "").strip()))
+
+
+def _route_path_shape(path: str) -> str:
+    return _ROUTE_PLACEHOLDER_PATTERN.sub("{{*}}", path.strip())
+
+
+def _is_declared_failure_status(expected_status: Any, failure_statuses: set[int]) -> bool:
+    return isinstance(expected_status, int) and not (200 <= expected_status < 300) and expected_status in failure_statuses

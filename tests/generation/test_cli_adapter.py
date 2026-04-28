@@ -448,6 +448,8 @@ db_verifications:
         self.assertEqual(sync_exit_code, 0)
         self.assertEqual(sync_payload["status"], "PASS")
         self.assertEqual(sync_payload["validation_status_after_sync"], "BLOCKED")
+        self.assertEqual(sync_payload["next_status"], "BLOCKED")
+        self.assertIn("follow-up validation is still blocked", sync_payload["message"])
         synced_user = sync_payload["authoring_plan"]["entities"]["user"]
         self.assertEqual(synced_user["id_field"], "user_id")
         create_operation = synced_user["operations"]["create_active"]
@@ -588,6 +590,7 @@ cases:
         self.assertEqual(exit_code, 0)
         self.assertIn("Authoring-plan synced from staged inventories", output_text)
         self.assertIn("Validation after sync:", output_text)
+        self.assertIn("Next status:", output_text)
 
     def test_validate_authoring_bundle_returns_blocked_for_stage_mismatch(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -110,6 +110,7 @@ def _render_authoring_text(payload: dict[str, Any]) -> str:
             [
                 f"Case count: {payload.get('case_count', 0)}",
                 f"Validation after sync: {payload.get('validation_status_after_sync')}",
+                f"Next status: {payload.get('next_status', payload.get('validation_status_after_sync'))}",
             ]
         )
     stage_policy = payload.get("stage_policy") or {}

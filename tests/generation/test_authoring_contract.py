@@ -1512,6 +1512,74 @@ cases:
         self.assertEqual(diagnostics[0].details["inventory_success_status"], 201)
         self.assertEqual(diagnostics[0].details["authored_status"], 200)
 
+    def test_compile_file_matches_route_inventory_by_placeholder_shape(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0008"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entity_operations: []
+routes:
+  - method: GET
+    path: /users/{{user_id}}
+    success_status: 200
+    failure_statuses: [404]
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations: {}
+cases:
+  - id: get-missing-user
+    kind: api
+    objective: Return not found for a missing user.
+    state_change: none
+    scenario_variables:
+      - "missing_user_id = literal:00000000-0000-0000-0000-000000000000"
+    execute:
+      route:
+        method: GET
+        path: /users/{{missing_user_id}}
+    oracle:
+      status_code: 404
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertNotIn(
+            "authoring_stage_inventory_route_mismatch",
+            {diagnostic.code for diagnostic in result.diagnostics},
+        )
+
     def test_compile_file_blocks_when_workflow_setup_state_disagrees_with_inventory_precondition(self) -> None:
         with TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0003"
@@ -1537,6 +1605,8 @@ entity_operations:
   - entity: user
     operation: create
     effect_state: ACTIVE
+    captures:
+      - response.json.id -> user_id
   - entity: user
     operation: archive
     effect_state: ARCHIVED
@@ -1570,6 +1640,8 @@ entities:
         route:
           method: POST
           path: /users
+        captures:
+          - response.json.id -> user_id
       archive:
         route:
           method: POST
@@ -1611,6 +1683,117 @@ cases:
         self.assertEqual(len(diagnostics), 1)
         self.assertEqual(diagnostics[0].details["expected_state"], "suspended")
         self.assertEqual(diagnostics[0].details["actual_state"], "archived")
+
+    def test_compile_file_allows_declared_failure_state_without_clearing_success_precondition(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0009"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    states: [ACTIVE, SUSPENDED, ARCHIVED]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create
+    effect_state: ACTIVE
+    captures:
+      - response.json.id -> user_id
+  - entity: user
+    operation: archive
+    effect_state: ARCHIVED
+routes:
+  - method: POST
+    path: /users/{{user_id}}/activate
+    success_status: 200
+    failure_statuses: [400, 404]
+    precondition_state: SUSPENDED
+db_verifications:
+  - entity: user
+    operation: verify_archived
+    scoped_by: user_id
+    sql: SELECT status FROM users WHERE id = :user_id
+    params:
+      user_id: "{{user_id}}"
+    expected_outcomes:
+      - one row exists
+      - "`status` = `ARCHIVED`"
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      create:
+        route:
+          method: POST
+          path: /users
+        captures:
+          - response.json.id -> user_id
+      archive:
+        route:
+          method: POST
+          path: /users/{{user_id}}/archive
+      verify_archived:
+        sql: SELECT status FROM users WHERE id = :user_id
+        params:
+          user_id: "{{user_id}}"
+        expected_outcomes:
+          - one row exists
+          - "`status` = `ARCHIVED`"
+cases:
+  - id: activate-archived-user-rejected
+    kind: workflow
+    title: Reject activating archived user
+    objective: Reject activation for an archived user.
+    state_change: none
+    setup:
+      - use_entity: user
+        operation: create
+      - use_entity: user
+        operation: archive
+    execute:
+      route:
+        method: POST
+        path: /users/{{user_id}}/activate
+    oracle:
+      status_code: 400
+      persisted_state:
+        entity: user
+        operation: verify_archived
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertNotIn(
+            "authoring_stage_inventory_state_mismatch",
+            {diagnostic.code for diagnostic in result.diagnostics},
+        )
 
     def test_compile_file_blocks_when_same_state_lifecycle_contract_is_missing_from_inventory(self) -> None:
         with TemporaryDirectory() as tmp:
