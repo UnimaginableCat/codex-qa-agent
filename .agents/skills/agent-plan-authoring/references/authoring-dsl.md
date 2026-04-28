@@ -60,6 +60,12 @@ Compiler behavior:
 - uses `defaults.auth` as fallback auth strategy when case/setup API auth is not authored explicitly
 - runs existing `validate_agent_plan_input(...)` after compilation
 
+Downstream note:
+
+- standalone `db-check` authoring cases compile correctly, but they are not the default choice for controller coverage when the next stages are `render -> review -> promote`
+- current draft rendering favors authored API routes and workflow steps; a pure schema-readiness `db-check` may remain deferred instead of becoming a promoted markdown scenario
+- for controller coverage, prefer API/workflow cases with persisted-state DB verification over a separate schema-readiness case unless the user explicitly asks for schema verification
+
 Expectation syntax is strict. Author only compile-safe checks.
 
 Supported API checks include:

@@ -96,6 +96,7 @@ for later phases.
 - Treat `expected_outcomes[]`, `capture`, `workflow_steps[]`, and `db_verification` as executable downstream contracts.
 - Treat first-class `scenario_variables[]` as the canonical variable channel from authoring through rendered scenarios.
 - Keep `metadata.scenario_variables` only as backward-compatibility input when repairing older bundles; do not author new plans that way.
+- Expect standalone pure `db-check` cases to compile, but they may remain deferred during draft rendering if they are not expressed as workflow DB steps or attached persisted-state verification.
 - Treat rendered `actor = literal:<value>` as an execution profile selector for actor-scoped API/DB env keys, not as decorative notes-only metadata.
 - If compile, render, or review reveals authoring defects, send the workflow back to `artifacts/agent/generation/<run_id>/authoring-plan.yaml` rather than compensating by inventing new coverage here.
 - Use direct `agent_plan` editing only as a low-level escape hatch for debugging or explicit manual control.

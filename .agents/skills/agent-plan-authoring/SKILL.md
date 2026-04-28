@@ -94,6 +94,9 @@ start inside the authoring branch rather than being classified first.
 - Use `defaults.actor` when a stable execution actor should flow into rendered scenario variables as `actor = literal:<value>` and select actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
 - Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
 - Keep variable definitions in first-class `scenario_variables` fields. Do not hide them under `metadata`.
+- For controller or endpoint full-coverage plans, prefer API and workflow cases plus persisted-state DB verification inside those cases.
+- Do not add standalone schema-readiness `db-check` cases by default when the expected downstream path includes render, review, and promote.
+- Use standalone `db-check` only when the user explicitly asks for schema or infrastructure verification, or when the workflow is expected to stop at authoring or compile instead of promoted runnable scenarios.
 - Do not rely on the compiler to invent SQL, routes, or capture targets.
 
 ## Strict DSL Gate
@@ -153,6 +156,7 @@ If validation fails on expectation syntax, rewrite the authoring DSL itself. Do 
 - Do not write full `agent-plan.json` as the primary artifact.
 - Do not perform render, review, promote, or scenario validation from this skill unless the user explicitly asks to continue into downstream work.
 - Do not compensate for missing templates, SQL, or capture targets by writing prose placeholders that the compiler must guess.
+- Do not treat a standalone schema `db-check` as part of the default controller-coverage recipe when promoted markdown scenarios are the expected downstream output.
 
 # References
 
