@@ -88,18 +88,147 @@ class GenerationCliAdapterTests(unittest.TestCase):
                 )
             payload = json.loads(stdout.getvalue())
             output_path = Path(payload["output_path"])
+            entity_inventory_path = Path(payload["entity_inventory_path"])
+            operation_inventory_path = Path(payload["operation_inventory_path"])
             output_text = output_path.read_text(encoding="utf-8")
+            entity_inventory_text = entity_inventory_path.read_text(encoding="utf-8")
+            operation_inventory_text = operation_inventory_path.read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(payload["input_mode"], "authoring_plan")
         self.assertEqual(output_path.name, "authoring-plan.yaml")
+        self.assertEqual(entity_inventory_path.name, "entity-inventory.yaml")
+        self.assertEqual(operation_inventory_path.name, "operation-inventory.yaml")
         self.assertEqual(output_path.parent, Path(payload["bundle_dir"]))
+        self.assertEqual(entity_inventory_path.parent, Path(payload["bundle_dir"]))
+        self.assertEqual(operation_inventory_path.parent, Path(payload["bundle_dir"]))
         self.assertTrue(output_path.parent.name.startswith("gen-"))
         self.assertIn("source_id: users-api", output_text)
         self.assertIn("project: code/demo", output_text)
         self.assertIn("scenario_variables:", output_text)
         self.assertIn("run_suffix = generated:run_suffix", output_text)
+        self.assertIn("authoring_workflow: staged-v1", output_text)
+        self.assertIn("stage: entity_inventory", entity_inventory_text)
+        self.assertIn("allowed_transitions:", entity_inventory_text)
+        self.assertIn("stage: operation_inventory", operation_inventory_text)
+        self.assertIn("success_status: 201", operation_inventory_text)
+
+    def test_init_entity_inventory_reuses_existing_bundle_dir(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_authoring_stdout = io.StringIO()
+            with redirect_stdout(init_authoring_stdout):
+                init_authoring_exit_code = cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            init_authoring_payload = json.loads(init_authoring_stdout.getvalue())
+            bundle_dir = Path(init_authoring_payload["bundle_dir"])
+
+            init_entity_stdout = io.StringIO()
+            with redirect_stdout(init_entity_stdout):
+                init_entity_exit_code = cli.main(
+                    [
+                        "--init-entity-inventory",
+                        "--output",
+                        str(bundle_dir),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--surface",
+                        "users-controller",
+                    ]
+                )
+            init_entity_payload = json.loads(init_entity_stdout.getvalue())
+
+        self.assertEqual(init_authoring_exit_code, 0)
+        self.assertEqual(init_entity_exit_code, 0)
+        self.assertEqual(Path(init_entity_payload["bundle_dir"]), bundle_dir)
+        self.assertEqual(Path(init_entity_payload["output_path"]), bundle_dir / "entity-inventory.yaml")
+
+    def test_validate_entity_inventory_returns_pass_for_valid_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entity_inventory_path = root / "entity-inventory.yaml"
+            entity_inventory_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    normalized_fields: [email]
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-entity-inventory", "--entity-inventory-file", str(entity_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+
+    def test_validate_operation_inventory_blocks_unknown_entity_reference(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0004"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = bundle_dir / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: account
+    operation: create
+    effect_state: ACTIVE
+routes:
+  - method: POST
+    path: /users
+    success_status: 201
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_unknown_entity", codes)
 
     def test_validate_agent_plan_returns_pass_for_valid_file(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -231,6 +360,49 @@ cases:
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(payload["input_mode"], "authoring_plan")
         self.assertEqual(payload["case_count"], 1)
+
+    def test_validate_authoring_plan_blocks_when_managed_bundle_is_missing_stage_inventory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                init_exit_code = cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            init_payload = json.loads(init_stdout.getvalue())
+            authoring_plan_path = Path(init_payload["output_path"])
+            (authoring_plan_path.parent / "entity-inventory.yaml").unlink()
+
+            validate_stdout = io.StringIO()
+            with redirect_stdout(validate_stdout):
+                validate_exit_code = cli.main(
+                    [
+                        "--validate-authoring-plan",
+                        "--authoring-plan-file",
+                        str(authoring_plan_path),
+                    ]
+                )
+            validate_payload = json.loads(validate_stdout.getvalue())
+
+        self.assertEqual(init_exit_code, 0)
+        self.assertNotEqual(validate_exit_code, 0)
+        self.assertEqual(validate_payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in validate_payload["diagnostics"]}
+        self.assertIn("authoring_stage_inventory_missing", codes)
 
     def test_compile_authoring_plan_writes_managed_agent_plan_bundle(self) -> None:
         with TemporaryDirectory() as tmp:

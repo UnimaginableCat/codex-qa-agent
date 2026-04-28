@@ -16,10 +16,114 @@ from .models import (
 )
 
 AUTHORING_PLAN_TEMPLATE_VERSION = "authoring-plan-template-v1"
+AUTHORING_ENTITY_INVENTORY_TEMPLATE_VERSION = "authoring-entity-inventory-template-v1"
+AUTHORING_OPERATION_INVENTORY_TEMPLATE_VERSION = "authoring-operation-inventory-template-v1"
 
 
 class AuthoringPlanTemplateService:
     """Create compact scaffolded authoring DSL files."""
+
+    def build_entity_inventory_template(
+        self,
+        *,
+        source_id: str = "",
+        project: str = "",
+        surface: str = "",
+    ) -> dict[str, object]:
+        resolved_source_id = source_id.strip() or "replace-with-source-id"
+        resolved_project = project.strip() or "code/replace-project"
+        resolved_surface = surface.strip() or "replace-surface"
+        return {
+            "version": 1,
+            "source_id": resolved_source_id,
+            "project": resolved_project,
+            "surface": resolved_surface,
+            "purpose": "Inventory entities, lifecycle states, normalized fields, and auth/header contracts before authoring cases.",
+            "entities": [
+                {
+                    "name": "primary_entity",
+                    "id_field": "entity_id",
+                    "key_fields": ["email", "status"],
+                    "normalized_fields": ["email"],
+                    "states": ["ACTIVE", "SUSPENDED", "ARCHIVED"],
+                    "allowed_transitions": [
+                        "ACTIVE -> SUSPENDED",
+                        "SUSPENDED -> ACTIVE",
+                        "ACTIVE -> ARCHIVED",
+                        "SUSPENDED -> ARCHIVED",
+                    ],
+                }
+            ],
+            "auth_contract": {
+                "actor": "api-client",
+                "shared_headers": ["X-Internal-Token"],
+            },
+            "notes": [
+                "List only entities and lifecycle facts grounded in code.",
+                "Mark normalized fields like email here so later cases separate submitted vs expected values.",
+            ],
+            "metadata": {
+                "template_version": AUTHORING_ENTITY_INVENTORY_TEMPLATE_VERSION,
+                "stage": "entity_inventory",
+            },
+        }
+
+    def build_operation_inventory_template(
+        self,
+        *,
+        source_id: str = "",
+        project: str = "",
+        surface: str = "",
+    ) -> dict[str, object]:
+        resolved_source_id = source_id.strip() or "replace-with-source-id"
+        resolved_project = project.strip() or "code/replace-project"
+        resolved_surface = surface.strip() or "replace-surface"
+        return {
+            "version": 1,
+            "source_id": resolved_source_id,
+            "project": resolved_project,
+            "surface": resolved_surface,
+            "purpose": "Inventory reusable setup operations, controller routes, and expected status contracts before authoring cases.",
+            "entity_operations": [
+                {
+                    "entity": "primary_entity",
+                    "operation": "create_active",
+                    "effect_state": "ACTIVE",
+                    "captures": ["entity_id"],
+                },
+                {
+                    "entity": "primary_entity",
+                    "operation": "suspend",
+                    "requires_state": "ACTIVE",
+                    "effect_state": "SUSPENDED",
+                },
+            ],
+            "routes": [
+                {
+                    "method": "POST",
+                    "path": "/replace/path",
+                    "success_status": 201,
+                    "failure_statuses": [400, 401, 404],
+                    "precondition_state": None,
+                    "normalized_response_fields": ["email"],
+                }
+            ],
+            "db_verifications": [
+                {
+                    "entity": "primary_entity",
+                    "operation": "verify_exists",
+                    "scoped_by": "entity_id",
+                }
+            ],
+            "notes": [
+                "Record the expected success HTTP code per route here instead of inferring it later from memory.",
+                "For lifecycle routes, record both precondition_state and effect_state before writing workflow cases.",
+            ],
+            "metadata": {
+                "template_version": AUTHORING_OPERATION_INVENTORY_TEMPLATE_VERSION,
+                "stage": "operation_inventory",
+            },
+        }
 
     def build_template(
         self,
@@ -97,5 +201,12 @@ class AuthoringPlanTemplateService:
             ],
             assumptions=["Replace with plan-wide assumptions if needed."],
             open_questions=["Replace with unresolved authoring questions if needed."],
-            metadata={"template_version": AUTHORING_PLAN_TEMPLATE_VERSION},
+            metadata={
+                "template_version": AUTHORING_PLAN_TEMPLATE_VERSION,
+                "authoring_workflow": "staged-v1",
+                "recommended_prerequisites": [
+                    "entity-inventory.yaml",
+                    "operation-inventory.yaml",
+                ],
+            },
         )

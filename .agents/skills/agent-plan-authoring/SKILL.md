@@ -63,12 +63,13 @@ Supported case kinds in MVP:
 # Lifecycle
 
 ```text
-understand scope -> define entities/templates -> author cases -> validate authoring-plan -> stop
+understand scope -> inventory entities/states -> inventory operations/status contracts -> author cases -> validate authoring-plan -> stop
 ```
 
 Default completion point:
 
 - `authoring-plan.yaml` exists or was updated
+- `entity-inventory.yaml` and `operation-inventory.yaml` were reviewed or updated when the bundle was scaffolded
 - when scaffolded from CLI, it lives under `artifacts/agent/generation/<run_id>/authoring-plan.yaml`
 - `--validate-authoring-plan` was run
 - authoring-level diagnostics were resolved or explicitly reported
@@ -101,6 +102,48 @@ start inside the authoring branch rather than being classified first.
 - Do not add standalone schema-readiness `db-check` cases by default when the expected downstream path includes render, review, and promote.
 - Use standalone `db-check` only when the user explicitly asks for schema or infrastructure verification, or when the workflow is expected to stop at authoring or compile instead of promoted runnable scenarios.
 - Do not rely on the compiler to invent SQL, routes, or capture targets.
+
+## Staged authoring
+
+When coverage is broad, do not jump straight to final cases in one pass.
+
+Use the scaffolded bundle in this order:
+
+1. `entity-inventory.yaml`
+   - entities
+   - lifecycle states
+   - allowed transitions
+   - normalized fields like `email`
+   - shared auth/header contract
+2. `operation-inventory.yaml`
+   - setup operations and their effect state
+   - controller routes
+   - expected success/failure HTTP codes
+   - DB verification templates
+3. `authoring-plan.yaml`
+   - only after the first two files are coherent
+
+Prefer explicit stage commands when the bundle already exists or when you only need one stage file:
+
+- `--init-entity-inventory`
+- `--validate-entity-inventory`
+- `--init-operation-inventory`
+- `--validate-operation-inventory`
+- `--init-authoring-plan`
+- `--validate-authoring-plan`
+
+This staged pass reduces common authoring failures:
+
+- wrong setup state for workflow routes
+- wrong HTTP code assumptions
+- reusing submitted values as normalized expected values
+
+In managed bundles, validation is now inventory-backed rather than inventory-adjacent:
+
+- `authoring-plan.yaml` entities must match `entity-inventory.yaml`
+- setup and persisted-state operations must match `operation-inventory.yaml`
+- case routes and HTTP status codes must match `operation-inventory.yaml`
+- workflow setup state must satisfy the staged precondition for the route
 
 ## Strict DSL Gate
 

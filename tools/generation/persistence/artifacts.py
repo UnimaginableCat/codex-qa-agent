@@ -30,6 +30,8 @@ GENERATION_ARTIFACTS_DIRNAME = Path("artifacts/agent/generation")
 BUNDLE_LAYOUT_VERSION = 7
 CONTEXT_FILENAME = "context.json"
 AUTHORING_PLAN_FILENAME = "authoring-plan.yaml"
+ENTITY_INVENTORY_FILENAME = "entity-inventory.yaml"
+OPERATION_INVENTORY_FILENAME = "operation-inventory.yaml"
 AGENT_PLAN_FILENAME = "agent-plan.json"
 SOURCE_INPUT_FILENAME = "source-input.json"
 NORMALIZED_SOURCE_FILENAME = "normalized-source.json"
@@ -92,13 +94,23 @@ class FileGenerationArtifactStore:
         authoring_plan: "AuthoringPlan",
     ) -> Path:
         target_path = _bundle_file_path(run_context, AUTHORING_PLAN_FILENAME)
+        self.write_yaml_document(run_context, AUTHORING_PLAN_FILENAME, authoring_plan.to_dict())
+        return target_path
+
+    def write_yaml_document(
+        self,
+        run_context: GenerationRunContext,
+        filename: str,
+        payload: dict[str, Any],
+    ) -> Path:
+        target_path = _bundle_file_path(run_context, filename)
         try:
             import yaml
         except ModuleNotFoundError as exc:  # pragma: no cover
             raise GenerationArtifactPolicyError("PyYAML is required to write authoring-plan YAML files.") from exc
         write_text_file(
             target_path,
-            yaml.safe_dump(authoring_plan.to_dict(), allow_unicode=True, sort_keys=False),
+            yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
         )
         self.write_manifest(run_context)
         return target_path
@@ -252,17 +264,23 @@ def managed_generation_artifacts_root_for_path(path: Path) -> Path | None:
     return None
 
 
-def load_generation_run_context_from_bundle_file(path: Path) -> GenerationRunContext | None:
-    if path.name not in {AGENT_PLAN_FILENAME, AUTHORING_PLAN_FILENAME}:
+def load_generation_run_context_from_bundle_dir(path: Path) -> GenerationRunContext | None:
+    if not path.exists() or not path.is_dir():
         return None
     artifacts_root_dir = managed_generation_artifacts_root_for_path(path)
     if artifacts_root_dir is None:
         return None
-    context_path = path.parent / CONTEXT_FILENAME
+    context_path = path / CONTEXT_FILENAME
     if not context_path.exists():
         return None
     payload = read_json_file(context_path, "Generation run context")
     return GenerationRunContext.from_dict(dict(payload))
+
+
+def load_generation_run_context_from_bundle_file(path: Path) -> GenerationRunContext | None:
+    if path.name not in {AGENT_PLAN_FILENAME, AUTHORING_PLAN_FILENAME, ENTITY_INVENTORY_FILENAME, OPERATION_INVENTORY_FILENAME}:
+        return None
+    return load_generation_run_context_from_bundle_dir(path.parent)
 
 
 def slugify_artifact_name(value: str) -> str:
@@ -321,6 +339,8 @@ def _write_manifest_json(run_context: GenerationRunContext) -> Path:
             "manifest_path": str(target_path),
             "context_path": str(run_context.artifact_dir / CONTEXT_FILENAME),
             "authoring_plan_path": str(run_context.artifact_dir / AUTHORING_PLAN_FILENAME),
+            "entity_inventory_path": str(run_context.artifact_dir / ENTITY_INVENTORY_FILENAME),
+            "operation_inventory_path": str(run_context.artifact_dir / OPERATION_INVENTORY_FILENAME),
             "agent_plan_path": str(run_context.artifact_dir / AGENT_PLAN_FILENAME),
             "source_input_path": str(run_context.artifact_dir / SOURCE_INPUT_FILENAME),
             "normalized_source_path": str(run_context.artifact_dir / NORMALIZED_SOURCE_FILENAME),

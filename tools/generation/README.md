@@ -94,6 +94,32 @@ Authoring-plan scaffold:
   --goal "Cover user API behavior."
 ```
 
+The scaffolded bundle now includes three authoring-stage files:
+
+- `authoring-plan.yaml`
+- `entity-inventory.yaml`
+- `operation-inventory.yaml`
+
+Recommended order for broad controller coverage:
+
+1. fill `entity-inventory.yaml` with entities, states, normalized fields, and auth/header contract
+2. fill `operation-inventory.yaml` with setup operations, effect states, routes, and expected HTTP codes
+3. write final cases in `authoring-plan.yaml`
+
+Stage-oriented commands are available when the bundle already exists or only one stage file needs
+to be scaffolded or validated:
+
+- `--init-entity-inventory`
+- `--validate-entity-inventory`
+- `--init-operation-inventory`
+- `--validate-operation-inventory`
+- `--init-authoring-plan`
+- `--validate-authoring-plan`
+
+For managed bundles, validate and compile now cross-check `authoring-plan.yaml` against both
+inventories. Missing or contradictory entity names, operations, routes, status codes, or workflow
+precondition states are blocking authoring diagnostics rather than downstream surprises.
+
 Typical authoring pattern for custom internal-token headers:
 
 ```yaml

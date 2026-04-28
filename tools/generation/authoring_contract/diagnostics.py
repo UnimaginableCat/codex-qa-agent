@@ -33,6 +33,13 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_persisted_state_id_field_missing",
     "authoring_persisted_state_id_field_semantic_mismatch",
     "authoring_case_boundary_mismatch",
+    "authoring_stage_inventory_missing",
+    "authoring_stage_inventory_invalid",
+    "authoring_stage_inventory_entity_mismatch",
+    "authoring_stage_inventory_operation_mismatch",
+    "authoring_stage_inventory_route_mismatch",
+    "authoring_stage_inventory_status_mismatch",
+    "authoring_stage_inventory_state_mismatch",
 }
 
 

@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from tools.generation.authoring import validate_agent_plan_input
+from tools.generation.persistence.artifacts import (
+    ENTITY_INVENTORY_FILENAME,
+    OPERATION_INVENTORY_FILENAME,
+    managed_generation_artifacts_root_for_path,
+)
 from tools.generation.domain.models import (
     AgentPlannedTestCaseInput,
     AgentTestPlanInput,
@@ -28,6 +33,7 @@ from .models import (
     AuthoringPlanCompileResult,
     AuthoringPlanLoadResult,
     AuthoringSetupStep,
+    _maybe_int,
 )
 
 _PLACEHOLDER_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
@@ -73,6 +79,8 @@ class AuthoringPlanCompiler:
 
     def validate_file(self, file_path: Path) -> AuthoringPlanCompileResult:
         load_result = self.load(file_path)
+        inventory_diagnostics = _required_stage_inventory_diagnostics(file_path)
+        load_result.diagnostics = [*load_result.diagnostics, *inventory_diagnostics]
         if load_result.authoring_plan is None:
             status = derive_authoring_status(load_result.diagnostics)
             return AuthoringPlanCompileResult(
@@ -81,8 +89,12 @@ class AuthoringPlanCompiler:
                 file_path=file_path,
                 diagnostics=load_result.diagnostics,
             )
+        load_result.diagnostics.extend(
+            _stage_inventory_contract_diagnostics(file_path=file_path, authoring_plan=load_result.authoring_plan)
+        )
         result = self.validate(load_result.authoring_plan, file_path=file_path)
         result.diagnostics = [*load_result.diagnostics, *result.diagnostics]
+        result.status = derive_authoring_status(result.diagnostics)
         result.message = build_authoring_message(result.status, result.diagnostics, compiled=False)
         return result
 
@@ -91,6 +103,8 @@ class AuthoringPlanCompiler:
 
     def compile_file(self, file_path: Path) -> AuthoringPlanCompileResult:
         load_result = self.load(file_path)
+        inventory_diagnostics = _required_stage_inventory_diagnostics(file_path)
+        load_result.diagnostics = [*load_result.diagnostics, *inventory_diagnostics]
         if load_result.authoring_plan is None:
             status = derive_authoring_status(load_result.diagnostics)
             return AuthoringPlanCompileResult(
@@ -99,8 +113,12 @@ class AuthoringPlanCompiler:
                 file_path=file_path,
                 diagnostics=load_result.diagnostics,
             )
+        load_result.diagnostics.extend(
+            _stage_inventory_contract_diagnostics(file_path=file_path, authoring_plan=load_result.authoring_plan)
+        )
         result = self.compile(load_result.authoring_plan, file_path=file_path)
         result.diagnostics = [*load_result.diagnostics, *result.diagnostics]
+        result.status = derive_authoring_status(result.diagnostics)
         result.message = build_authoring_message(result.status, result.diagnostics, compiled=True)
         return result
 
@@ -1160,6 +1178,411 @@ def _normalize_case_field_name(value: str) -> str:
 
 def _numeric_path_has_placeholder(path: str) -> bool:
     return bool(_extract_placeholders(path))
+
+
+def _required_stage_inventory_diagnostics(file_path: Path) -> list[GenerationDiagnostic]:
+    if managed_generation_artifacts_root_for_path(file_path) is None:
+        return []
+    inventory_specs = (
+        (
+            "entity_inventory",
+            file_path.parent / ENTITY_INVENTORY_FILENAME,
+            ("version", "source_id", "project", "surface", "entities"),
+            {"entities"},
+        ),
+        (
+            "operation_inventory",
+            file_path.parent / OPERATION_INVENTORY_FILENAME,
+            ("version", "source_id", "project", "surface", "entity_operations", "routes"),
+            {"entity_operations", "routes", "db_verifications"},
+        ),
+    )
+    diagnostics: list[GenerationDiagnostic] = []
+    for inventory_kind, inventory_path, required_fields, list_fields in inventory_specs:
+        diagnostics.extend(
+            _inventory_file_diagnostics(
+                inventory_kind=inventory_kind,
+                inventory_path=inventory_path,
+                required_fields=required_fields,
+                list_fields=list_fields,
+            )
+        )
+    return diagnostics
+
+
+def _inventory_file_diagnostics(
+    *,
+    inventory_kind: str,
+    inventory_path: Path,
+    required_fields: tuple[str, ...],
+    list_fields: set[str],
+) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    if not inventory_path.exists():
+        diagnostics.append(
+            authoring_diagnostic(
+                "authoring_stage_inventory_missing",
+                "Managed authoring bundles require staged inventory files before authoring-plan validation or compile.",
+                source_ref=str(inventory_path),
+                details={"inventory_kind": inventory_kind, "path": str(inventory_path)},
+            )
+        )
+        return diagnostics
+    try:
+        import yaml
+
+        payload = yaml.safe_load(inventory_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        diagnostics.append(
+            authoring_diagnostic(
+                "authoring_stage_inventory_invalid",
+                "Staged inventory file could not be parsed as YAML.",
+                source_ref=str(inventory_path),
+                details={"inventory_kind": inventory_kind, "path": str(inventory_path), "error": str(exc)},
+            )
+        )
+        return diagnostics
+    if not isinstance(payload, dict):
+        diagnostics.append(
+            authoring_diagnostic(
+                "authoring_stage_inventory_invalid",
+                "Staged inventory file must contain a YAML object.",
+                source_ref=str(inventory_path),
+                details={"inventory_kind": inventory_kind, "path": str(inventory_path)},
+            )
+        )
+        return diagnostics
+    missing_fields = [field_name for field_name in required_fields if field_name not in payload]
+    if missing_fields:
+        diagnostics.append(
+            authoring_diagnostic(
+                "authoring_stage_inventory_invalid",
+                "Staged inventory file is missing required top-level fields.",
+                source_ref=str(inventory_path),
+                details={
+                    "inventory_kind": inventory_kind,
+                    "path": str(inventory_path),
+                    "missing_fields": missing_fields,
+                },
+            )
+        )
+    for field_name in list_fields:
+        if field_name in payload and not isinstance(payload.get(field_name), list):
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_stage_inventory_invalid",
+                    "Staged inventory list fields must be YAML arrays.",
+                    source_ref=str(inventory_path),
+                    details={
+                        "inventory_kind": inventory_kind,
+                        "path": str(inventory_path),
+                        "field": field_name,
+                    },
+                )
+            )
+    return diagnostics
+
+
+def _stage_inventory_contract_diagnostics(
+    *,
+    file_path: Path,
+    authoring_plan: AuthoringPlan,
+) -> list[GenerationDiagnostic]:
+    if managed_generation_artifacts_root_for_path(file_path) is None:
+        return []
+    entity_inventory = _load_inventory_payload_if_valid(
+        inventory_path=file_path.parent / ENTITY_INVENTORY_FILENAME,
+        required_fields=("version", "source_id", "project", "surface", "entities"),
+        list_fields={"entities"},
+    )
+    operation_inventory = _load_inventory_payload_if_valid(
+        inventory_path=file_path.parent / OPERATION_INVENTORY_FILENAME,
+        required_fields=("version", "source_id", "project", "surface", "entity_operations", "routes"),
+        list_fields={"entity_operations", "routes", "db_verifications"},
+    )
+    if entity_inventory is None or operation_inventory is None:
+        return []
+    return _cross_check_authoring_plan_against_stage_inventories(
+        authoring_plan=authoring_plan,
+        file_path=file_path,
+        entity_inventory=entity_inventory,
+        operation_inventory=operation_inventory,
+    )
+
+
+def _load_inventory_payload_if_valid(
+    *,
+    inventory_path: Path,
+    required_fields: tuple[str, ...],
+    list_fields: set[str],
+) -> dict[str, Any] | None:
+    if not inventory_path.exists():
+        return None
+    try:
+        import yaml
+
+        payload = yaml.safe_load(inventory_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if any(field_name not in payload for field_name in required_fields):
+        return None
+    if any(field_name in payload and not isinstance(payload.get(field_name), list) for field_name in list_fields):
+        return None
+    return payload
+
+
+def _cross_check_authoring_plan_against_stage_inventories(
+    *,
+    authoring_plan: AuthoringPlan,
+    file_path: Path,
+    entity_inventory: dict[str, Any],
+    operation_inventory: dict[str, Any],
+) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    source_ref = str(file_path)
+    entity_specs = _entity_inventory_specs(entity_inventory)
+    entity_operation_specs = _entity_operation_inventory_specs(operation_inventory)
+    route_specs = _route_inventory_specs(operation_inventory)
+    db_verification_specs = _db_verification_inventory_specs(operation_inventory)
+
+    for entity_name, entity_spec in authoring_plan.entities.items():
+        inventory_entity_spec = entity_specs.get(entity_name)
+        if inventory_entity_spec is None:
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_stage_inventory_entity_mismatch",
+                    "Authoring-plan entity is not declared in entity-inventory.yaml.",
+                    source_ref=source_ref,
+                    details={"entity": entity_name},
+                )
+            )
+            continue
+        inventory_id_field = str(inventory_entity_spec.get("id_field") or "").strip()
+        authored_id_field = entity_spec.id_field.strip()
+        if inventory_id_field and authored_id_field and inventory_id_field != authored_id_field:
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_stage_inventory_entity_mismatch",
+                    "Authoring-plan entity id_field must match entity-inventory.yaml.",
+                    source_ref=source_ref,
+                    details={
+                        "entity": entity_name,
+                        "authored_id_field": authored_id_field,
+                        "inventory_id_field": inventory_id_field,
+                    },
+                )
+            )
+        for operation_name, operation in entity_spec.operations.items():
+            operation_key = (entity_name, operation_name)
+            if operation.route is not None:
+                if operation_key not in entity_operation_specs:
+                    diagnostics.append(
+                        authoring_diagnostic(
+                            "authoring_stage_inventory_operation_mismatch",
+                            "Route-backed entity operation is not declared in operation-inventory.yaml.",
+                            source_ref=source_ref,
+                            details={"entity": entity_name, "operation": operation_name},
+                        )
+                    )
+            if operation.sql.strip():
+                db_verification_spec = db_verification_specs.get(operation_key)
+                if db_verification_spec is None:
+                    diagnostics.append(
+                        authoring_diagnostic(
+                            "authoring_stage_inventory_operation_mismatch",
+                            "DB verification operation is not declared in operation-inventory.yaml.",
+                            source_ref=source_ref,
+                            details={"entity": entity_name, "operation": operation_name},
+                        )
+                    )
+                else:
+                    scoped_by = str(db_verification_spec.get("scoped_by") or "").strip()
+                    if scoped_by and inventory_id_field and scoped_by != inventory_id_field:
+                        diagnostics.append(
+                            authoring_diagnostic(
+                                "authoring_stage_inventory_operation_mismatch",
+                                "DB verification scope must match the entity id_field declared in staged inventories.",
+                                source_ref=source_ref,
+                                details={
+                                    "entity": entity_name,
+                                    "operation": operation_name,
+                                    "scoped_by": scoped_by,
+                                    "inventory_id_field": inventory_id_field,
+                                },
+                            )
+                        )
+
+    for case in authoring_plan.cases:
+        case_ref = case.id.strip() or source_ref
+        for setup_step in case.setup:
+            step_key = (setup_step.use_entity.strip(), setup_step.operation.strip())
+            if step_key not in entity_operation_specs:
+                diagnostics.append(
+                    authoring_diagnostic(
+                        "authoring_stage_inventory_operation_mismatch",
+                        "Workflow setup operation is not declared in operation-inventory.yaml.",
+                        source_ref=case_ref,
+                        details={"entity": step_key[0], "operation": step_key[1]},
+                    )
+                )
+        if case.oracle is not None and case.oracle.persisted_state is not None:
+            persisted_key = (
+                case.oracle.persisted_state.entity.strip(),
+                case.oracle.persisted_state.operation.strip(),
+            )
+            if persisted_key not in db_verification_specs:
+                diagnostics.append(
+                    authoring_diagnostic(
+                        "authoring_stage_inventory_operation_mismatch",
+                        "Persisted-state operation is not declared in operation-inventory.yaml.",
+                        source_ref=case_ref,
+                        details={"entity": persisted_key[0], "operation": persisted_key[1]},
+                    )
+                )
+        if case.execute is None or case.execute.route is None:
+            continue
+        route_key = (
+            case.execute.route.method.strip().upper(),
+            case.execute.route.path.strip(),
+        )
+        route_spec = route_specs.get(route_key)
+        if route_spec is None:
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_stage_inventory_route_mismatch",
+                    "Authoring case route is not declared in operation-inventory.yaml.",
+                    source_ref=case_ref,
+                    details={"method": route_key[0], "path": route_key[1]},
+                )
+            )
+            continue
+        expected_status = None if case.oracle is None else case.oracle.status_code
+        if isinstance(expected_status, int):
+            success_status = _maybe_int(route_spec.get("success_status"))
+            failure_statuses = {_maybe_int(item) for item in route_spec.get("failure_statuses", [])}
+            failure_statuses.discard(None)
+            if 200 <= expected_status < 300:
+                if success_status is not None and expected_status != success_status:
+                    diagnostics.append(
+                        authoring_diagnostic(
+                            "authoring_stage_inventory_status_mismatch",
+                            "Success HTTP status in authoring-plan.yaml does not match operation-inventory.yaml.",
+                            source_ref=case_ref,
+                            details={
+                                "method": route_key[0],
+                                "path": route_key[1],
+                                "authored_status": expected_status,
+                                "inventory_success_status": success_status,
+                            },
+                        )
+                    )
+            elif failure_statuses and expected_status not in failure_statuses:
+                diagnostics.append(
+                    authoring_diagnostic(
+                        "authoring_stage_inventory_status_mismatch",
+                        "Failure HTTP status in authoring-plan.yaml is not listed in operation-inventory.yaml.",
+                        source_ref=case_ref,
+                        details={
+                            "method": route_key[0],
+                            "path": route_key[1],
+                            "authored_status": expected_status,
+                            "inventory_failure_statuses": sorted(failure_statuses),
+                        },
+                    )
+                )
+        if case.kind.strip().lower() != "workflow" or not case.setup:
+            continue
+        expected_state = _normalized_inventory_state(route_spec.get("precondition_state")) or _expected_precondition_state(case)
+        actual_state = _infer_setup_state_from_inventory(case.setup, entity_operation_specs)
+        if expected_state is None or actual_state is None or expected_state == actual_state:
+            continue
+        diagnostics.append(
+            authoring_diagnostic(
+                "authoring_stage_inventory_state_mismatch",
+                "Workflow setup state derived from operation-inventory.yaml does not satisfy the case precondition.",
+                source_ref=case_ref,
+                details={
+                    "expected_state": expected_state,
+                    "actual_state": actual_state,
+                    "route_path": route_key[1],
+                    "setup_operations": [step.operation for step in case.setup],
+                },
+            )
+        )
+    return diagnostics
+
+
+def _entity_inventory_specs(entity_inventory: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    specs: dict[str, dict[str, Any]] = {}
+    for item in entity_inventory.get("entities", []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        specs[name] = item
+    return specs
+
+
+def _entity_operation_inventory_specs(operation_inventory: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    specs: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in operation_inventory.get("entity_operations", []):
+        if not isinstance(item, dict):
+            continue
+        entity_name = str(item.get("entity") or "").strip()
+        operation_name = str(item.get("operation") or "").strip()
+        if not entity_name or not operation_name:
+            continue
+        specs[(entity_name, operation_name)] = item
+    return specs
+
+
+def _route_inventory_specs(operation_inventory: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    specs: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in operation_inventory.get("routes", []):
+        if not isinstance(item, dict):
+            continue
+        method = str(item.get("method") or "").strip().upper()
+        path = str(item.get("path") or "").strip()
+        if not method or not path:
+            continue
+        specs[(method, path)] = item
+    return specs
+
+
+def _db_verification_inventory_specs(operation_inventory: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    specs: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in operation_inventory.get("db_verifications", []):
+        if not isinstance(item, dict):
+            continue
+        entity_name = str(item.get("entity") or "").strip()
+        operation_name = str(item.get("operation") or "").strip()
+        if not entity_name or not operation_name:
+            continue
+        specs[(entity_name, operation_name)] = item
+    return specs
+
+
+def _infer_setup_state_from_inventory(
+    setup_steps: list[AuthoringSetupStep],
+    operation_specs: dict[tuple[str, str], dict[str, Any]],
+) -> str | None:
+    state: str | None = None
+    for step in setup_steps:
+        operation_spec = operation_specs.get((step.use_entity.strip(), step.operation.strip()))
+        if operation_spec is None:
+            continue
+        state = _normalized_inventory_state(operation_spec.get("effect_state")) or state
+    return state
+
+
+def _normalized_inventory_state(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    return normalized or None
 
 
 def _workflow_setup_state_mismatch_diagnostics(

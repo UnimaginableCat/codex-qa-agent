@@ -16,6 +16,13 @@ from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 from tools.generation.authoring import AgentPlanAuthoringService
 from tools.generation.authoring_contract import AuthoringPlanCompiler, AuthoringPlanTemplateService
+from tools.generation.persistence.artifacts import (
+    AUTHORING_PLAN_FILENAME,
+    CONTEXT_FILENAME,
+    ENTITY_INVENTORY_FILENAME,
+    OPERATION_INVENTORY_FILENAME,
+    load_generation_run_context_from_bundle_dir,
+)
 from tools.generation.application import GenerateTestPlanOptions, GenerateTestPlanRequest, GenerationInputMode
 from tools.generation.application.use_cases import GenerateTestPlanUseCase
 from tools.generation.domain.gaps import format_case_gap_note, project_case_gap
@@ -63,6 +70,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a scaffolded authoring-plan YAML file into a managed generation bundle.",
     )
     workflow.add_argument(
+        "--init-entity-inventory",
+        action="store_true",
+        help="Write a scaffolded entity-inventory YAML file into a managed generation bundle.",
+    )
+    workflow.add_argument(
+        "--init-operation-inventory",
+        action="store_true",
+        help="Write a scaffolded operation-inventory YAML file into a managed generation bundle.",
+    )
+    workflow.add_argument(
         "--init-agent-plan",
         action="store_true",
         help="Write a low-level AgentTestPlanInput template JSON file. Prefer authoring-plan YAML for the normal DSL flow.",
@@ -76,6 +93,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--validate-authoring-plan",
         action="store_true",
         help="Validate a compact authoring-plan file without compile or generation.",
+    )
+    workflow.add_argument(
+        "--validate-entity-inventory",
+        action="store_true",
+        help="Validate an entity-inventory YAML file without compile or generation.",
+    )
+    workflow.add_argument(
+        "--validate-operation-inventory",
+        action="store_true",
+        help="Validate an operation-inventory YAML file without compile or generation.",
     )
     workflow.add_argument(
         "--compile-authoring-plan",
@@ -101,6 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     source.add_argument("--prose", help="Inline prose source for fallback/bootstrap test-plan generation.")
     source.add_argument("--source-file", help="Path to a prose source file.")
+    parser.add_argument("--entity-inventory-file", help="Path to an entity-inventory YAML file.")
+    parser.add_argument("--operation-inventory-file", help="Path to an operation-inventory YAML file.")
     parser.add_argument(
         "--input-mode",
         choices=[mode.value for mode in GenerationInputMode],
@@ -108,6 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--source-id", help="Stable source id for this generation run.")
     parser.add_argument("--project", help="Project identifier stored in generation contracts.")
+    parser.add_argument("--surface", default="", help="Optional surface/controller name used for staged authoring inventories.")
     parser.add_argument("--name", default="", help="Optional human-readable source name.")
     parser.add_argument("--goal", default="", help="Optional goal used when scaffolding a low-level agent plan template.")
     parser.add_argument(
@@ -218,49 +248,61 @@ def run_init_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
     diagnostics = _init_authoring_plan_adapter_diagnostics(args)
     if diagnostics:
         raise GenerationCliInputError(diagnostics)
-    requested_output_path = Path(args.output)
-    artifacts_root_dir = managed_generation_artifacts_root_for_path(requested_output_path)
-    if artifacts_root_dir is None:
-        raise GenerationCliInputError(
-            [
-                GenerationDiagnostic(
-                    code="adapter_init_authoring_plan_requires_managed_root",
-                    message="Authoring plan scaffold must be written under artifacts/agent/generation.",
-                    severity=DiagnosticSeverity.ERROR,
-                    source_ref=str(requested_output_path),
-                )
-            ]
-        )
-    workspace_root = artifacts_root_dir.parent.parent.parent
-    template = AuthoringPlanTemplateService().build_template(
+    template_service = AuthoringPlanTemplateService()
+    template = template_service.build_template(
         source_id=args.source_id or "",
         project=args.project or "",
         title=args.name or "",
         goal=args.goal or "",
     )
-    source_input = GenerationSourceInput(
-        source_id=template.source_id,
-        project=template.project,
-        input_format=SourceInputFormat.STRUCTURED,
-        name=template.title,
-        content=json.dumps(template.to_dict(), ensure_ascii=False),
-        metadata={"input_mode": GenerationInputMode.AUTHORING_PLAN.value},
+    requested_output_path = Path(args.output)
+    run_context = _resolve_scaffold_run_context(
+        requested_output_path=requested_output_path,
+        source_input=_scaffold_source_input(
+            source_id=template.source_id,
+            project=template.project,
+            name=template.title,
+            content=template.to_dict(),
+            source_path=AUTHORING_PLAN_FILENAME,
+            input_mode=GenerationInputMode.AUTHORING_PLAN.value,
+        ),
     )
-    run_context = initialize_generation_run_context(source_input, workspace_root=workspace_root)
     artifact_store = FileGenerationArtifactStore()
     artifact_store.write_context(run_context)
     output_path = artifact_store.write_authoring_plan(run_context, template)
+    entity_inventory_path = artifact_store.write_yaml_document(run_context, ENTITY_INVENTORY_FILENAME, template_service.build_entity_inventory_template(
+        source_id=template.source_id,
+        project=template.project,
+        surface=args.surface or template.scope.surface,
+    ))
+    operation_inventory_path = artifact_store.write_yaml_document(run_context, OPERATION_INVENTORY_FILENAME, template_service.build_operation_inventory_template(
+        source_id=template.source_id,
+        project=template.project,
+        surface=args.surface or template.scope.surface,
+    ))
     return to_json_safe(
         {
             "status": StepStatus.PASS.value,
             "message": "Authoring-plan bundle scaffolded.",
             "bundle_dir": run_context.artifact_dir,
             "output_path": output_path,
+            "entity_inventory_path": entity_inventory_path,
+            "operation_inventory_path": operation_inventory_path,
             "requested_output_path": requested_output_path,
             "template_version": template.metadata.get("template_version", ""),
             "input_mode": GenerationInputMode.AUTHORING_PLAN.value,
             "diagnostics": [],
             "authoring_plan": template.to_dict(),
+            "entity_inventory": template_service.build_entity_inventory_template(
+                source_id=template.source_id,
+                project=template.project,
+                surface=args.surface or template.scope.surface,
+            ),
+            "operation_inventory": template_service.build_operation_inventory_template(
+                source_id=template.source_id,
+                project=template.project,
+                surface=args.surface or template.scope.surface,
+            ),
         }
     )
 
@@ -316,6 +358,82 @@ def run_init_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def run_init_entity_inventory(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _init_entity_inventory_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    template_service = AuthoringPlanTemplateService()
+    inventory = template_service.build_entity_inventory_template(
+        source_id=args.source_id or "",
+        project=args.project or "",
+        surface=args.surface or "",
+    )
+    requested_output_path = Path(args.output)
+    run_context = _resolve_scaffold_run_context(
+        requested_output_path=requested_output_path,
+        source_input=_scaffold_source_input(
+            source_id=str(inventory["source_id"]),
+            project=str(inventory["project"]),
+            name=str(inventory["surface"]),
+            content=inventory,
+            source_path=ENTITY_INVENTORY_FILENAME,
+            input_mode="entity_inventory",
+        ),
+    )
+    artifact_store = FileGenerationArtifactStore()
+    artifact_store.write_context(run_context)
+    output_path = artifact_store.write_yaml_document(run_context, ENTITY_INVENTORY_FILENAME, inventory)
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "message": "Entity inventory scaffolded.",
+            "bundle_dir": run_context.artifact_dir,
+            "output_path": output_path,
+            "requested_output_path": requested_output_path,
+            "diagnostics": [],
+            "entity_inventory": inventory,
+        }
+    )
+
+
+def run_init_operation_inventory(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _init_operation_inventory_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    template_service = AuthoringPlanTemplateService()
+    inventory = template_service.build_operation_inventory_template(
+        source_id=args.source_id or "",
+        project=args.project or "",
+        surface=args.surface or "",
+    )
+    requested_output_path = Path(args.output)
+    run_context = _resolve_scaffold_run_context(
+        requested_output_path=requested_output_path,
+        source_input=_scaffold_source_input(
+            source_id=str(inventory["source_id"]),
+            project=str(inventory["project"]),
+            name=str(inventory["surface"]),
+            content=inventory,
+            source_path=OPERATION_INVENTORY_FILENAME,
+            input_mode="operation_inventory",
+        ),
+    )
+    artifact_store = FileGenerationArtifactStore()
+    artifact_store.write_context(run_context)
+    output_path = artifact_store.write_yaml_document(run_context, OPERATION_INVENTORY_FILENAME, inventory)
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "message": "Operation inventory scaffolded.",
+            "bundle_dir": run_context.artifact_dir,
+            "output_path": output_path,
+            "requested_output_path": requested_output_path,
+            "diagnostics": [],
+            "operation_inventory": inventory,
+        }
+    )
+
+
 def run_validate_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
     diagnostics = _validate_agent_plan_adapter_diagnostics(args)
     if diagnostics:
@@ -330,6 +448,50 @@ def run_validate_agent_plan(args: argparse.Namespace) -> dict[str, Any]:
             "case_count": result.case_count,
             "diagnostics": [diagnostic.to_dict() for diagnostic in result.diagnostics],
             "agent_plan": None if result.agent_plan is None else result.agent_plan.to_dict(),
+        }
+    )
+
+
+def run_validate_entity_inventory(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _validate_entity_inventory_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    file_path = Path(args.entity_inventory_file)
+    payload, validation_diagnostics = _validate_entity_inventory_file(file_path)
+    status = StepStatus.PASS if not validation_diagnostics else StepStatus.BLOCKED
+    return to_json_safe(
+        {
+            "status": status.value,
+            "message": (
+                "Entity inventory is structurally valid."
+                if status == StepStatus.PASS
+                else "Entity inventory is blocked by missing or inconsistent staged contract details."
+            ),
+            "file_path": file_path,
+            "diagnostics": [diagnostic.to_dict() for diagnostic in validation_diagnostics],
+            "entity_inventory": payload,
+        }
+    )
+
+
+def run_validate_operation_inventory(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _validate_operation_inventory_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    file_path = Path(args.operation_inventory_file)
+    payload, validation_diagnostics = _validate_operation_inventory_file(file_path)
+    status = StepStatus.PASS if not validation_diagnostics else StepStatus.BLOCKED
+    return to_json_safe(
+        {
+            "status": status.value,
+            "message": (
+                "Operation inventory is structurally valid."
+                if status == StepStatus.PASS
+                else "Operation inventory is blocked by missing or inconsistent staged contract details."
+            ),
+            "file_path": file_path,
+            "diagnostics": [diagnostic.to_dict() for diagnostic in validation_diagnostics],
+            "operation_inventory": payload,
         }
     )
 
@@ -410,6 +572,63 @@ def run_compile_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
     return to_json_safe(payload)
 
 
+def _scaffold_source_input(
+    *,
+    source_id: str,
+    project: str,
+    name: str,
+    content: dict[str, Any],
+    source_path: str,
+    input_mode: str,
+) -> GenerationSourceInput:
+    return GenerationSourceInput(
+        source_id=source_id,
+        project=project,
+        input_format=SourceInputFormat.STRUCTURED,
+        name=name,
+        content=json.dumps(content, ensure_ascii=False),
+        source_path=Path(source_path),
+        metadata={"input_mode": input_mode},
+    )
+
+
+def _resolve_scaffold_run_context(
+    *,
+    requested_output_path: Path,
+    source_input: GenerationSourceInput,
+):
+    existing_context = _load_existing_bundle_context(requested_output_path)
+    if existing_context is not None:
+        return existing_context
+    artifacts_root_dir = managed_generation_artifacts_root_for_path(requested_output_path)
+    if artifacts_root_dir is None:
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_scaffold_requires_managed_root",
+                    message="Staged authoring scaffold must target artifacts/agent/generation or one existing bundle inside it.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(requested_output_path),
+                )
+            ]
+        )
+    workspace_root = artifacts_root_dir.parent.parent.parent
+    return initialize_generation_run_context(source_input, workspace_root=workspace_root)
+
+
+def _load_existing_bundle_context(path: Path):
+    if not path.exists():
+        return None
+    if path.is_dir():
+        return load_generation_run_context_from_bundle_dir(path.resolve())
+    if path.is_file():
+        if path.name == CONTEXT_FILENAME:
+            return load_generation_run_context_from_bundle_dir(path.parent.resolve())
+        if path.name in {AUTHORING_PLAN_FILENAME, ENTITY_INVENTORY_FILENAME, OPERATION_INVENTORY_FILENAME}:
+            return load_generation_run_context_from_bundle_dir(path.parent.resolve())
+    return None
+
+
 def summarize_result(result: Any) -> dict[str, Any]:
     scenario_render_result = result.scenario_render_result
     unresolved_intents = _scenario_unresolved_intents(scenario_render_result)
@@ -450,10 +669,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.init_authoring_plan:
             payload = run_init_authoring_plan(args)
+        elif args.init_entity_inventory:
+            payload = run_init_entity_inventory(args)
+        elif args.init_operation_inventory:
+            payload = run_init_operation_inventory(args)
         elif args.init_agent_plan:
             payload = run_init_agent_plan(args)
         elif args.validate_agent_plan:
             payload = run_validate_agent_plan(args)
+        elif args.validate_entity_inventory:
+            payload = run_validate_entity_inventory(args)
+        elif args.validate_operation_inventory:
+            payload = run_validate_operation_inventory(args)
         elif args.validate_authoring_plan:
             payload = run_validate_authoring_plan(args)
         elif args.compile_authoring_plan:
@@ -491,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
 
     workflow = (
         "authoring"
-        if args.init_authoring_plan or args.init_agent_plan or args.validate_agent_plan or args.validate_authoring_plan or args.compile_authoring_plan
+        if args.init_authoring_plan or args.init_entity_inventory or args.init_operation_inventory or args.init_agent_plan or args.validate_agent_plan or args.validate_entity_inventory or args.validate_operation_inventory or args.validate_authoring_plan or args.compile_authoring_plan
         else "review"
         if args.review_drafts
         else "promotion"
@@ -830,6 +1057,271 @@ def _compile_authoring_plan_file(path: Path):
     return compile_result
 
 
+def _load_yaml_inventory_file(path: Path, *, inventory_kind: str) -> tuple[dict[str, Any] | None, list[GenerationDiagnostic]]:
+    if not path.exists():
+        return None, [
+            GenerationDiagnostic(
+                code=f"adapter_{inventory_kind}_file_missing",
+                message=f"{inventory_kind.replace('_', ' ').title()} file does not exist.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+            )
+        ]
+    try:
+        import yaml
+
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return None, [
+            GenerationDiagnostic(
+                code=f"adapter_{inventory_kind}_invalid_yaml",
+                message=f"{inventory_kind.replace('_', ' ').title()} file must contain valid YAML.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+                details={"error": str(exc)},
+            )
+        ]
+    if not isinstance(payload, dict):
+        return None, [
+            GenerationDiagnostic(
+                code=f"adapter_{inventory_kind}_not_object",
+                message=f"{inventory_kind.replace('_', ' ').title()} file must contain a YAML object.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+            )
+        ]
+    return payload, []
+
+
+def _validate_entity_inventory_file(path: Path) -> tuple[dict[str, Any] | None, list[GenerationDiagnostic]]:
+    payload, diagnostics = _load_yaml_inventory_file(path, inventory_kind="entity_inventory")
+    if payload is None:
+        return None, diagnostics
+    required_fields = ("version", "source_id", "project", "surface", "entities")
+    missing_fields = [field_name for field_name in required_fields if field_name not in payload]
+    if missing_fields:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_entity_inventory_missing_fields",
+                message="Entity inventory is missing required top-level fields.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+                details={"missing_fields": missing_fields},
+            )
+        )
+        return payload, diagnostics
+    if not isinstance(payload.get("entities"), list):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_entity_inventory_entities_not_list",
+                message="Entity inventory field 'entities' must be a YAML array.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+            )
+        )
+        return payload, diagnostics
+    seen_names: set[str] = set()
+    for index, item in enumerate(payload.get("entities", []), start=1):
+        if not isinstance(item, dict):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_entity_inventory_item_invalid",
+                    message="Each entity inventory item must be a YAML object.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"entity_index": index},
+                )
+            )
+            continue
+        entity_name = str(item.get("name") or "").strip()
+        if not entity_name:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_entity_inventory_name_missing",
+                    message="Each entity inventory item must include name.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"entity_index": index},
+                )
+            )
+            continue
+        if entity_name in seen_names:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_entity_inventory_duplicate_name",
+                    message="Entity inventory names must be unique.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"entity": entity_name},
+                )
+            )
+        seen_names.add(entity_name)
+        if not str(item.get("id_field") or "").strip():
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_entity_inventory_id_field_missing",
+                    message="Each entity inventory item must include id_field.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"entity": entity_name},
+                )
+            )
+    return payload, diagnostics
+
+
+def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | None, list[GenerationDiagnostic]]:
+    payload, diagnostics = _load_yaml_inventory_file(path, inventory_kind="operation_inventory")
+    if payload is None:
+        return None, diagnostics
+    required_fields = ("version", "source_id", "project", "surface", "entity_operations", "routes")
+    missing_fields = [field_name for field_name in required_fields if field_name not in payload]
+    if missing_fields:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_operation_inventory_missing_fields",
+                message="Operation inventory is missing required top-level fields.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+                details={"missing_fields": missing_fields},
+            )
+        )
+        return payload, diagnostics
+    for field_name in ("entity_operations", "routes", "db_verifications"):
+        if field_name in payload and not isinstance(payload.get(field_name), list):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_field_not_list",
+                    message="Operation inventory list fields must be YAML arrays.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"field": field_name},
+                )
+            )
+    entity_inventory_payload, entity_inventory_diagnostics = _validate_entity_inventory_file(path.parent / ENTITY_INVENTORY_FILENAME)
+    entity_items = [] if entity_inventory_payload is None else entity_inventory_payload.get("entities", [])
+    known_entities = {
+        str(item.get("name")).strip()
+        for item in entity_items
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+    if path.parent / ENTITY_INVENTORY_FILENAME != path and (path.parent / ENTITY_INVENTORY_FILENAME).exists():
+        diagnostics.extend(entity_inventory_diagnostics)
+    for index, item in enumerate(payload.get("entity_operations", []), start=1):
+        if not isinstance(item, dict):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_operation_invalid",
+                    message="Each entity operation inventory item must be a YAML object.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"operation_index": index},
+                )
+            )
+            continue
+        entity_name = str(item.get("entity") or "").strip()
+        operation_name = str(item.get("operation") or "").strip()
+        if not entity_name or not operation_name:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_operation_missing_fields",
+                    message="Each entity operation must include entity and operation.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"operation_index": index},
+                )
+            )
+        elif known_entities and entity_name not in known_entities:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_unknown_entity",
+                    message="Entity operation references an entity not declared in entity-inventory.yaml.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"entity": entity_name, "operation": operation_name},
+                )
+            )
+    for index, item in enumerate(payload.get("routes", []), start=1):
+        if not isinstance(item, dict):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_route_invalid",
+                    message="Each route inventory item must be a YAML object.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index},
+                )
+            )
+            continue
+        method = str(item.get("method") or "").strip()
+        route_path = str(item.get("path") or "").strip()
+        if not method or not route_path:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_route_missing_fields",
+                    message="Each route inventory item must include method and path.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index},
+                )
+            )
+        if item.get("success_status") is not None and not isinstance(item.get("success_status"), int):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_success_status_invalid",
+                    message="Route success_status must be an integer.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index},
+                )
+            )
+        failure_statuses = item.get("failure_statuses", [])
+        if failure_statuses is not None and not isinstance(failure_statuses, list):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_failure_statuses_invalid",
+                    message="Route failure_statuses must be a YAML array when present.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index},
+                )
+            )
+    for index, item in enumerate(payload.get("db_verifications", []), start=1):
+        if not isinstance(item, dict):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_db_verification_invalid",
+                    message="Each db_verifications item must be a YAML object.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"db_verification_index": index},
+                )
+            )
+            continue
+        entity_name = str(item.get("entity") or "").strip()
+        operation_name = str(item.get("operation") or "").strip()
+        if not entity_name or not operation_name:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_db_verification_missing_fields",
+                    message="Each db_verifications item must include entity and operation.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"db_verification_index": index},
+                )
+            )
+        elif known_entities and entity_name not in known_entities:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_unknown_entity",
+                    message="DB verification references an entity not declared in entity-inventory.yaml.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"entity": entity_name, "operation": operation_name},
+                )
+            )
+    return payload, diagnostics
+
+
 def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     if not args.authoring_plan_file and not args.agent_plan_file and not args.prose and not args.source_file:
@@ -998,6 +1490,48 @@ def _init_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> list[G
     return diagnostics
 
 
+def _init_entity_inventory_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if not args.output:
+        return [
+            GenerationDiagnostic(
+                code="adapter_init_entity_inventory_requires_output",
+                message="--init-entity-inventory requires --output.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        ]
+    if not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
+        return [
+            GenerationDiagnostic(
+                code="adapter_init_entity_inventory_requires_managed_root",
+                message="Entity inventory scaffold must target artifacts/agent/generation or one existing bundle inside it.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.output,
+            )
+        ]
+    return []
+
+
+def _init_operation_inventory_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if not args.output:
+        return [
+            GenerationDiagnostic(
+                code="adapter_init_operation_inventory_requires_output",
+                message="--init-operation-inventory requires --output.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        ]
+    if not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
+        return [
+            GenerationDiagnostic(
+                code="adapter_init_operation_inventory_requires_managed_root",
+                message="Operation inventory scaffold must target artifacts/agent/generation or one existing bundle inside it.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.output,
+            )
+        ]
+    return []
+
+
 def _validate_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     if args.agent_plan_file:
         if _path_under_root(Path(args.agent_plan_file), LEGACY_AGENT_PLAN_ROOT):
@@ -1026,6 +1560,30 @@ def _validate_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> li
         GenerationDiagnostic(
             code="adapter_validate_authoring_plan_requires_file",
             message="--validate-authoring-plan requires --authoring-plan-file.",
+            severity=DiagnosticSeverity.ERROR,
+        )
+    ]
+
+
+def _validate_entity_inventory_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if args.entity_inventory_file:
+        return []
+    return [
+        GenerationDiagnostic(
+            code="adapter_validate_entity_inventory_requires_file",
+            message="--validate-entity-inventory requires --entity-inventory-file.",
+            severity=DiagnosticSeverity.ERROR,
+        )
+    ]
+
+
+def _validate_operation_inventory_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if args.operation_inventory_file:
+        return []
+    return [
+        GenerationDiagnostic(
+            code="adapter_validate_operation_inventory_requires_file",
+            message="--validate-operation-inventory requires --operation-inventory-file.",
             severity=DiagnosticSeverity.ERROR,
         )
     ]

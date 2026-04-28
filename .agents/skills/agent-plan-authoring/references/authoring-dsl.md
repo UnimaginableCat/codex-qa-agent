@@ -5,6 +5,13 @@
 In the managed workflow, the editable DSL source normally lives at
 `artifacts/agent/generation/<run_id>/authoring-plan.yaml`.
 
+For broad coverage work, the scaffolded bundle also includes:
+
+- `entity-inventory.yaml`
+- `operation-inventory.yaml`
+
+These files are not compiled directly. They exist to decompose authoring before final cases are written.
+
 MVP decisions:
 
 - YAML first
@@ -63,6 +70,33 @@ Compiler behavior:
 - uses that rendered `actor` variable to select actor-scoped API/DB env keys like `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`, with fallback to base keys
 - uses `defaults.auth` as fallback auth strategy when case/setup API auth is not authored explicitly
 - runs existing `validate_agent_plan_input(...)` after compilation
+
+Recommended staged workflow:
+
+1. fill `entity-inventory.yaml`
+   - entities
+   - states
+   - allowed transitions
+   - normalized fields
+2. fill `operation-inventory.yaml`
+   - setup operations
+   - effect states
+   - route to success/failure HTTP status expectations
+   - DB verification templates
+3. write `authoring-plan.yaml`
+   - cases should reference the first two inventories instead of inventing lifecycle and status assumptions ad hoc
+
+Recommended CLI stages:
+
+1. scaffold or refresh entity inventory
+   - `--init-entity-inventory`
+   - `--validate-entity-inventory`
+2. scaffold or refresh operation inventory
+   - `--init-operation-inventory`
+   - `--validate-operation-inventory`
+3. scaffold or refine final cases
+   - `--init-authoring-plan`
+   - `--validate-authoring-plan`
 
 Downstream note:
 
