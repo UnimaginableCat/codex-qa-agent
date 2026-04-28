@@ -9,6 +9,7 @@ from typing import Any, Iterable
 
 from tools.common.errors import ToolingError
 from tools.common.io import write_text_file
+from tools.common.slugging import stable_slug
 
 from ..domain.execution import ExecutionEvent
 from ..domain.models import RunContext, ScenarioDefinition, ScenarioExecutionSummary
@@ -24,6 +25,7 @@ JOURNAL_FILENAME = "journal.jsonl"
 PAUSE_STATE_FILENAME = "pause-state.json"
 COMPILED_PLAN_FILENAME = "compiled-plan.json"
 MANIFEST_FILENAME = "manifest.json"
+COMPILED_PLAN_STEM_MAX_LENGTH = 120
 FORBIDDEN_ARTIFACT_SUFFIXES = {
     ".py",
     ".pyi",
@@ -165,7 +167,13 @@ def create_artifact_directory(artifacts_root_dir: Path, artifact_dir_name: str) 
 
 
 def create_compiled_plan_path(parsed_plans_dir: Path, scenario_slug: str) -> Path:
-    return parsed_plans_dir / f"{scenario_slug}.json"
+    stem = stable_slug(
+        scenario_slug,
+        fallback="scenario",
+        max_length=COMPILED_PLAN_STEM_MAX_LENGTH,
+        hash_input=scenario_slug,
+    )
+    return parsed_plans_dir / f"{stem}.json"
 
 
 def write_compiled_plan_json(parsed_plan_path: Path, scenario_definition: ScenarioDefinition) -> Path:

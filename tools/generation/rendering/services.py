@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tools.common.slugging import stable_slug
 from tools.generation.domain.gaps import format_case_gap_note, project_case_gap
 from tools.generation.domain.models import (
     DiagnosticSeverity,
@@ -37,6 +38,7 @@ EXECUTION_BLOCKING_GAP_CODES = {
     "assertion_detail_unresolved",
     "executable_detail_unresolved",
 }
+SCENARIO_DRAFT_FILENAME_MAX_LENGTH = 120
 
 
 @dataclass(slots=True)
@@ -154,7 +156,7 @@ class DraftScenarioRenderer:
                 )
                 draft_id = f"draft-{test_case.case_id}"
                 title = f"{plan.title} - {test_case.title}".strip(" -")
-                relative_path = Path("scenario-drafts") / f"{_slugify(test_case.case_id + '-' + test_case.title)}.md"
+                relative_path = Path("scenario-drafts") / _draft_filename(test_case.case_id, test_case.title)
                 drafts.append(
                     ScenarioDraft(
                         draft_id=draft_id,
@@ -236,7 +238,7 @@ class DraftScenarioRenderer:
 
             draft_id = f"draft-{test_case.case_id}"
             title = f"{plan.title} - {test_case.title}".strip(" -")
-            relative_path = Path("scenario-drafts") / f"{_slugify(test_case.case_id + '-' + test_case.title)}.md"
+            relative_path = Path("scenario-drafts") / _draft_filename(test_case.case_id, test_case.title)
             drafts.append(
                 ScenarioDraft(
                     draft_id=draft_id,
@@ -1046,8 +1048,17 @@ def _blocking_gap_checks(test_case: PlannedTestCase) -> list[UnsupportedCheck]:
 
 
 def _slugify(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-._")
-    return slug.lower() or "scenario-draft"
+    return stable_slug(value, fallback="scenario-draft")
+
+
+def _draft_filename(case_id: str, title: str) -> str:
+    stem = stable_slug(
+        f"{case_id}-{title}",
+        fallback="scenario-draft",
+        max_length=SCENARIO_DRAFT_FILENAME_MAX_LENGTH,
+        hash_input=f"{case_id}|{title}",
+    )
+    return f"{stem}.md"
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:

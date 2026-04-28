@@ -7,6 +7,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tools.common.slugging import stable_slug
 from tools.common.io import read_json_file
 from tools.common.statuses import StepStatus
 from tools.generation.domain.gaps import project_case_gap
@@ -63,6 +64,9 @@ from tools.scenario_runner.orchestration.compiler import CompiledScenario, Scena
 from tools.scenario_runner.orchestration.preflight import ScenarioPreflightChecker
 from tools.scenario_runner.runtime.validators import ScenarioStepValidator
 from tools.scenario_runner.parser import MarkdownScenarioParser
+
+PROMOTED_SCENARIO_FILENAME_MAX_LENGTH = 120
+PROMOTED_SCENARIO_DIRNAME_MAX_LENGTH = 120
 
 
 @dataclass(slots=True)
@@ -218,7 +222,7 @@ class ScenarioDraftPromotionService:
         target_dir = _promotion_target_dir(target_dir, run_context)
         if request.purge_target_dir:
             _purge_target_dir(target_dir)
-        target_path = target_dir / f"{_slugify(run_context.source_id)}-{_slugify(request.draft_id)}.md"
+        target_path = target_dir / _promoted_scenario_filename(run_context.source_id, request.draft_id)
         if target_path.exists():
             diagnostics.append(
                 GenerationDiagnostic(
@@ -2283,7 +2287,13 @@ def _promotion_target_dir(base_target_dir: Path, run_context: GenerationRunConte
     normalized_parts = tuple(_slugify(part) for part in base_target_dir.parts)
     if normalized_parts[-2:] != ("scenarios", "generated"):
         return base_target_dir
-    return base_target_dir / f"{_slugify(run_context.source_id)}-{_slugify(run_context.run_id)}"
+    dirname = stable_slug(
+        f"{run_context.source_id}-{run_context.run_id}",
+        fallback="generated-scenarios",
+        max_length=PROMOTED_SCENARIO_DIRNAME_MAX_LENGTH,
+        hash_input=f"{run_context.source_id}|{run_context.run_id}",
+    )
+    return base_target_dir / dirname
 
 
 def _purge_target_dir(target_dir: Path) -> None:
@@ -2303,5 +2313,14 @@ def _promotion_header(run_id: str, draft_id: str) -> str:
 
 
 def _slugify(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-._")
-    return slug.lower() or "scenario"
+    return stable_slug(value, fallback="scenario")
+
+
+def _promoted_scenario_filename(source_id: str, draft_id: str) -> str:
+    stem = stable_slug(
+        f"{source_id}-{draft_id}",
+        fallback="scenario",
+        max_length=PROMOTED_SCENARIO_FILENAME_MAX_LENGTH,
+        hash_input=f"{source_id}|{draft_id}",
+    )
+    return f"{stem}.md"

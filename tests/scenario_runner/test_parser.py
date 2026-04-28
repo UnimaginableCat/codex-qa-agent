@@ -448,6 +448,19 @@ class MarkdownScenarioParserTests(unittest.TestCase):
         self.assertTrue(first.scenario_slug.startswith("same-name-"))
         self.assertTrue(second.scenario_slug.startswith("same-name-"))
 
+    def test_long_scenario_slug_is_shortened_stably_for_filesystem_safety(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            long_name = "Very Long Scenario Name " * 20
+            scenario_path = self._write_scenario(root / ("nested-" * 10), self._minimal_scenario(long_name))
+
+            first = self.parser.parse(scenario_path)
+            second = self.parser.parse(scenario_path)
+
+        self.assertLessEqual(len(first.scenario_slug), 120)
+        self.assertEqual(first.scenario_slug, second.scenario_slug)
+        self.assertTrue(first.scenario_slug.startswith("very-long-scenario-name"))
+
     @staticmethod
     def _write_scenario(root: Path, content: str) -> Path:
         root.mkdir(parents=True, exist_ok=True)

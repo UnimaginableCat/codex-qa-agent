@@ -303,6 +303,25 @@ class ScenarioRenderingTests(unittest.TestCase):
             self.assertEqual(artifact_paths["scenario_render_result"].name, "scenario-render-result.json")
             self.assertTrue(result_payload.validation_results[0].parse_valid)
 
+    def test_renderer_shortens_long_draft_filenames(self) -> None:
+        render_result = DraftScenarioRenderer().render(
+            _plan(
+                [
+                    PlannedTestCase(
+                        case_id="tc-long-name-001",
+                        title="List users using status, query, limit, and offset parameters and verify the created user appears in the returned array " * 3,
+                        objective="Verify long titles do not create oversized filenames.",
+                        expected_results=["HTTP 200"],
+                        planned_route=PlannedRouteIntent(http_method="GET", endpoint_path="/users"),
+                    )
+                ]
+            )
+        )
+
+        draft = render_result.draft_set.drafts[0]
+        self.assertLessEqual(len(draft.relative_path.name), 123)
+        self.assertTrue(draft.relative_path.name.endswith(".md"))
+
 
 def _plan(cases: list[PlannedTestCase]) -> NormalizedTestPlan:
     return NormalizedTestPlan(

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from hashlib import sha1
-import re
 from pathlib import Path
+
+from tools.common.slugging import stable_slug
 
 from .domain.models import ScenarioDefinition, ScenarioVariableDefinition
 from .parsing.contracts.errors import ScenarioParseError as _ScenarioParseError
@@ -27,7 +28,7 @@ from .parsing.steps.fields import parse_step_block
 from .parsing.steps.ir import ParsedStepDraft
 from .parsing.variables.parser import parse_variables_section
 
-_SLUG_INVALID_CHARS_RE = re.compile(r"[^a-z0-9]+")
+_SCENARIO_SLUG_MAX_LENGTH = 120
 
 
 class ScenarioParseError(_ScenarioParseError):
@@ -223,12 +224,23 @@ class MarkdownScenarioParser:
         path_slug = cls._slugify(scenario_path.stem)
         path_hash = sha1(str(scenario_path).encode("utf-8")).hexdigest()[:8]
         if path_slug and path_slug != title_slug:
-            return f"{title_slug}-{path_slug}-{path_hash}"
-        return f"{title_slug}-{path_hash}"
+            base_slug = f"{title_slug}-{path_slug}-{path_hash}"
+        else:
+            base_slug = f"{title_slug}-{path_hash}"
+        return stable_slug(
+            base_slug,
+            fallback="scenario",
+            max_length=_SCENARIO_SLUG_MAX_LENGTH,
+            invalid_chars_re=r"[^a-z0-9]+",
+            hash_input=base_slug,
+        )
 
     @staticmethod
     def _slugify(value: str) -> str:
-        slug = _SLUG_INVALID_CHARS_RE.sub("-", value.strip().lower()).strip("-")
-        return slug or "scenario"
+        return stable_slug(
+            value,
+            fallback="scenario",
+            invalid_chars_re=r"[^a-z0-9]+",
+        )
 
 

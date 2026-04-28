@@ -118,6 +118,19 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             self.assertTrue(result.target_path.exists())
             self.assertTrue(result.promotion_result_path.exists())
 
+    def test_promotion_shortens_long_target_filename(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_long_named_draft_run(root)
+            result = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(run_id=payload["run_id"], draft_id="draft-tc-001", workspace_root=root)
+            )
+
+            self.assertEqual(result.status.value, "PASS")
+            assert result.target_path is not None
+            self.assertLessEqual(len(result.target_path.name), 123)
+            self.assertTrue(result.target_path.exists())
+
     def test_batch_promotion_promotes_all_drafts_in_one_run(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -367,6 +380,45 @@ def _generate_seeded_id_gap_run(root: Path) -> dict[str, object]:
                         "route": {"http_method": "GET", "endpoint_path": "/users/{{user_id}}"},
                         "expected_outcomes": ["HTTP 200", "response JSON exists"],
                         "unresolved_items": ["A seeded or previously created user_id must be supplied."],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = cli.main(
+            [
+                "--agent-plan-file",
+                str(agent_plan_path),
+                "--workspace-root",
+                str(root),
+                "--render-drafts",
+            ]
+        )
+    payload = json.loads(stdout.getvalue())
+    if exit_code != 0:
+        raise AssertionError(payload)
+    return payload
+
+
+def _generate_long_named_draft_run(root: Path) -> dict[str, object]:
+    agent_plan_path = root / "agent-plan.json"
+    agent_plan_path.write_text(
+        json.dumps(
+            {
+                "source_id": "leadflow-internal-user-controller-full-coverage",
+                "project": "code/demo",
+                "title": "LeadFlow InternalUserController full coverage",
+                "planned_test_cases": [
+                    {
+                        "case_id": "tc-001",
+                        "title": "Internal API client lists users using status, query, limit, and offset parameters and sees the created user in the result array " * 2,
+                        "objective": "Verify long generated names are shortened safely.",
+                        "route": {"http_method": "GET", "endpoint_path": "/users"},
+                        "expected_outcomes": ["HTTP 200"],
                     }
                 ],
             },
