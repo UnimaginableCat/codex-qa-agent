@@ -104,6 +104,17 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertEqual(entity_inventory_path.parent, Path(payload["bundle_dir"]))
         self.assertEqual(operation_inventory_path.parent, Path(payload["bundle_dir"]))
         self.assertTrue(output_path.parent.name.startswith("gen-"))
+        self.assertEqual(payload["stage_policy"]["mode"], "strict_sequential_authoring")
+        self.assertEqual(
+            [stage["required_gate"] for stage in payload["stage_policy"]["stages"]],
+            [
+                "validate-entity-inventory",
+                "validate-operation-inventory",
+                "sync-authoring-plan",
+                "validate-authoring-plan",
+                "validate-authoring-bundle",
+            ],
+        )
         self.assertIn("source_id: users-api", output_text)
         self.assertIn("project: code/demo", output_text)
         self.assertIn("scenario_variables:", output_text)
@@ -321,6 +332,174 @@ db_verifications: []
         self.assertIn("authoring_plan: PASS (1/1 cases compile)", output_text)
         self.assertIn("scenario_drafts_rendered: False", output_text)
         self.assertIn("--render-drafts", output_text)
+
+    def test_init_authoring_plan_text_output_includes_stage_policy(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                        "--output-format",
+                        "text",
+                    ]
+                )
+            output_text = stdout.getvalue()
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Stage policy:", output_text)
+        self.assertIn("strict_sequential_authoring", output_text)
+        self.assertIn("entity_inventory: validate-entity-inventory", output_text)
+        self.assertIn("operation_inventory: validate-operation-inventory after entity_inventory", output_text)
+        self.assertIn("sync_authoring_plan: sync-authoring-plan after operation_inventory", output_text)
+        self.assertIn("authoring_plan: validate-authoring-plan after sync_authoring_plan", output_text)
+
+    def test_sync_authoring_plan_hydrates_entities_from_inventories(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                init_exit_code = cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            init_payload = json.loads(init_stdout.getvalue())
+            bundle_dir = Path(init_payload["bundle_dir"])
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    normalized_fields: [email]
+auth_contract:
+  actor: admin-api-client
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create_active
+    effect_state: ACTIVE
+    route:
+      method: POST
+      path: /users
+    request_body:
+      email: "{{submitted_email}}"
+    captures:
+      - user_id
+routes:
+  - method: POST
+    path: /users
+    success_status: 201
+    failure_statuses: [400]
+db_verifications:
+  - entity: user
+    operation: verify_exists
+    scoped_by: user_id
+    sql: SELECT id FROM users WHERE id = :user_id
+    params:
+      user_id: "{{user_id}}"
+    expected_outcomes:
+      - one row exists
+""",
+                encoding="utf-8",
+            )
+
+            sync_stdout = io.StringIO()
+            with redirect_stdout(sync_stdout):
+                sync_exit_code = cli.main(["--sync-authoring-plan", "--path", str(bundle_dir)])
+            sync_payload = json.loads(sync_stdout.getvalue())
+
+        self.assertEqual(init_exit_code, 0)
+        self.assertEqual(sync_exit_code, 0)
+        self.assertEqual(sync_payload["status"], "PASS")
+        self.assertEqual(sync_payload["validation_status_after_sync"], "BLOCKED")
+        synced_user = sync_payload["authoring_plan"]["entities"]["user"]
+        self.assertEqual(synced_user["id_field"], "user_id")
+        create_operation = synced_user["operations"]["create_active"]
+        self.assertEqual(create_operation["route"]["method"], "POST")
+        self.assertEqual(create_operation["route"]["path"], "/users")
+        self.assertEqual(create_operation["oracle"]["status_code"], 201)
+        self.assertEqual(create_operation["captures"], ["response.json.user_id -> user_id"])
+        verify_operation = synced_user["operations"]["verify_exists"]
+        self.assertEqual(verify_operation["sql"], "SELECT id FROM users WHERE id = :user_id")
+        self.assertEqual(verify_operation["expected_outcomes"], ["one row exists"])
+        self.assertEqual(sync_payload["authoring_plan"]["cases"], [])
+
+    def test_sync_authoring_plan_text_output_reports_followup_validation_status(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            bundle_dir = Path(json.loads(init_stdout.getvalue())["bundle_dir"])
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--sync-authoring-plan",
+                        "--path",
+                        str(bundle_dir),
+                        "--output-format",
+                        "text",
+                    ]
+                )
+            output_text = stdout.getvalue()
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Authoring-plan synced from staged inventories", output_text)
+        self.assertIn("Validation after sync:", output_text)
 
     def test_validate_authoring_bundle_returns_blocked_for_stage_mismatch(self) -> None:
         with TemporaryDirectory() as tmp:

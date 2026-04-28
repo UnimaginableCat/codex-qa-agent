@@ -12,10 +12,20 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.common.io import write_text_file
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 from tools.generation.authoring import AgentPlanAuthoringService
 from tools.generation.authoring_contract import AuthoringPlanCompiler, AuthoringPlanTemplateService
+from tools.generation.authoring_contract.models import (
+    AuthoringDefaults,
+    AuthoringEntityOperation,
+    AuthoringEntitySpec,
+    AuthoringOracle,
+    AuthoringPlan,
+    AuthoringRoute,
+    AuthoringScope,
+)
 from tools.generation.persistence.artifacts import (
     AUTHORING_PLAN_FILENAME,
     CONTEXT_FILENAME,
@@ -93,6 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--validate-authoring-plan",
         action="store_true",
         help="Validate a compact authoring-plan file without compile or generation.",
+    )
+    workflow.add_argument(
+        "--sync-authoring-plan",
+        action="store_true",
+        help="Synchronize authoring-plan scope/entities/operation templates from staged inventories.",
     )
     workflow.add_argument(
         "--validate-authoring-bundle",
@@ -288,7 +303,10 @@ def run_init_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
     return to_json_safe(
         {
             "status": StepStatus.PASS.value,
-            "message": "Authoring-plan bundle scaffolded.",
+            "message": (
+                "Authoring-plan bundle scaffolded. Fill and validate one stage at a time: "
+                "entity inventory, then operation inventory, then authoring plan."
+            ),
             "bundle_dir": run_context.artifact_dir,
             "output_path": output_path,
             "entity_inventory_path": entity_inventory_path,
@@ -297,6 +315,41 @@ def run_init_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
             "template_version": template.metadata.get("template_version", ""),
             "input_mode": GenerationInputMode.AUTHORING_PLAN.value,
             "diagnostics": [],
+            "stage_policy": {
+                "mode": "strict_sequential_authoring",
+                "rule": "Do not fill or substantially rewrite multiple staged files in the same authoring pass.",
+                "stages": [
+                    {
+                        "name": "entity_inventory",
+                        "path": entity_inventory_path,
+                        "required_gate": "validate-entity-inventory",
+                    },
+                    {
+                        "name": "operation_inventory",
+                        "path": operation_inventory_path,
+                        "required_gate": "validate-operation-inventory",
+                        "requires_passed_stage": "entity_inventory",
+                    },
+                    {
+                        "name": "sync_authoring_plan",
+                        "path": output_path,
+                        "required_gate": "sync-authoring-plan",
+                        "requires_passed_stage": "operation_inventory",
+                    },
+                    {
+                        "name": "authoring_plan",
+                        "path": output_path,
+                        "required_gate": "validate-authoring-plan",
+                        "requires_passed_stage": "sync_authoring_plan",
+                    },
+                    {
+                        "name": "bundle",
+                        "path": run_context.artifact_dir,
+                        "required_gate": "validate-authoring-bundle",
+                        "requires_passed_stage": "authoring_plan",
+                    },
+                ],
+            },
             "authoring_plan": template.to_dict(),
             "entity_inventory": template_service.build_entity_inventory_template(
                 source_id=template.source_id,
@@ -499,6 +552,317 @@ def run_validate_operation_inventory(args: argparse.Namespace) -> dict[str, Any]
             "operation_inventory": payload,
         }
     )
+
+
+def run_sync_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _sync_authoring_plan_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    bundle_dir = _resolve_bundle_dir(Path(args.path))
+    entity_inventory_path = bundle_dir / ENTITY_INVENTORY_FILENAME
+    operation_inventory_path = bundle_dir / OPERATION_INVENTORY_FILENAME
+    authoring_plan_path = bundle_dir / AUTHORING_PLAN_FILENAME
+
+    entity_payload, entity_diagnostics = _validate_entity_inventory_file(entity_inventory_path)
+    operation_payload, operation_diagnostics = _validate_operation_inventory_file(operation_inventory_path)
+    if entity_diagnostics or operation_diagnostics or entity_payload is None or operation_payload is None:
+        return to_json_safe(
+            {
+                "status": StepStatus.BLOCKED.value,
+                "message": "Authoring-plan sync is blocked until staged inventories validate.",
+                "bundle_dir": str(bundle_dir),
+                "diagnostics": [
+                    diagnostic.to_dict()
+                    for diagnostic in [*entity_diagnostics, *operation_diagnostics]
+                ],
+                "stage_results": {
+                    "entity_inventory": {
+                        "status": (StepStatus.PASS if not entity_diagnostics else StepStatus.BLOCKED).value,
+                        "file_path": str(entity_inventory_path),
+                        "diagnostics": [diagnostic.to_dict() for diagnostic in entity_diagnostics],
+                    },
+                    "operation_inventory": {
+                        "status": (StepStatus.PASS if not operation_diagnostics else StepStatus.BLOCKED).value,
+                        "file_path": str(operation_inventory_path),
+                        "diagnostics": [diagnostic.to_dict() for diagnostic in operation_diagnostics],
+                    },
+                },
+            }
+        )
+
+    load_result = AuthoringPlanCompiler().load(authoring_plan_path)
+    load_diagnostics = list(load_result.diagnostics)
+    if load_diagnostics and authoring_plan_path.exists():
+        return to_json_safe(
+            {
+                "status": StepStatus.BLOCKED.value,
+                "message": "Authoring-plan sync is blocked because the existing authoring-plan cannot be loaded.",
+                "bundle_dir": str(bundle_dir),
+                "file_path": str(authoring_plan_path),
+                "diagnostics": [diagnostic.to_dict() for diagnostic in load_diagnostics],
+            }
+        )
+    template_service = AuthoringPlanTemplateService()
+    existing_plan = load_result.authoring_plan or template_service.build_template(
+        source_id=str(entity_payload.get("source_id") or operation_payload.get("source_id") or ""),
+        project=str(entity_payload.get("project") or operation_payload.get("project") or ""),
+        title=str(entity_payload.get("surface") or operation_payload.get("surface") or "Authoring plan"),
+        goal=str(operation_payload.get("purpose") or entity_payload.get("purpose") or "Author coverage from staged inventories."),
+    )
+    synced_plan = _sync_authoring_plan_from_inventories(
+        existing_plan=existing_plan,
+        entity_inventory=entity_payload,
+        operation_inventory=operation_payload,
+    )
+    _write_synced_authoring_plan(bundle_dir, synced_plan)
+    validation_result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+    return to_json_safe(
+        {
+            "status": StepStatus.PASS.value,
+            "message": (
+                "Authoring-plan synced from staged inventories. Author or review cases next, then run "
+                "--validate-authoring-plan."
+            ),
+            "bundle_dir": str(bundle_dir),
+            "output_path": str(authoring_plan_path),
+            "case_count": len(synced_plan.cases),
+            "validation_status_after_sync": validation_result.status.value,
+            "validation_diagnostics_after_sync": [
+                diagnostic.to_dict() for diagnostic in validation_result.diagnostics
+            ],
+            "authoring_plan": synced_plan.to_dict(),
+        }
+    )
+
+
+def _sync_authoring_plan_from_inventories(
+    *,
+    existing_plan: AuthoringPlan,
+    entity_inventory: dict[str, Any],
+    operation_inventory: dict[str, Any],
+) -> AuthoringPlan:
+    entity_items = [
+        item for item in entity_inventory.get("entities", []) if isinstance(item, dict) and str(item.get("name") or "").strip()
+    ]
+    route_specs = _route_specs_by_key(operation_inventory)
+    existing_entities = dict(existing_plan.entities)
+    synced_entities: dict[str, AuthoringEntitySpec] = {}
+    for entity_item in entity_items:
+        entity_name = str(entity_item.get("name") or "").strip()
+        existing_entity = existing_entities.get(entity_name, AuthoringEntitySpec())
+        synced_entities[entity_name] = AuthoringEntitySpec(
+            id_field=str(entity_item.get("id_field") or existing_entity.id_field or "").strip(),
+            operations={},
+        )
+
+    for operation_item in operation_inventory.get("entity_operations", []):
+        if not isinstance(operation_item, dict):
+            continue
+        entity_name = str(operation_item.get("entity") or "").strip()
+        operation_name = str(operation_item.get("operation") or "").strip()
+        if not entity_name or not operation_name or entity_name not in synced_entities:
+            continue
+        existing_operation = existing_entities.get(entity_name, AuthoringEntitySpec()).operations.get(
+            operation_name,
+            AuthoringEntityOperation(),
+        )
+        synced_entities[entity_name].operations[operation_name] = _sync_route_operation_from_inventory(
+            existing_operation=existing_operation,
+            operation_item=operation_item,
+            route_specs=route_specs,
+        )
+
+    for verification_item in operation_inventory.get("db_verifications", []):
+        if not isinstance(verification_item, dict):
+            continue
+        entity_name = str(verification_item.get("entity") or "").strip()
+        operation_name = str(verification_item.get("operation") or "").strip()
+        if not entity_name or not operation_name or entity_name not in synced_entities:
+            continue
+        existing_operation = existing_entities.get(entity_name, AuthoringEntitySpec()).operations.get(
+            operation_name,
+            AuthoringEntityOperation(),
+        )
+        synced_entities[entity_name].operations[operation_name] = _sync_db_operation_from_inventory(
+            existing_operation=existing_operation,
+            verification_item=verification_item,
+        )
+
+    surface = str(operation_inventory.get("surface") or entity_inventory.get("surface") or existing_plan.scope.surface)
+    route_includes = [
+        f"{str(item.get('method') or '').strip().upper()} {str(item.get('path') or '').strip()}"
+        for item in operation_inventory.get("routes", [])
+        if isinstance(item, dict) and str(item.get("method") or "").strip() and str(item.get("path") or "").strip()
+    ]
+    cases = [] if _has_only_placeholder_cases(existing_plan) else list(existing_plan.cases)
+    return AuthoringPlan(
+        version=existing_plan.version,
+        source_id=str(entity_inventory.get("source_id") or operation_inventory.get("source_id") or existing_plan.source_id),
+        project=str(entity_inventory.get("project") or operation_inventory.get("project") or existing_plan.project),
+        title=existing_plan.title,
+        goal=existing_plan.goal,
+        scope=AuthoringScope(
+            surface=surface,
+            style=existing_plan.scope.style,
+            include=route_includes or list(existing_plan.scope.include),
+        ),
+        defaults=_sync_defaults_from_entity_inventory(existing_plan.defaults, entity_inventory),
+        entities=synced_entities,
+        cases=cases,
+        assumptions=[] if _has_placeholder_notes(existing_plan.assumptions) else list(existing_plan.assumptions),
+        open_questions=[] if _has_placeholder_notes(existing_plan.open_questions) else list(existing_plan.open_questions),
+        metadata={
+            **dict(existing_plan.metadata),
+            "authoring_workflow": "staged-v1",
+            "synced_from_inventories": True,
+        },
+    )
+
+
+def _sync_route_operation_from_inventory(
+    *,
+    existing_operation: AuthoringEntityOperation,
+    operation_item: dict[str, Any],
+    route_specs: dict[tuple[str, str], dict[str, Any]],
+) -> AuthoringEntityOperation:
+    route_payload = operation_item.get("route") if isinstance(operation_item.get("route"), dict) else None
+    method = str((route_payload or {}).get("method") or operation_item.get("method") or "").strip().upper()
+    path = str((route_payload or {}).get("path") or operation_item.get("path") or "").strip()
+    route = AuthoringRoute(method=method, path=path) if method and path else existing_operation.route
+    route_spec = route_specs.get((route.method.strip().upper(), route.path.strip())) if route is not None else None
+    status_code = _maybe_int((operation_item.get("oracle") or {}).get("status_code") if isinstance(operation_item.get("oracle"), dict) else None)
+    if status_code is None and route_spec is not None:
+        status_code = _maybe_int(route_spec.get("success_status"))
+    existing_oracle = existing_operation.oracle or AuthoringOracle()
+    oracle = AuthoringOracle(
+        status_code=status_code if status_code is not None else existing_oracle.status_code,
+        business_checks=_string_list_from_payload(
+            (operation_item.get("oracle") or {}).get("business_checks") if isinstance(operation_item.get("oracle"), dict) else None,
+            fallback=existing_oracle.business_checks or (["response JSON exists"] if status_code and status_code != 204 else []),
+        ),
+        captures=_capture_rules_from_inventory(operation_item.get("captures"), fallback=existing_oracle.captures),
+        persisted_state=existing_oracle.persisted_state,
+    )
+    return AuthoringEntityOperation(
+        route=route,
+        request_headers=dict(operation_item.get("request_headers") or operation_item.get("headers") or existing_operation.request_headers),
+        request_params=dict(operation_item.get("request_params") or operation_item.get("params") or existing_operation.request_params),
+        request_body=operation_item.get("request_body", existing_operation.request_body),
+        auth_strategy=_string_list_from_payload(operation_item.get("auth_strategy"), fallback=existing_operation.auth_strategy),
+        oracle=oracle,
+        sql=existing_operation.sql,
+        params=dict(existing_operation.params),
+        expected_outcomes=list(existing_operation.expected_outcomes),
+        captures=_capture_rules_from_inventory(operation_item.get("captures"), fallback=existing_operation.captures),
+    )
+
+
+def _sync_db_operation_from_inventory(
+    *,
+    existing_operation: AuthoringEntityOperation,
+    verification_item: dict[str, Any],
+) -> AuthoringEntityOperation:
+    return AuthoringEntityOperation(
+        route=existing_operation.route,
+        request_headers=dict(existing_operation.request_headers),
+        request_params=dict(existing_operation.request_params),
+        request_body=existing_operation.request_body,
+        auth_strategy=list(existing_operation.auth_strategy),
+        oracle=existing_operation.oracle,
+        sql=str(verification_item.get("sql") or existing_operation.sql or ""),
+        params=dict(verification_item.get("params") or existing_operation.params),
+        expected_outcomes=_string_list_from_payload(
+            verification_item.get("expected_outcomes"),
+            fallback=existing_operation.expected_outcomes,
+        ),
+        captures=_string_list_from_payload(verification_item.get("captures"), fallback=existing_operation.captures),
+    )
+
+
+def _sync_defaults_from_entity_inventory(
+    existing_defaults: AuthoringDefaults,
+    entity_inventory: dict[str, Any],
+) -> AuthoringDefaults:
+    auth_contract = entity_inventory.get("auth_contract") if isinstance(entity_inventory.get("auth_contract"), dict) else {}
+    actor = str(auth_contract.get("actor") or existing_defaults.actor or "")
+    return AuthoringDefaults(
+        environment=existing_defaults.environment,
+        auth=existing_defaults.auth,
+        actor=actor,
+        headers=dict(existing_defaults.headers),
+        scenario_variables=list(existing_defaults.scenario_variables),
+    )
+
+
+def _route_specs_by_key(operation_inventory: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    specs: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in operation_inventory.get("routes", []):
+        if not isinstance(item, dict):
+            continue
+        method = str(item.get("method") or "").strip().upper()
+        path = str(item.get("path") or "").strip()
+        if method and path:
+            specs[(method, path)] = item
+    return specs
+
+
+def _capture_rules_from_inventory(value: Any, *, fallback: list[str]) -> list[str]:
+    captures = _string_list_from_payload(value, fallback=fallback)
+    rules: list[str] = []
+    for capture in captures:
+        normalized = capture.strip()
+        if not normalized:
+            continue
+        if "->" in normalized:
+            rules.append(normalized)
+        else:
+            rules.append(f"response.json.{normalized} -> {normalized}")
+    return rules
+
+
+def _string_list_from_payload(value: Any, *, fallback: list[str]) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return list(fallback)
+
+
+def _maybe_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _has_only_placeholder_cases(plan: AuthoringPlan) -> bool:
+    return len(plan.cases) == 1 and plan.cases[0].id == "create-primary-entity"
+
+
+def _has_placeholder_notes(values: list[str]) -> bool:
+    return bool(values) and all(value.strip().lower().startswith("replace with") for value in values)
+
+
+def _write_synced_authoring_plan(bundle_dir: Path, authoring_plan: AuthoringPlan) -> Path:
+    run_context = load_generation_run_context_from_bundle_dir(bundle_dir)
+    if run_context is not None:
+        return FileGenerationArtifactStore().write_authoring_plan(run_context, authoring_plan)
+    target_path = bundle_dir / AUTHORING_PLAN_FILENAME
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:  # pragma: no cover
+        raise GenerationCliInputError(
+            [
+                GenerationDiagnostic(
+                    code="adapter_sync_authoring_plan_yaml_dependency_missing",
+                    message="PyYAML is required to write synced authoring-plan YAML.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(target_path),
+                )
+            ]
+        ) from exc
+    write_text_file(target_path, yaml.safe_dump(authoring_plan.to_dict(), allow_unicode=True, sort_keys=False))
+    return target_path
 
 
 def run_validate_authoring_bundle(args: argparse.Namespace) -> dict[str, Any]:
@@ -827,6 +1191,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = run_validate_entity_inventory(args)
         elif args.validate_operation_inventory:
             payload = run_validate_operation_inventory(args)
+        elif args.sync_authoring_plan:
+            payload = run_sync_authoring_plan(args)
         elif args.validate_authoring_bundle:
             payload = run_validate_authoring_bundle(args)
         elif args.validate_authoring_plan:
@@ -866,7 +1232,7 @@ def main(argv: list[str] | None = None) -> int:
 
     workflow = (
         "authoring"
-        if args.init_authoring_plan or args.init_entity_inventory or args.init_operation_inventory or args.init_agent_plan or args.validate_agent_plan or args.validate_entity_inventory or args.validate_operation_inventory or args.validate_authoring_bundle or args.validate_authoring_plan or args.compile_authoring_plan
+        if args.init_authoring_plan or args.init_entity_inventory or args.init_operation_inventory or args.init_agent_plan or args.validate_agent_plan or args.validate_entity_inventory or args.validate_operation_inventory or args.sync_authoring_plan or args.validate_authoring_bundle or args.validate_authoring_plan or args.compile_authoring_plan
         else "review"
         if args.review_drafts
         else "promotion"
@@ -1813,6 +2179,28 @@ def _validate_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> li
     ]
 
 
+def _sync_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if not args.path:
+        return [
+            GenerationDiagnostic(
+                code="adapter_sync_authoring_plan_requires_path",
+                message="--sync-authoring-plan requires --path pointing to a managed bundle dir or staged file inside it.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        ]
+    bundle_dir = _resolve_bundle_dir(Path(args.path))
+    if not _path_under_root(bundle_dir, MANAGED_AGENT_PLAN_ROOT):
+        return [
+            GenerationDiagnostic(
+                code="adapter_sync_authoring_plan_requires_managed_root",
+                message="--sync-authoring-plan requires a path under artifacts/agent/generation.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.path,
+            )
+        ]
+    return []
+
+
 def _validate_entity_inventory_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     if args.entity_inventory_file:
         return []
@@ -2050,6 +2438,27 @@ def _render_authoring_text(payload: dict[str, Any]) -> str:
                 f"Case count: {payload.get('case_count', 0)}",
             ]
         )
+    if payload.get("validation_status_after_sync"):
+        lines.extend(
+            [
+                f"Case count: {payload.get('case_count', 0)}",
+                f"Validation after sync: {payload.get('validation_status_after_sync')}",
+            ]
+        )
+    stage_policy = payload.get("stage_policy") or {}
+    if stage_policy:
+        lines.extend(
+            [
+                "Stage policy:",
+                f"  - mode: {stage_policy.get('mode', '')}",
+                f"  - rule: {stage_policy.get('rule', '')}",
+            ]
+        )
+        for stage in stage_policy.get("stages") or []:
+            line = f"  - {stage.get('name', '')}: {stage.get('required_gate', '')}"
+            if stage.get("requires_passed_stage"):
+                line += f" after {stage.get('requires_passed_stage')}"
+            lines.append(line)
     stage_results = payload.get("stage_results") or {}
     if stage_results:
         lines.append("Stages:")

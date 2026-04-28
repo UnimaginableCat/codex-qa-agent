@@ -104,7 +104,11 @@ Recommended order for broad controller coverage:
 
 1. fill `entity-inventory.yaml` with entities, states, normalized fields, and auth/header contract
 2. fill `operation-inventory.yaml` with setup operations, effect states, routes, and expected HTTP codes
-3. write final cases in `authoring-plan.yaml`
+3. run `--sync-authoring-plan` to hydrate repeated `authoring-plan.yaml` structure from inventories
+4. write final cases in `authoring-plan.yaml`
+
+Use strict sequential authoring for broad coverage. Fill and validate one stage before editing the
+next one; do not substantially rewrite all three staged files in the same authoring pass.
 
 Stage-oriented commands are available when the bundle already exists or only one stage file needs
 to be scaffolded or validated:
@@ -114,6 +118,7 @@ to be scaffolded or validated:
 - `--init-operation-inventory`
 - `--validate-operation-inventory`
 - `--init-authoring-plan`
+- `--sync-authoring-plan`
 - `--validate-authoring-plan`
 - `--validate-authoring-bundle`
 
@@ -141,6 +146,12 @@ Recommended managed-bundle walkthrough:
   --output-format text
 
 # stage 3
+<project-venv-python> -m tools.generation.cli `
+  --sync-authoring-plan `
+  --path artifacts/agent/generation/<run_id> `
+  --output-format text
+
+# stage 4
 <project-venv-python> -m tools.generation.cli `
   --validate-authoring-plan `
   --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `

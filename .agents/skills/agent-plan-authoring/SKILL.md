@@ -114,6 +114,19 @@ start inside the authoring branch rather than being classified first.
 
 When coverage is broad, do not jump straight to final cases in one pass.
 
+Use strict sequential authoring. Treat each staged file as a gate, not as three files to fill in
+one edit:
+
+1. Edit only `entity-inventory.yaml`, then run `--validate-entity-inventory`.
+2. Edit only `operation-inventory.yaml`, then run `--validate-operation-inventory`.
+3. Run `--sync-authoring-plan` to hydrate repeated `authoring-plan.yaml` structure from the two inventories.
+4. Edit only authored cases in `authoring-plan.yaml`, then run `--validate-authoring-plan`.
+5. Run `--validate-authoring-bundle`.
+
+Do not fill or substantially rewrite `entity-inventory.yaml`, `operation-inventory.yaml`, and
+`authoring-plan.yaml` in the same editing pass. If a later stage reveals an earlier inventory
+mistake, return to that earlier file, revalidate it, then continue forward again.
+
 Use the scaffolded bundle in this order:
 
 1. `entity-inventory.yaml`
@@ -129,8 +142,12 @@ Use the scaffolded bundle in this order:
    - lifecycle route `target_state`
    - lifecycle route `same_state_behavior` and `same_state_status` when the command can be invoked on an entity already in the target state
    - DB verification templates
-3. `authoring-plan.yaml`
+3. `--sync-authoring-plan`
+   - after both inventories validate, synchronize `scope`, `entities`, reusable route operations, and DB verification templates into `authoring-plan.yaml`
+   - this command does not invent final cases; it removes the need to repeat inventory facts by hand
+4. `authoring-plan.yaml`
    - only after the first two files are coherent
+   - author case intent, request payloads, case-local variables, and assertions that are not already sourced from inventory
 
 Prefer explicit stage commands when the bundle already exists or when you only need one stage file:
 
@@ -206,6 +223,7 @@ If a desired assertion cannot be expressed in supported DSL, prefer:
 
 - Scaffold authoring DSL bundle:
   `<venv-python> -m tools.generation.cli --init-authoring-plan --output artifacts/agent/generation --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
+  This creates all staged files as placeholders only; do not fill them all at once.
 - Scaffold or refresh entity inventory in an existing bundle:
   `<venv-python> -m tools.generation.cli --init-entity-inventory --output artifacts/agent/generation/<run_id> --source-id <id> --project code/<project> --surface "<surface>"`
 - Validate entity inventory:
@@ -214,6 +232,8 @@ If a desired assertion cannot be expressed in supported DSL, prefer:
   `<venv-python> -m tools.generation.cli --init-operation-inventory --output artifacts/agent/generation/<run_id> --source-id <id> --project code/<project> --surface "<surface>"`
 - Validate operation inventory:
   `<venv-python> -m tools.generation.cli --validate-operation-inventory --operation-inventory-file artifacts/agent/generation/<run_id>/operation-inventory.yaml --output-format text`
+- Sync authoring plan from staged inventories:
+  `<venv-python> -m tools.generation.cli --sync-authoring-plan --path artifacts/agent/generation/<run_id> --output-format text`
 - Validate authoring DSL:
   `<venv-python> -m tools.generation.cli --validate-authoring-plan --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --output-format text`
 - Validate managed staged bundle:
@@ -223,18 +243,19 @@ If a desired assertion cannot be expressed in supported DSL, prefer:
 - Generate downstream plan directly:
   `<venv-python> -m tools.generation.cli --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --workspace-root .`
 
-Use only the validate step by default inside this skill. Compile/generate commands are downstream handoff points unless the user explicitly asks to continue.
+Use only stage validation plus `--sync-authoring-plan` by default inside this skill. Compile/generate commands are downstream handoff points unless the user explicitly asks to continue.
 
 For managed bundles, prefer this exact authoring close-out:
 
 1. `--validate-entity-inventory`
 2. `--validate-operation-inventory`
-3. `--validate-authoring-plan`
-4. `--validate-authoring-bundle`
+3. `--sync-authoring-plan`
+4. `--validate-authoring-plan`
+5. `--validate-authoring-bundle`
 
-Treat step 4 as the required final handoff gate.
+Treat step 5 as the required final handoff gate.
 
-When step 4 passes, do not describe the result as runnable coverage or completed scenario
+When step 5 passes, do not describe the result as runnable coverage or completed scenario
 generation. Report the bundle path, stage statuses, authored/compiled case count from the
 validation output, and the next handoff command when the user wants promoted scenarios.
 

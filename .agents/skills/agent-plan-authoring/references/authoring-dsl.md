@@ -73,11 +73,14 @@ Compiler behavior:
 
 Recommended staged workflow:
 
+Use strict sequential authoring. Do not fill all three staged files in one pass.
+
 1. fill `entity-inventory.yaml`
    - entities
    - states
    - allowed transitions
    - normalized fields
+   - then validate this file before editing operation inventory
 2. fill `operation-inventory.yaml`
    - setup operations
    - effect states
@@ -85,9 +88,14 @@ Recommended staged workflow:
    - lifecycle route target state
    - same-state lifecycle behavior and status when reissuing the same command matters
    - DB verification templates
-3. write `authoring-plan.yaml`
+   - then validate this file before editing authoring plan
+3. run `--sync-authoring-plan`
+   - hydrate `authoring-plan.yaml` from both inventories
+   - do not manually repeat inventory-backed entity/operation templates unless the sync output shows missing executable details
+4. write `authoring-plan.yaml`
    - cases should reference the first two inventories instead of inventing lifecycle and status assumptions ad hoc
    - same-state lifecycle cases such as `archive archived`, `activate active`, and `suspend suspended` should not be authored until the route inventory explicitly says whether they reject or return an idempotent success
+   - then validate this file before the bundle gate
 
 Recommended CLI stages:
 
@@ -97,7 +105,9 @@ Recommended CLI stages:
 2. scaffold or refresh operation inventory
    - `--init-operation-inventory`
    - `--validate-operation-inventory`
-3. scaffold or refine final cases
+3. sync authoring plan from inventories
+   - `--sync-authoring-plan`
+4. scaffold or refine final cases
    - `--init-authoring-plan`
    - `--validate-authoring-plan`
 
@@ -110,9 +120,10 @@ Mandatory managed-bundle sequence:
 1. create or open bundle under `artifacts/agent/generation/<run_id>`
 2. make `entity-inventory.yaml` valid
 3. make `operation-inventory.yaml` valid
-4. make `authoring-plan.yaml` valid
-5. run `--validate-authoring-bundle`
-6. only then hand off to compile or downstream generation
+4. run `--sync-authoring-plan`
+5. make `authoring-plan.yaml` valid
+6. run `--validate-authoring-bundle`
+7. only then hand off to compile or downstream generation
 
 Do not treat `--validate-authoring-plan` by itself as the final gate for a managed staged bundle.
 
