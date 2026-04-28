@@ -352,7 +352,14 @@ class AuthoringPlanCompiler:
                 )
             )
 
-        setup_steps, setup_diagnostics, setup_captures = self._expand_setup_steps(authoring_plan, case, case_ref)
+        declared_variable_names = _declared_variable_names(authoring_plan, case)
+
+        setup_steps, setup_diagnostics, setup_captures = self._expand_setup_steps(
+            authoring_plan,
+            case,
+            case_ref,
+            available_variables=declared_variable_names,
+        )
         diagnostics.extend(setup_diagnostics)
 
         persisted_verification, persistence_diagnostics, persistence_placeholders = self._build_db_verification(
@@ -366,7 +373,7 @@ class AuthoringPlanCompiler:
             unresolved_placeholders = sorted(
                 placeholder
                 for placeholder in _extract_placeholders(case.execute.route.path)
-                if placeholder not in setup_captures
+                if placeholder not in declared_variable_names and placeholder not in setup_captures
             )
             if unresolved_placeholders:
                 diagnostics.append(
@@ -379,7 +386,8 @@ class AuthoringPlanCompiler:
                 )
 
         case_captures = [] if case.oracle is None else list(case.oracle.captures)
-        available_after_execute = set(setup_captures)
+        available_after_execute = set(declared_variable_names)
+        available_after_execute.update(setup_captures)
         available_after_execute.update(_capture_targets(case_captures))
         unresolved_persistence_placeholders = sorted(
             placeholder
@@ -504,10 +512,12 @@ class AuthoringPlanCompiler:
         authoring_plan: AuthoringPlan,
         case: AuthoringCase,
         case_ref: str,
+        *,
+        available_variables: set[str] | None = None,
     ) -> tuple[list[PlannedWorkflowStep], list[GenerationDiagnostic], set[str]]:
         workflow_steps: list[PlannedWorkflowStep] = []
         diagnostics: list[GenerationDiagnostic] = []
-        available_captures: set[str] = set()
+        available_names = set(available_variables or set())
         for step_index, setup_step in enumerate(case.setup, start=1):
             operation, lookup_diagnostics = self._resolve_entity_operation(
                 authoring_plan,
@@ -520,7 +530,7 @@ class AuthoringPlanCompiler:
                 continue
             entity_spec = authoring_plan.entities.get(setup_step.use_entity.strip())
             entity_id_field = "" if entity_spec is None else entity_spec.id_field.strip()
-            if entity_id_field and _operation_uses_placeholder(operation, entity_id_field) and entity_id_field not in available_captures:
+            if entity_id_field and _operation_uses_placeholder(operation, entity_id_field) and entity_id_field not in available_names:
                 diagnostics.append(
                     authoring_diagnostic(
                         "authoring_setup_entity_id_field_unresolved",
@@ -555,7 +565,7 @@ class AuthoringPlanCompiler:
                         metadata=_authoring_defaults_metadata(authoring_plan),
                     )
                 )
-                available_captures.update(
+                available_names.update(
                     _capture_targets(operation.captures or ([] if operation.oracle is None else operation.oracle.captures))
                 )
                 continue
@@ -574,7 +584,7 @@ class AuthoringPlanCompiler:
                         metadata=_authoring_defaults_metadata(authoring_plan),
                     )
                 )
-                available_captures.update(_capture_targets(operation.captures))
+                available_names.update(_capture_targets(operation.captures))
                 continue
             diagnostics.append(
                 authoring_diagnostic(
@@ -588,7 +598,7 @@ class AuthoringPlanCompiler:
                     },
                 )
             )
-        return workflow_steps, diagnostics, available_captures
+        return workflow_steps, diagnostics, available_names
 
     def _build_db_verification(
         self,
@@ -790,6 +800,23 @@ def _capture_targets(capture_rules: list[str]) -> set[str]:
         if normalized:
             targets.add(normalized)
     return targets
+
+
+def _declared_variable_names(authoring_plan: AuthoringPlan, case: AuthoringCase) -> set[str]:
+    return _scenario_variable_names(authoring_plan.defaults.scenario_variables) | _scenario_variable_names(
+        case.scenario_variables
+    )
+
+
+def _scenario_variable_names(definitions: list[str]) -> set[str]:
+    variable_names: set[str] = set()
+    for definition in definitions:
+        if not isinstance(definition, str) or "=" not in definition:
+            continue
+        variable_name = definition.split("=", 1)[0].strip().strip("`")
+        if variable_name and _VARIABLE_NAME_PATTERN.fullmatch(variable_name):
+            variable_names.add(variable_name)
+    return variable_names
 
 
 def _extract_placeholders(value: Any) -> set[str]:

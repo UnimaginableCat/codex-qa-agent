@@ -394,6 +394,50 @@ cases:
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertIn("authoring_setup_entity_id_field_unresolved", codes)
 
+    def test_compile_allows_setup_operation_with_entity_id_field_from_declared_variable(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=["missing_user_id = generated:uuid"],
+            ),
+            entities={
+                "missing_user": AuthoringEntitySpec(
+                    id_field="missing_user_id",
+                    operations={
+                        "bind_generated_id": AuthoringEntityOperation(
+                            sql="SELECT :missing_user_id AS missing_user_id",
+                            params={"missing_user_id": "{{missing_user_id}}"},
+                            expected_outcomes=["one row exists"],
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="get-missing-user",
+                    kind="workflow",
+                    objective="Read missing user",
+                    state_change="none",
+                    setup=[AuthoringSetupStep(use_entity="missing_user", operation="bind_generated_id")],
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/users/{{missing_user_id}}")),
+                    oracle=AuthoringOracle(status_code=404),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        compiled_case = result.compiled_plan.planned_test_cases[0]
+        self.assertEqual(compiled_case.workflow_steps[0].params["missing_user_id"], "{{missing_user_id}}")
+        self.assertEqual(compiled_case.workflow_steps[1].route.endpoint_path, "/users/{{missing_user_id}}")
+
     def test_compile_blocks_persisted_state_template_missing_entity_id_field(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -479,6 +523,65 @@ cases:
         self.assertEqual(result.status, StepStatus.BLOCKED)
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertIn("authoring_persisted_state_id_field_semantic_mismatch", codes)
+
+    def test_compile_allows_db_check_persisted_state_placeholders_from_declared_variables(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "run_suffix = generated:run_suffix",
+                    "email_suffix = derived:run_suffix|lower",
+                ],
+            ),
+            entities={
+                "invalid_user": AuthoringEntitySpec(
+                    operations={
+                        "verify_invalid_creates_absent": AuthoringEntityOperation(
+                            sql=(
+                                "SELECT COUNT(*) AS invalid_user_count "
+                                "FROM users "
+                                "WHERE display_name LIKE 'AUTOTEST Invalid User ' || :run_suffix || '%' "
+                                "OR email = 'autotest.invalid.' || :email_suffix || '@example.com'"
+                            ),
+                            params={
+                                "run_suffix": "{{run_suffix}}",
+                                "email_suffix": "{{email_suffix}}",
+                            },
+                            expected_outcomes=["one row exists", "`invalid_user_count` = `0`"],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="invalid-create-requests-do-not-persist",
+                    kind="db-check",
+                    objective="Invalid create requests do not persist users.",
+                    state_change="none",
+                    oracle=AuthoringOracle(
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="invalid_user",
+                            operation="verify_invalid_creates_absent",
+                        ),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        compiled_case = result.compiled_plan.planned_test_cases[0]
+        assert compiled_case.db_verification is not None
+        self.assertEqual(compiled_case.kind, "db")
+        self.assertEqual(compiled_case.db_verification.params["run_suffix"], "{{run_suffix}}")
+        self.assertEqual(compiled_case.db_verification.params["email_suffix"], "{{email_suffix}}")
 
     def test_compile_blocks_string_too_long_case_when_body_does_not_exceed_stated_boundary(self) -> None:
         plan = AuthoringPlan(
