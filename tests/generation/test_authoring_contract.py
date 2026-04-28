@@ -21,6 +21,7 @@ from tools.generation.authoring_contract.models import (
     AuthoringPlan,
     AuthoringRoute,
     AuthoringScope,
+    AuthoringStateChange,
     AuthoringSetupStep,
 )
 
@@ -535,6 +536,78 @@ cases:
         self.assertEqual(result.status, StepStatus.BLOCKED)
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertIn("authoring_unknown_state_change", codes)
+
+    def test_load_normalizes_known_state_change_to_enum(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "authoring-plan.yaml"
+            path.write_text(
+                """
+version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+cases:
+- id: create-user
+  kind: api
+  objective: Create user.
+  state_change: CREATE
+  execute:
+    route:
+      method: POST
+      path: /users
+  oracle:
+    status_code: 201
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().load(path)
+
+        self.assertFalse(result.diagnostics)
+        self.assertIsNotNone(result.authoring_plan)
+        assert result.authoring_plan is not None
+        self.assertEqual(result.authoring_plan.cases[0].state_change, AuthoringStateChange.CREATE)
+
+    def test_load_blocks_unknown_state_change_before_compile(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "authoring-plan.yaml"
+            path.write_text(
+                """
+version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+cases:
+- id: create-user
+  kind: api
+  objective: Create user.
+  state_change: create active user
+  execute:
+    route:
+      method: POST
+      path: /users
+  oracle:
+    status_code: 201
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertIn("authoring_unknown_state_change", codes)
+        diagnostic = next(
+            diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_unknown_state_change"
+        )
+        self.assertEqual(diagnostic.details["field"], "cases[1].state_change")
+        self.assertIn("create", diagnostic.details["allowed_values"])
 
     def test_compile_blocks_duplicate_case_ids(self) -> None:
         plan = AuthoringPlan(

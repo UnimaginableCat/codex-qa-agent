@@ -14,7 +14,13 @@ except ImportError:  # pragma: no cover - exercised via runtime environment, not
 from tools.generation.domain.models import GenerationDiagnostic
 
 from .diagnostics import authoring_diagnostic
-from .models import AuthoringPlan, AuthoringPlanLoadResult
+from .models import (
+    AUTHORING_STATE_CHANGE_ALLOWED_TEXT,
+    AuthoringPlan,
+    AuthoringPlanLoadResult,
+    AuthoringStateChange,
+    normalize_state_change_value,
+)
 
 
 class AuthoringPlanLoader:
@@ -180,6 +186,14 @@ def _validate_payload_shape(payload: Any, source_ref: str) -> list[GenerationDia
                     owner=case_id,
                 )
             )
+            diagnostics.extend(
+                _validate_state_change_field(
+                    case_payload.get("state_change"),
+                    source_ref,
+                    field_path=f"cases[{case_index}].state_change",
+                    owner=case_id,
+                )
+            )
     for field_name in ("assumptions", "open_questions"):
         value = payload.get(field_name)
         if value is not None and not isinstance(value, list):
@@ -192,6 +206,33 @@ def _validate_payload_shape(payload: Any, source_ref: str) -> list[GenerationDia
                 )
             )
     return diagnostics
+
+
+def _validate_state_change_field(
+    value: Any,
+    source_ref: str,
+    *,
+    field_path: str,
+    owner: str,
+) -> list[GenerationDiagnostic]:
+    normalized = normalize_state_change_value(value)
+    if not normalized:
+        return []
+    if AuthoringStateChange.from_raw(value) is not None:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_unknown_state_change",
+            f"Authoring case state_change must be one of {AUTHORING_STATE_CHANGE_ALLOWED_TEXT}.",
+            source_ref=source_ref,
+            details={
+                "field": field_path,
+                "owner": owner,
+                "state_change": value,
+                "allowed_values": list(AuthoringStateChange.allowed_values()),
+            },
+        )
+    ]
 
 
 def _validate_scenario_variables_shape(

@@ -27,13 +27,16 @@ from tools.scenario_runner.parsing.variables.validation import build_variable_de
 from .diagnostics import authoring_diagnostic, build_authoring_message, derive_authoring_status
 from .loaders import AuthoringPlanLoader
 from .models import (
+    AUTHORING_STATE_CHANGE_ALLOWED_TEXT,
     AuthoringCase,
     AuthoringEntityOperation,
     AuthoringPlan,
     AuthoringPlanCompileResult,
     AuthoringPlanLoadResult,
+    AuthoringStateChange,
     AuthoringSetupStep,
     _maybe_int,
+    normalize_state_change_value,
 )
 
 _PLACEHOLDER_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
@@ -59,9 +62,6 @@ _ZERO_FIELD_PATTERN = re.compile(
     r"\bzero\s+(?P<field>[A-Za-z_][A-Za-z0-9_-]*)\b",
     re.IGNORECASE,
 )
-_MUTATING_STATE_CHANGES = {"create", "update", "delete", "mutate"}
-_READ_ONLY_STATE_CHANGES = {"none", "read_only", "readonly"}
-_SUPPORTED_STATE_CHANGES = _MUTATING_STATE_CHANGES | _READ_ONLY_STATE_CHANGES
 _SUPPORTED_CASE_KINDS = {"api", "workflow", "db-check"}
 _SUPPORTED_SAME_STATE_BEHAVIORS = {"reject", "idempotent_success"}
 
@@ -316,7 +316,8 @@ class AuthoringPlanCompiler:
                     details={"case_index": index},
                 )
             )
-        if not case.state_change.strip():
+        normalized_state_change = normalize_state_change_value(case.state_change)
+        if not normalized_state_change:
             diagnostics.append(
                 authoring_diagnostic(
                     "authoring_case_missing_state_change",
@@ -325,11 +326,11 @@ class AuthoringPlanCompiler:
                     details={"case_index": index},
                 )
             )
-        elif case.state_change.strip().lower() not in _SUPPORTED_STATE_CHANGES:
+        elif AuthoringStateChange.from_raw(case.state_change) is None:
             diagnostics.append(
                 authoring_diagnostic(
                     "authoring_unknown_state_change",
-                    "Authoring case state_change must be one of create, update, delete, mutate, none, read_only, or readonly.",
+                    f"Authoring case state_change must be one of {AUTHORING_STATE_CHANGE_ALLOWED_TEXT}.",
                     source_ref=case_ref,
                     details={"case_index": index, "state_change": case.state_change},
                 )
@@ -902,12 +903,10 @@ def _operation_uses_placeholder(operation: AuthoringEntityOperation, variable_na
 
 
 def _requires_persistence(state_change: str) -> bool:
-    normalized = state_change.strip().lower()
-    if not normalized:
+    parsed = AuthoringStateChange.from_raw(state_change)
+    if parsed is None:
         return False
-    if normalized in _READ_ONLY_STATE_CHANGES:
-        return False
-    return normalized in _MUTATING_STATE_CHANGES
+    return parsed.requires_persistence
 
 
 def _authoring_defaults_metadata(authoring_plan: AuthoringPlan) -> dict[str, Any]:

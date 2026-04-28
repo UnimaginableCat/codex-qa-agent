@@ -3,12 +3,60 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 from tools.generation.domain.models import AgentTestPlanInput, GenerationDiagnostic
+
+
+class AuthoringStateChange(StrEnum):
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
+    MUTATE = "mutate"
+    NONE = "none"
+    READ_ONLY = "read_only"
+    READONLY = "readonly"
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "AuthoringStateChange | None":
+        normalized = normalize_state_change_value(value)
+        if not normalized:
+            return None
+        try:
+            return cls(normalized)
+        except ValueError:
+            return None
+
+    @classmethod
+    def allowed_values(cls) -> tuple[str, ...]:
+        return tuple(item.value for item in cls)
+
+    @property
+    def requires_persistence(self) -> bool:
+        return self in {
+            AuthoringStateChange.CREATE,
+            AuthoringStateChange.UPDATE,
+            AuthoringStateChange.DELETE,
+            AuthoringStateChange.MUTATE,
+        }
+
+
+AUTHORING_STATE_CHANGE_ALLOWED_TEXT = ", ".join(AuthoringStateChange.allowed_values())
+
+
+def normalize_state_change_value(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def parse_state_change_or_raw(value: Any) -> AuthoringStateChange | str:
+    parsed = AuthoringStateChange.from_raw(value)
+    if parsed is not None:
+        return parsed
+    return str(value or "").strip()
 
 
 @dataclass(slots=True)
@@ -233,7 +281,7 @@ class AuthoringCase:
     kind: str = ""
     title: str = ""
     objective: str = ""
-    state_change: str = ""
+    state_change: AuthoringStateChange | str = ""
     setup: list[AuthoringSetupStep] = field(default_factory=list)
     execute: AuthoringExecute | None = None
     oracle: AuthoringOracle | None = None
@@ -258,7 +306,7 @@ class AuthoringCase:
             kind=str(payload.get("kind", "")),
             title=str(payload.get("title", "")),
             objective=str(payload.get("objective", "")),
-            state_change=str(payload.get("state_change", "")),
+            state_change=parse_state_change_or_raw(payload.get("state_change", "")),
             setup=[
                 AuthoringSetupStep.from_dict(item)
                 for item in payload.get("setup", [])
