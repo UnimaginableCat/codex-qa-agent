@@ -1904,6 +1904,95 @@ cases:
         self.assertEqual(diagnostics[0].details["same_state_behavior"], "idempotent_success")
         self.assertEqual(diagnostics[0].details["same_state_status"], 200)
 
+    def test_compile_file_allows_inventory_backed_same_state_reject_with_success_precondition(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0007"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    states: [ACTIVE, SUSPENDED]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create_active
+    effect_state: ACTIVE
+    captures:
+      - response.json.id -> user_id
+routes:
+  - method: POST
+    path: /users/{{user_id}}/activate
+    success_status: 200
+    failure_statuses: [400, 404]
+    precondition_state: SUSPENDED
+    target_state: ACTIVE
+    same_state_behavior: reject
+    same_state_status: 400
+    same_state_evidence: ActivateUserHandler rejects users whose status is not SUSPENDED before calling User.activate.
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      create_active:
+        route:
+          method: POST
+          path: /users
+        captures:
+          - response.json.id -> user_id
+cases:
+  - id: activate-active-user-rejected
+    kind: workflow
+    title: Activate active user rejected
+    objective: Reject activation when the user is already ACTIVE.
+    state_change: none
+    setup:
+      - use_entity: user
+        operation: create_active
+    execute:
+      route:
+        method: POST
+        path: /users/{{user_id}}/activate
+    oracle:
+      status_code: 400
+      business_checks:
+        - HTTP 400
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertNotIn(
+            "authoring_stage_inventory_state_mismatch",
+            {diagnostic.code for diagnostic in result.diagnostics},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1505,6 +1505,8 @@ def _cross_check_authoring_plan_against_stage_inventories(
                 actual_state=actual_state,
             )
         )
+        if _is_same_state_inventory_case(route_spec=route_spec, route_key=route_key, actual_state=actual_state):
+            continue
         expected_state = _normalized_inventory_state(route_spec.get("precondition_state")) or _expected_precondition_state(case)
         if expected_state is None or actual_state is None or expected_state == actual_state:
             continue
@@ -1982,6 +1984,18 @@ def _same_state_inventory_contract_diagnostics(
             )
         ]
     return []
+
+
+def _is_same_state_inventory_case(
+    *,
+    route_spec: dict[str, Any],
+    route_key: tuple[str, str],
+    actual_state: str | None,
+) -> bool:
+    if actual_state is None:
+        return False
+    target_state = _normalized_inventory_state(route_spec.get("target_state")) or _inferred_route_target_state(route_key[1])
+    return target_state is not None and actual_state == target_state
 
 
 def _normalized_inventory_same_state_behavior(value: Any) -> str | None:
