@@ -98,6 +98,21 @@ Recommended CLI stages:
    - `--init-authoring-plan`
    - `--validate-authoring-plan`
 
+Recommended final stage gate before compile:
+
+- `--validate-authoring-bundle --path artifacts/agent/generation/<run_id>`
+
+Mandatory managed-bundle sequence:
+
+1. create or open bundle under `artifacts/agent/generation/<run_id>`
+2. make `entity-inventory.yaml` valid
+3. make `operation-inventory.yaml` valid
+4. make `authoring-plan.yaml` valid
+5. run `--validate-authoring-bundle`
+6. only then hand off to compile or downstream generation
+
+Do not treat `--validate-authoring-plan` by itself as the final gate for a managed staged bundle.
+
 Downstream note:
 
 - standalone `db-check` authoring cases compile correctly, but they are not the default choice for controller coverage when the next stages are `render -> review -> promote`

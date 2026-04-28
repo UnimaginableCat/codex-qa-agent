@@ -116,8 +116,9 @@ Do not start with broad code analysis for a runnable scenario unless the user ex
 
 - Prefer one primary skill for the main branch and add secondary skills only when the branch requires them.
 - Prefer `runner-execution` over manual API/DB replay when a runnable scenario exists.
-- Prefer `agent-plan-authoring` when the request is about decomposition, coverage design, or creating/filling the bundle-local `artifacts/agent/generation/<run_id>/authoring-plan.yaml`.
+- Prefer `agent-plan-authoring` when the request is about decomposition, coverage design, or creating/filling the staged bundle under `artifacts/agent/generation/<run_id>/` with `entity-inventory.yaml`, `operation-inventory.yaml`, and `authoring-plan.yaml`.
 - Prefer `test-plan-generation` when the request starts from an existing generation bundle and asks for compile, generate, render, review, promote, or validate.
+- Before routing an existing staged authoring bundle into compile or generate, require `--validate-authoring-bundle` as the final authoring gate.
 - Do not route broad coverage-authoring requests directly into `test-plan-generation`.
 - Use `env-resolution` before manual API or DB work if config is unclear.
 - Use `reporting` after execution/investigation when the user needs a final QA report or consolidated result.
@@ -128,7 +129,7 @@ When this skill is used, the agent should make the routing decision explicit:
 - target project if known
 - chosen primary branch
 - chosen primary skill
-- authoring artifact when relevant: `artifacts/agent/generation/<run_id>/authoring-plan.yaml`
+- authoring bundle when relevant: `artifacts/agent/generation/<run_id>/`
 - downstream artifact when relevant: compiled `agent-plan.json`
 - secondary skills that may be needed later
 - reason this branch was selected
@@ -153,14 +154,14 @@ Examples:
 Use skill: qa-entrypoint
 
 project: code/LeadFlow
-request: Scaffold and author authoring-plan.yaml for full InternalUserController coverage.
+request: Scaffold and fill a staged authoring bundle for full InternalUserController coverage, including entity inventory, operation inventory, and final authoring plan.
 ```
 
 ```text
 Use skill: qa-entrypoint
 
 project: code/LeadFlow
-request: Take the existing authoring-plan.yaml from the generation bundle and run downstream generation to draft scenarios.
+request: Take the existing staged authoring bundle, verify it passes validate-authoring-bundle, and then run downstream generation to draft scenarios.
 ```
 
 # Guardrails

@@ -63,7 +63,7 @@ Supported case kinds in MVP:
 # Lifecycle
 
 ```text
-understand scope -> inventory entities/states -> inventory operations/status contracts -> author cases -> validate authoring-plan -> stop
+understand scope -> inventory entities/states -> inventory operations/status contracts -> author cases -> validate staged bundle -> stop
 ```
 
 Default completion point:
@@ -71,7 +71,8 @@ Default completion point:
 - `authoring-plan.yaml` exists or was updated
 - `entity-inventory.yaml` and `operation-inventory.yaml` were reviewed or updated when the bundle was scaffolded
 - when scaffolded from CLI, it lives under `artifacts/agent/generation/<run_id>/authoring-plan.yaml`
-- `--validate-authoring-plan` was run
+- `--validate-authoring-bundle --path artifacts/agent/generation/<run_id>` was run for managed bundles
+- `--validate-authoring-plan` may still be used as a local authoring check, but it is not the final staged handoff gate for managed bundles
 - authoring-level diagnostics were resolved or explicitly reported
 - downstream compile/render/promote work is left to `test-plan-generation`
 
@@ -132,6 +133,10 @@ Prefer explicit stage commands when the bundle already exists or when you only n
 - `--init-authoring-plan`
 - `--validate-authoring-plan`
 
+Before handing off to compile or downstream generation, prefer one bundle-level gate:
+
+- `--validate-authoring-bundle --path artifacts/agent/generation/<run_id>`
+
 This staged pass reduces common authoring failures:
 
 - wrong setup state for workflow routes
@@ -186,14 +191,33 @@ If a desired assertion cannot be expressed in supported DSL, prefer:
 
 - Scaffold authoring DSL bundle:
   `<venv-python> -m tools.generation.cli --init-authoring-plan --output artifacts/agent/generation --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
+- Scaffold or refresh entity inventory in an existing bundle:
+  `<venv-python> -m tools.generation.cli --init-entity-inventory --output artifacts/agent/generation/<run_id> --source-id <id> --project code/<project> --surface "<surface>"`
+- Validate entity inventory:
+  `<venv-python> -m tools.generation.cli --validate-entity-inventory --entity-inventory-file artifacts/agent/generation/<run_id>/entity-inventory.yaml --output-format text`
+- Scaffold or refresh operation inventory in an existing bundle:
+  `<venv-python> -m tools.generation.cli --init-operation-inventory --output artifacts/agent/generation/<run_id> --source-id <id> --project code/<project> --surface "<surface>"`
+- Validate operation inventory:
+  `<venv-python> -m tools.generation.cli --validate-operation-inventory --operation-inventory-file artifacts/agent/generation/<run_id>/operation-inventory.yaml --output-format text`
 - Validate authoring DSL:
   `<venv-python> -m tools.generation.cli --validate-authoring-plan --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --output-format text`
+- Validate managed staged bundle:
+  `<venv-python> -m tools.generation.cli --validate-authoring-bundle --path artifacts/agent/generation/<run_id> --output-format text`
 - Compile to managed bundle:
   `<venv-python> -m tools.generation.cli --compile-authoring-plan --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --output artifacts/agent/generation --output-format text`
 - Generate downstream plan directly:
   `<venv-python> -m tools.generation.cli --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml --workspace-root .`
 
 Use only the validate step by default inside this skill. Compile/generate commands are downstream handoff points unless the user explicitly asks to continue.
+
+For managed bundles, prefer this exact authoring close-out:
+
+1. `--validate-entity-inventory`
+2. `--validate-operation-inventory`
+3. `--validate-authoring-plan`
+4. `--validate-authoring-bundle`
+
+Treat step 4 as the required final handoff gate.
 
 If validation fails on expectation syntax, rewrite the authoring DSL itself. Do not keep unsupported phrasing and hope downstream render/review will compensate.
 

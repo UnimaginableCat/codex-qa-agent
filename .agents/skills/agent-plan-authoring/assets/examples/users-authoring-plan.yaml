@@ -4,6 +4,14 @@ project: code/demo-project
 title: Admin users controller coverage
 goal: Verify admin user-management flows through the admin API client profile
 
+# Managed-bundle note:
+# This file is the third stage artifact.
+# Final handoff for staged authoring should validate:
+# 1. entity-inventory.yaml
+# 2. operation-inventory.yaml
+# 3. this authoring-plan.yaml
+# 4. the whole bundle with --validate-authoring-bundle
+
 scope:
   surface: users-controller
   style: api-first

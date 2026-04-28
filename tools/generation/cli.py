@@ -95,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate a compact authoring-plan file without compile or generation.",
     )
     workflow.add_argument(
+        "--validate-authoring-bundle",
+        action="store_true",
+        help="Validate entity inventory, operation inventory, and authoring plan together for one managed bundle.",
+    )
+    workflow.add_argument(
         "--validate-entity-inventory",
         action="store_true",
         help="Validate an entity-inventory YAML file without compile or generation.",
@@ -496,6 +501,27 @@ def run_validate_operation_inventory(args: argparse.Namespace) -> dict[str, Any]
     )
 
 
+def run_validate_authoring_bundle(args: argparse.Namespace) -> dict[str, Any]:
+    diagnostics = _validate_authoring_bundle_adapter_diagnostics(args)
+    if diagnostics:
+        raise GenerationCliInputError(diagnostics)
+    bundle_dir = _resolve_bundle_dir(Path(args.path))
+    overall_status, stage_results, _ = _evaluate_authoring_bundle(bundle_dir)
+    return to_json_safe(
+        {
+            "status": overall_status.value,
+            "message": (
+                "Authoring bundle is structurally valid across entity inventory, operation inventory, and authoring plan."
+                if overall_status == StepStatus.PASS
+                else "Authoring bundle is blocked by staged authoring validation diagnostics."
+            ),
+            "bundle_dir": str(bundle_dir),
+            "stage_order": ["entity_inventory", "operation_inventory", "authoring_plan"],
+            "stage_results": stage_results,
+        }
+    )
+
+
 def run_validate_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
     diagnostics = _validate_authoring_plan_adapter_diagnostics(args)
     if diagnostics:
@@ -519,7 +545,22 @@ def run_compile_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
     diagnostics = _compile_authoring_plan_adapter_diagnostics(args)
     if diagnostics:
         raise GenerationCliInputError(diagnostics)
-    result = AuthoringPlanCompiler().compile_file(Path(args.authoring_plan_file))
+    authoring_plan_path = Path(args.authoring_plan_file)
+    bundle_dir = _managed_bundle_dir_for_authoring_path(authoring_plan_path)
+    if bundle_dir is not None:
+        bundle_status, stage_results, bundle_diagnostics = _evaluate_authoring_bundle(bundle_dir)
+        if bundle_status != StepStatus.PASS:
+            return to_json_safe(
+                {
+                    "status": bundle_status.value,
+                    "message": "Managed authoring bundle is blocked by staged validation diagnostics.",
+                    "file_path": str(authoring_plan_path),
+                    "input_mode": GenerationInputMode.AUTHORING_PLAN.value,
+                    "diagnostics": [diagnostic.to_dict() for diagnostic in bundle_diagnostics],
+                    "stage_results": stage_results,
+                }
+            )
+    result = AuthoringPlanCompiler().compile_file(authoring_plan_path)
     payload: dict[str, Any] = {
         "status": result.status.value,
         "message": result.message,
@@ -629,6 +670,82 @@ def _load_existing_bundle_context(path: Path):
     return None
 
 
+def _managed_bundle_dir_for_authoring_path(path: Path) -> Path | None:
+    resolved = path.resolve()
+    if managed_generation_artifacts_root_for_path(resolved) is None:
+        return None
+    if resolved.is_dir():
+        return resolved
+    if resolved.is_file() and resolved.name == AUTHORING_PLAN_FILENAME:
+        return resolved.parent
+    return None
+
+
+def _resolve_bundle_dir(path: Path) -> Path:
+    resolved = path.resolve()
+    if resolved.is_dir():
+        return resolved
+    if resolved.is_file() and resolved.name in {
+        CONTEXT_FILENAME,
+        AUTHORING_PLAN_FILENAME,
+        ENTITY_INVENTORY_FILENAME,
+        OPERATION_INVENTORY_FILENAME,
+    }:
+        return resolved.parent
+    return resolved
+
+
+def _highest_priority_status(statuses: list[StepStatus]) -> StepStatus:
+    if StepStatus.ERROR in statuses:
+        return StepStatus.ERROR
+    if StepStatus.BLOCKED in statuses:
+        return StepStatus.BLOCKED
+    if StepStatus.FAIL in statuses:
+        return StepStatus.FAIL
+    return StepStatus.PASS
+
+
+def _evaluate_authoring_bundle(
+    bundle_dir: Path,
+) -> tuple[StepStatus, dict[str, Any], list[GenerationDiagnostic]]:
+    entity_inventory_path = bundle_dir / ENTITY_INVENTORY_FILENAME
+    operation_inventory_path = bundle_dir / OPERATION_INVENTORY_FILENAME
+    authoring_plan_path = bundle_dir / AUTHORING_PLAN_FILENAME
+
+    entity_payload, entity_diagnostics = _validate_entity_inventory_file(entity_inventory_path)
+    entity_status = StepStatus.PASS if not entity_diagnostics else StepStatus.BLOCKED
+
+    operation_payload, operation_diagnostics = _validate_operation_inventory_file(operation_inventory_path)
+    operation_status = StepStatus.PASS if not operation_diagnostics else StepStatus.BLOCKED
+
+    authoring_result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+    authoring_status = authoring_result.status
+
+    stage_results = {
+        "entity_inventory": {
+            "status": entity_status.value,
+            "file_path": str(entity_inventory_path),
+            "diagnostics": [diagnostic.to_dict() for diagnostic in entity_diagnostics],
+            "payload": entity_payload,
+        },
+        "operation_inventory": {
+            "status": operation_status.value,
+            "file_path": str(operation_inventory_path),
+            "diagnostics": [diagnostic.to_dict() for diagnostic in operation_diagnostics],
+            "payload": operation_payload,
+        },
+        "authoring_plan": {
+            "status": authoring_status.value,
+            "file_path": None if authoring_result.file_path is None else str(authoring_result.file_path),
+            "diagnostics": [diagnostic.to_dict() for diagnostic in authoring_result.diagnostics],
+            "payload": None if authoring_result.authoring_plan is None else authoring_result.authoring_plan.to_dict(),
+        },
+    }
+    overall_status = _highest_priority_status([entity_status, operation_status, authoring_status])
+    diagnostics = [*entity_diagnostics, *operation_diagnostics, *authoring_result.diagnostics]
+    return overall_status, stage_results, diagnostics
+
+
 def summarize_result(result: Any) -> dict[str, Any]:
     scenario_render_result = result.scenario_render_result
     unresolved_intents = _scenario_unresolved_intents(scenario_render_result)
@@ -681,6 +798,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = run_validate_entity_inventory(args)
         elif args.validate_operation_inventory:
             payload = run_validate_operation_inventory(args)
+        elif args.validate_authoring_bundle:
+            payload = run_validate_authoring_bundle(args)
         elif args.validate_authoring_plan:
             payload = run_validate_authoring_plan(args)
         elif args.compile_authoring_plan:
@@ -718,7 +837,7 @@ def main(argv: list[str] | None = None) -> int:
 
     workflow = (
         "authoring"
-        if args.init_authoring_plan or args.init_entity_inventory or args.init_operation_inventory or args.init_agent_plan or args.validate_agent_plan or args.validate_entity_inventory or args.validate_operation_inventory or args.validate_authoring_plan or args.compile_authoring_plan
+        if args.init_authoring_plan or args.init_entity_inventory or args.init_operation_inventory or args.init_agent_plan or args.validate_agent_plan or args.validate_entity_inventory or args.validate_operation_inventory or args.validate_authoring_bundle or args.validate_authoring_plan or args.compile_authoring_plan
         else "review"
         if args.review_drafts
         else "promotion"
@@ -1049,6 +1168,11 @@ def _load_agent_plan_file(path: Path) -> AgentTestPlanInput:
 
 
 def _compile_authoring_plan_file(path: Path):
+    bundle_dir = _managed_bundle_dir_for_authoring_path(path)
+    if bundle_dir is not None:
+        bundle_status, _, bundle_diagnostics = _evaluate_authoring_bundle(bundle_dir)
+        if bundle_status != StepStatus.PASS:
+            raise GenerationCliInputError(bundle_diagnostics)
     compile_result = AuthoringPlanCompiler().compile_file(path)
     if compile_result.status != StepStatus.PASS or compile_result.compiled_plan is None:
         raise GenerationCliInputError(
@@ -1589,6 +1713,28 @@ def _validate_operation_inventory_adapter_diagnostics(args: argparse.Namespace) 
     ]
 
 
+def _validate_authoring_bundle_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    if not args.path:
+        return [
+            GenerationDiagnostic(
+                code="adapter_validate_authoring_bundle_requires_path",
+                message="--validate-authoring-bundle requires --path pointing to a managed bundle dir or one staged file inside it.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        ]
+    bundle_dir = _resolve_bundle_dir(Path(args.path))
+    if not _path_under_root(bundle_dir, MANAGED_AGENT_PLAN_ROOT):
+        return [
+            GenerationDiagnostic(
+                code="adapter_validate_authoring_bundle_requires_managed_root",
+                message="--validate-authoring-bundle requires a path under artifacts/agent/generation.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=args.path,
+            )
+        ]
+    return []
+
+
 def _compile_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     diagnostics = _validate_authoring_plan_adapter_diagnostics(args)
     if not args.output:
@@ -1691,8 +1837,8 @@ def _revalidation_dir_adapter_diagnostics(args: argparse.Namespace) -> list[Gene
 def _error_payload(diagnostics: list[GenerationDiagnostic]) -> dict[str, Any]:
     return to_json_safe(
         {
-            "status": StepStatus.ERROR.value,
-            "message": "Generation adapter input was invalid.",
+            "status": StepStatus.BLOCKED.value,
+            "message": "Generation adapter request is blocked by input or staged-validation diagnostics.",
             "diagnostics": [diagnostic.to_dict() for diagnostic in diagnostics],
             "artifact_paths": {},
         }

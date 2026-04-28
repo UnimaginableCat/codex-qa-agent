@@ -52,6 +52,8 @@ for later phases.
   `<venv-python> -m tools.generation.cli --validate-agent-plan --agent-plan-file <bundle>/agent-plan.json --output-format text`
 - Validate authoring DSL:
   `<venv-python> -m tools.generation.cli --validate-authoring-plan --authoring-plan-file <bundle>/authoring-plan.yaml --output-format text`
+- Validate staged authoring bundle:
+  `<venv-python> -m tools.generation.cli --validate-authoring-bundle --path <bundle> --output-format text`
 - Scaffold authoring DSL bundle:
   `<venv-python> -m tools.generation.cli --init-authoring-plan --output artifacts/agent/generation --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
 - Compile authoring DSL:
@@ -104,7 +106,8 @@ for later phases.
 ## Quality Gates
 
 - `validate-agent-plan` is the minimum gate, not the only gate.
-- `validate-authoring-plan` is the minimum gate for `artifacts/agent/generation/<run_id>/authoring-plan.yaml` before compile.
+- `validate-authoring-plan` is a local authoring check, not the final managed-bundle gate.
+- For managed staged bundles, `validate-authoring-bundle` is the required pre-compile and pre-generate gate; do not skip straight from edited inventories/authoring-plan into compile or generation.
 - If later phases are requested, treat render/review/compile warnings as authoring defects to fix back in the bundle-local `authoring-plan.yaml` or compiled `agent-plan.json`, not as acceptable follow-up manual cleanup.
 - Do not treat drafts with unresolved `data_setup`, `assertion_detail`, `environment`, `auth_strategy`, or `executable_detail` gaps as close to runnable or promotable. Return to the source authoring artifact instead.
 - If a rendered standalone case still depends on seeded IDs, missing machine-readable variables, or undeclared setup fixtures, rewrite it as a self-contained workflow case or keep it deferred on purpose.

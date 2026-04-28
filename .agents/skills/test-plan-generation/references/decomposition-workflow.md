@@ -7,11 +7,12 @@ Transform a broad feature/controller request into a high-quality `AgentTestPlanI
 ## Core Method
 
 1. Identify scope.
-2. Extract concrete operations.
-3. Define coverage buckets.
-4. Expand planned test cases.
-5. Add assumptions and open questions.
-6. Align API/DB cases with downstream scenario syntax.
+2. Inventory entities and lifecycle facts.
+3. Extract concrete operations and status contracts.
+4. Define coverage buckets.
+5. Expand planned test cases.
+6. Add assumptions and open questions.
+7. Align API/DB cases with downstream scenario syntax.
 
 ## Compact-First Rule
 
@@ -46,6 +47,9 @@ Look for named operations first:
 - `authenticate`
 - `transition`
 
+For managed staged bundles, do this in `operation-inventory.yaml` before treating any route/status
+assumption as available to final cases.
+
 ### Define Coverage Buckets
 
 Common buckets:
@@ -72,6 +76,7 @@ Execution-first pattern:
 - make those seed cases fully executable before expanding the rest
 - if a field is normalized or transformed by the system, model both input and expected output explicitly with separate variables
 - avoid prose bundles like "send several invalid payloads" unless they are rendered as separate executable workflow steps
+- do not author final cases until `entity-inventory.yaml` and `operation-inventory.yaml` are already valid
 
 For full workflows:
 
@@ -96,3 +101,12 @@ Prefer adding:
 - `auth_strategy[]` / `requires_auth_strategy` when auth is not implicit
 - `db_verification` / `requires_db_verification` when persisted state is part of the contract
 - derived/template variables when expectations depend on normalized output values rather than raw request values
+
+Final staged handoff:
+
+- `--validate-entity-inventory`
+- `--validate-operation-inventory`
+- `--validate-authoring-plan`
+- `--validate-authoring-bundle`
+
+Treat the bundle-level validation as the required handoff point before compile/generate.

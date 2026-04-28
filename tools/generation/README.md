@@ -115,6 +115,43 @@ to be scaffolded or validated:
 - `--validate-operation-inventory`
 - `--init-authoring-plan`
 - `--validate-authoring-plan`
+- `--validate-authoring-bundle`
+
+Recommended managed-bundle walkthrough:
+
+```powershell
+# stage 1
+<project-venv-python> -m tools.generation.cli `
+  --init-entity-inventory `
+  --output artifacts/agent/generation/<run_id>
+
+<project-venv-python> -m tools.generation.cli `
+  --validate-entity-inventory `
+  --entity-inventory-file artifacts/agent/generation/<run_id>/entity-inventory.yaml `
+  --output-format text
+
+# stage 2
+<project-venv-python> -m tools.generation.cli `
+  --init-operation-inventory `
+  --output artifacts/agent/generation/<run_id>
+
+<project-venv-python> -m tools.generation.cli `
+  --validate-operation-inventory `
+  --operation-inventory-file artifacts/agent/generation/<run_id>/operation-inventory.yaml `
+  --output-format text
+
+# stage 3
+<project-venv-python> -m tools.generation.cli `
+  --validate-authoring-plan `
+  --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
+  --output-format text
+
+# final gate before compile/generate
+<project-venv-python> -m tools.generation.cli `
+  --validate-authoring-bundle `
+  --path artifacts/agent/generation/<run_id> `
+  --output-format text
+```
 
 For managed bundles, validate and compile now cross-check `authoring-plan.yaml` against both
 inventories. Missing or contradictory entity names, operations, routes, status codes, or workflow
@@ -149,6 +186,9 @@ Authoring-plan compile:
   --output artifacts/agent/generation `
   --output-format text
 ```
+
+For managed staged bundles, do not call compile or direct generation before `--validate-authoring-bundle`
+passes.
 
 Direct generation from authoring-plan:
 

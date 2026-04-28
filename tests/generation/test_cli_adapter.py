@@ -230,6 +230,173 @@ db_verifications: []
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
         self.assertIn("adapter_operation_inventory_unknown_entity", codes)
 
+    def test_validate_authoring_bundle_returns_pass_for_scaffolded_bundle(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                init_exit_code = cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            init_payload = json.loads(init_stdout.getvalue())
+            bundle_dir = Path(init_payload["bundle_dir"])
+
+            validate_stdout = io.StringIO()
+            with redirect_stdout(validate_stdout):
+                validate_exit_code = cli.main(
+                    [
+                        "--validate-authoring-bundle",
+                        "--path",
+                        str(bundle_dir),
+                    ]
+                )
+            validate_payload = json.loads(validate_stdout.getvalue())
+
+        self.assertEqual(init_exit_code, 0)
+        self.assertEqual(validate_exit_code, 0)
+        self.assertEqual(validate_payload["status"], "PASS")
+        self.assertEqual(validate_payload["stage_order"], ["entity_inventory", "operation_inventory", "authoring_plan"])
+        self.assertEqual(validate_payload["stage_results"]["authoring_plan"]["status"], "PASS")
+
+    def test_validate_authoring_bundle_returns_blocked_for_stage_mismatch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0005"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "context.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "gen-20260428T000000Z-test0005",
+                        "workspace_root": str(Path(tmp).resolve()),
+                        "source_id": "users-api",
+                        "project": "code/demo",
+                        "artifacts_root_dir": str((Path(tmp) / "artifacts" / "agent" / "generation").resolve()),
+                        "artifact_dir": str(bundle_dir.resolve()),
+                        "started_at": "2026-04-28T00:00:00+00:00",
+                        "variables": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    states: [ACTIVE, SUSPENDED, ARCHIVED]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create
+    effect_state: ACTIVE
+  - entity: user
+    operation: archive
+    effect_state: ARCHIVED
+routes:
+  - method: POST
+    path: /users/{{user_id}}/activate
+    success_status: 200
+    failure_statuses: [400, 404]
+    precondition_state: SUSPENDED
+db_verifications:
+  - entity: user
+    operation: verify_active
+    scoped_by: user_id
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "authoring-plan.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover users API behavior.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      create:
+        route:
+          method: POST
+          path: /users
+      archive:
+        route:
+          method: POST
+          path: /users/{{user_id}}/archive
+      verify_active:
+        sql: SELECT status FROM users WHERE id = :user_id
+        params:
+          user_id: "{{user_id}}"
+        expected_outcomes:
+          - one row exists
+cases:
+  - id: activate-user
+    kind: workflow
+    objective: Activate suspended user.
+    state_change: none
+    setup:
+      - use_entity: user
+        operation: create
+      - use_entity: user
+        operation: archive
+    execute:
+      route:
+        method: POST
+        path: /users/{{user_id}}/activate
+    oracle:
+      status_code: 200
+      persisted_state:
+        entity: user
+        operation: verify_active
+""",
+                encoding="utf-8",
+            )
+
+            validate_stdout = io.StringIO()
+            with redirect_stdout(validate_stdout):
+                validate_exit_code = cli.main(
+                    [
+                        "--validate-authoring-bundle",
+                        "--path",
+                        str(bundle_dir),
+                    ]
+                )
+            validate_payload = json.loads(validate_stdout.getvalue())
+
+        self.assertNotEqual(validate_exit_code, 0)
+        self.assertEqual(validate_payload["status"], "BLOCKED")
+        self.assertEqual(validate_payload["stage_results"]["authoring_plan"]["status"], "BLOCKED")
+        authoring_codes = {
+            diagnostic["code"]
+            for diagnostic in validate_payload["stage_results"]["authoring_plan"]["diagnostics"]
+        }
+        self.assertIn("authoring_stage_inventory_state_mismatch", authoring_codes)
+
     def test_validate_agent_plan_returns_pass_for_valid_file(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -511,6 +678,103 @@ cases:
         self.assertEqual(Path(compile_payload["bundle_dir"]), authoring_plan_path.parent)
         self.assertEqual(compile_payload["output_path"], str(authoring_plan_path.parent / "agent-plan.json"))
 
+    def test_compile_authoring_plan_blocks_when_bundle_stage_gate_fails(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0006"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "context.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "gen-20260428T000000Z-test0006",
+                        "workspace_root": str(Path(tmp).resolve()),
+                        "source_id": "users-api",
+                        "project": "code/demo",
+                        "artifacts_root_dir": str((Path(tmp) / "artifacts" / "agent" / "generation").resolve()),
+                        "artifact_dir": str(bundle_dir.resolve()),
+                        "started_at": "2026-04-28T00:00:00+00:00",
+                        "variables": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: account
+    operation: create
+    effect_state: ACTIVE
+routes:
+  - method: GET
+    path: /users
+    success_status: 200
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover user API behavior.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations: {}
+cases:
+  - id: list-users
+    kind: api
+    objective: List users.
+    state_change: none
+    execute:
+      route:
+        method: GET
+        path: /users
+    oracle:
+      status_code: 200
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--compile-authoring-plan",
+                        "--authoring-plan-file",
+                        str(authoring_plan_path),
+                        "--output",
+                        str(bundle_dir.parent),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        self.assertIn("stage_results", payload)
+        operation_codes = {
+            diagnostic["code"]
+            for diagnostic in payload["stage_results"]["operation_inventory"]["diagnostics"]
+        }
+        self.assertIn("adapter_operation_inventory_unknown_entity", operation_codes)
+
     def test_authoring_plan_file_generates_plan_via_compiler(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -563,6 +827,98 @@ cases:
         self.assertEqual(payload["status"], "PASS")
         self.assertEqual(payload["input_mode"], "authoring_plan")
         self.assertEqual(payload["test_case_count"], 1)
+
+    def test_authoring_plan_generation_blocks_when_bundle_stage_gate_fails(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0007"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "context.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "gen-20260428T000000Z-test0007",
+                        "workspace_root": str(Path(tmp).resolve()),
+                        "source_id": "users-api",
+                        "project": "code/demo",
+                        "artifacts_root_dir": str((Path(tmp) / "artifacts" / "agent" / "generation").resolve()),
+                        "artifact_dir": str(bundle_dir.resolve()),
+                        "started_at": "2026-04-28T00:00:00+00:00",
+                        "variables": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: account
+    operation: create
+    effect_state: ACTIVE
+routes:
+  - method: GET
+    path: /users
+    success_status: 200
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover user API behavior.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations: {}
+cases:
+  - id: list-users
+    kind: api
+    objective: List users.
+    state_change: none
+    execute:
+      route:
+        method: GET
+        path: /users
+    oracle:
+      status_code: 200
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--authoring-plan-file",
+                        str(authoring_plan_path),
+                        "--workspace-root",
+                        str(Path(tmp)),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_unknown_entity", codes)
 
     def test_plan_only_mode_generates_plan_and_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:

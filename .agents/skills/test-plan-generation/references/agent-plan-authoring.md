@@ -5,9 +5,12 @@
 The normal skill-routed path is:
 
 1. use `qa-entrypoint` when the request is broad
-2. scaffold or refine `artifacts/agent/generation/<run_id>/authoring-plan.yaml` through `agent-plan-authoring`
-3. validate authoring DSL
-4. compile or generate through `test-plan-generation`
+2. scaffold or refine the staged bundle through `agent-plan-authoring`
+   - `entity-inventory.yaml`
+   - `operation-inventory.yaml`
+   - `authoring-plan.yaml`
+3. run `--validate-authoring-bundle --path artifacts/agent/generation/<run_id>`
+4. only then compile or generate through `test-plan-generation`
 
 Use direct `agent-plan.json` work only when the user explicitly wants manual structured control or
 when you are debugging or repairing a compiled bundle.
