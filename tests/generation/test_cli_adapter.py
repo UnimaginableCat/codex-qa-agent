@@ -271,6 +271,56 @@ db_verifications: []
         self.assertEqual(validate_payload["status"], "PASS")
         self.assertEqual(validate_payload["stage_order"], ["entity_inventory", "operation_inventory", "authoring_plan"])
         self.assertEqual(validate_payload["stage_results"]["authoring_plan"]["status"], "PASS")
+        self.assertEqual(validate_payload["stage_results"]["authoring_plan"]["case_count"], 1)
+        self.assertEqual(validate_payload["stage_results"]["authoring_plan"]["compiled_case_count"], 1)
+        self.assertFalse(validate_payload["handoff"]["scenario_drafts_rendered"])
+        self.assertFalse(validate_payload["handoff"]["promoted_scenarios"])
+        self.assertIn("--compile-authoring-plan", validate_payload["handoff"]["next_commands"][0]["command"])
+        self.assertIn("--render-drafts", validate_payload["handoff"]["next_commands"][1]["command"])
+
+    def test_validate_authoring_bundle_text_output_names_authoring_only_handoff(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            init_payload = json.loads(init_stdout.getvalue())
+            bundle_dir = Path(init_payload["bundle_dir"])
+
+            validate_stdout = io.StringIO()
+            with redirect_stdout(validate_stdout):
+                validate_exit_code = cli.main(
+                    [
+                        "--validate-authoring-bundle",
+                        "--path",
+                        str(bundle_dir),
+                        "--output-format",
+                        "text",
+                    ]
+                )
+            output_text = validate_stdout.getvalue()
+
+        self.assertEqual(validate_exit_code, 0)
+        self.assertIn("No runnable scenario drafts were rendered or promoted", output_text)
+        self.assertIn("authoring_plan: PASS (1/1 cases compile)", output_text)
+        self.assertIn("scenario_drafts_rendered: False", output_text)
+        self.assertIn("--render-drafts", output_text)
 
     def test_validate_authoring_bundle_returns_blocked_for_stage_mismatch(self) -> None:
         with TemporaryDirectory() as tmp:

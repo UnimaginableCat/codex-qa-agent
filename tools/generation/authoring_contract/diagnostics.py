@@ -29,6 +29,7 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_case_kind_incompatible_with_setup",
     "authoring_capture_required_but_missing",
     "authoring_invalid_entity_id_field",
+    "authoring_scenario_variable_entry_invalid",
     "authoring_setup_entity_id_field_unresolved",
     "authoring_persisted_state_id_field_missing",
     "authoring_persisted_state_id_field_semantic_mismatch",

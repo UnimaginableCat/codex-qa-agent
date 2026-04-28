@@ -75,6 +75,9 @@ Default completion point:
 - `--validate-authoring-plan` may still be used as a local authoring check, but it is not the final staged handoff gate for managed bundles
 - authoring-level diagnostics were resolved or explicitly reported
 - downstream compile/render/promote work is left to `test-plan-generation`
+- final responses for this skill must explicitly say that the result is an authoring bundle only:
+  no runnable scenario drafts were rendered, no scenarios were promoted, and downstream generation
+  requires `test-plan-generation` or an explicit compile/render command
 
 # Invocation
 
@@ -97,6 +100,9 @@ start inside the authoring branch rather than being classified first.
 - Use `defaults.headers` for shared request headers that should be applied across authored API and workflow requests.
 - Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
 - Keep variable definitions in first-class `scenario_variables` fields. Do not hide them under `metadata`.
+- In YAML, quote the whole `scenario_variables` entry and write source prefixes without a space after the colon:
+  use `"display_name = template:Invalid Update {{run_suffix}}"`, not `display_name = template: Invalid Update {{run_suffix}}`.
+  Unquoted `template: value` entries are parsed by YAML as maps instead of strings.
 - For normalized fields such as `email`, separate submitted input variables from expected output variables. Prefer patterns like `submitted_email` plus `expected_email = derived:submitted_email|lower` instead of reusing one placeholder in both request and expectation.
 - Prefer `defaults.headers` plus env-backed variables for custom tokens such as `X-Leadflow-Internal-Token`; do not encode custom header semantics as fake auth types.
 - For controller or endpoint full-coverage plans, prefer API and workflow cases plus persisted-state DB verification inside those cases.
@@ -178,10 +184,10 @@ Before writing a broad full-coverage plan, make the first `1-2` cases compile-sa
 - `` `email` starts with `autotest.` ``
 - Capture rules must use `<source> -> <variable_name>`.
 - Variable rules must use supported machine-readable syntax such as:
-  - `run_suffix = generated:run_suffix`
-  - `internal_api_token = env:INTERNAL_API_TOKEN`
-  - `primary_email = template:autotest.{{run_suffix}}@example.com`
-  - `normalized_email = derived:primary_email|lower`
+  - `"run_suffix = generated:run_suffix"`
+  - `"internal_api_token = env:INTERNAL_API_TOKEN"`
+  - `"primary_email = template:autotest.{{run_suffix}}@example.com"`
+  - `"normalized_email = derived:primary_email|lower"`
 
 Do not write unsupported prose-like checks such as:
 
@@ -227,6 +233,10 @@ For managed bundles, prefer this exact authoring close-out:
 4. `--validate-authoring-bundle`
 
 Treat step 4 as the required final handoff gate.
+
+When step 4 passes, do not describe the result as runnable coverage or completed scenario
+generation. Report the bundle path, stage statuses, authored/compiled case count from the
+validation output, and the next handoff command when the user wants promoted scenarios.
 
 If validation fails on expectation syntax, rewrite the authoring DSL itself. Do not keep unsupported phrasing and hope downstream render/review will compensate.
 

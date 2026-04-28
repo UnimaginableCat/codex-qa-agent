@@ -310,6 +310,127 @@ cases:
             ["internal_api_token = env:INTERNAL_API_TOKEN"],
         )
 
+    def test_validate_file_blocks_yaml_map_defaults_scenario_variable_entry(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "authoring-plan.yaml"
+            path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+defaults:
+  scenario_variables:
+    - setup_display_name = template: Invalid Update {{run_suffix}}
+cases:
+  - id: get-users
+    kind: api
+    objective: List users.
+    state_change: none
+    execute:
+      route:
+        method: GET
+        path: /users
+    oracle:
+      status_code: 200
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertIn(
+            "authoring_scenario_variable_entry_invalid",
+            {diagnostic.code for diagnostic in result.diagnostics},
+        )
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_scenario_variable_entry_invalid"
+        )
+        self.assertEqual(diagnostic.details["field"], "defaults.scenario_variables[1]")
+        self.assertEqual(diagnostic.details["entry_type"], "dict")
+
+    def test_validate_file_blocks_yaml_map_case_scenario_variable_entry(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "authoring-plan.yaml"
+            path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+cases:
+  - id: update-user
+    kind: api
+    objective: Update user.
+    state_change: none
+    scenario_variables:
+      - submitted_display_name = template: Invalid Update {{run_suffix}}
+    execute:
+      route:
+        method: PATCH
+        path: /users/{{user_id}}
+    oracle:
+      status_code: 200
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_scenario_variable_entry_invalid"
+        )
+        self.assertEqual(diagnostic.details["field"], "cases[1].scenario_variables[1]")
+        self.assertEqual(diagnostic.details["owner"], "update-user")
+
+    def test_validate_file_accepts_quoted_template_scenario_variable_entry(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "authoring-plan.yaml"
+            path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+defaults:
+  scenario_variables:
+    - "setup_display_name = template:Invalid Update {{run_suffix}}"
+cases:
+  - id: get-users
+    kind: api
+    objective: List users.
+    state_change: none
+    execute:
+      route:
+        method: GET
+        path: /users
+    oracle:
+      status_code: 200
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        self.assertEqual(
+            result.compiled_plan.scenario_variables,
+            ["setup_display_name = template:Invalid Update {{run_suffix}}"],
+        )
+
     def test_compile_db_check_promotes_db_expected_outcomes_to_case_level(self) -> None:
         plan = AuthoringPlan(
             version=1,

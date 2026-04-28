@@ -44,8 +44,8 @@ defaults:
   headers:
     X-Internal-Token: "{{internal_api_token}}"
   scenario_variables:
-    - run_suffix = generated:run_suffix
-    - internal_api_token = env:INTERNAL_API_TOKEN
+    - "run_suffix = generated:run_suffix"
+    - "internal_api_token = env:INTERNAL_API_TOKEN"
 
 entities: {}
 cases: []
@@ -140,8 +140,8 @@ Normalized-field guidance:
 - when the request intentionally sends mixed-case or padded input that the product may normalize, do not reuse the same placeholder in output expectations
 - for fields like `email`, author separate variables for submitted input and expected stored/returned value
 - example:
-  - `submitted_email = template:AUTOTEST.User.{{email_suffix}}@Example.COM`
-  - `expected_email = derived:submitted_email|lower`
+  - `"submitted_email = template:AUTOTEST.User.{{email_suffix}}@Example.COM"`
+  - `"expected_email = derived:submitted_email|lower"`
   - request body: `email: "{{submitted_email}}"`
   - expectation: `response \`email\` = \`{{expected_email}}\``
 
@@ -170,12 +170,13 @@ Capture syntax is strict too:
 
 Variable syntax is strict too:
 
-- good: `run_suffix = generated:run_suffix`
-- good: `internal_api_token = env:INTERNAL_API_TOKEN`
-- good: `primary_email = template:autotest.{{run_suffix}}@example.com`
+- good YAML entry: `"run_suffix = generated:run_suffix"`
+- good YAML entry: `"internal_api_token = env:INTERNAL_API_TOKEN"`
+- good YAML entry: `"primary_email = template:autotest.{{run_suffix}}@example.com"`
 - bad: `run_suffix generated dynamically`
 - bad: `internal token from env`
 - bad: `display_name = Fixed literal without literal prefix`
+- bad YAML entry: `display_name = template: Invalid Update {{run_suffix}}`
 
 Header guidance:
 

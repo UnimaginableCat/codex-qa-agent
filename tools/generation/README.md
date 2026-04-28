@@ -165,8 +165,12 @@ defaults:
   headers:
     X-Leadflow-Internal-Token: "{{internal_api_token}}"
   scenario_variables:
-    - internal_api_token = env:INTERNAL_API_TOKEN
+    - "internal_api_token = env:INTERNAL_API_TOKEN"
 ```
+
+Quote each YAML `scenario_variables` entry as one string and write source prefixes without a space
+after the colon, for example `"display_name = template:Invalid Update {{run_suffix}}"`.
+Unquoted `template: value` entries are parsed by YAML as maps instead of strings.
 
 Authoring-plan validate-only:
 

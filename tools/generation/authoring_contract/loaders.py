@@ -140,6 +140,15 @@ def _validate_payload_shape(payload: Any, source_ref: str) -> list[GenerationDia
                 details={"field": "defaults"},
             )
         )
+    defaults_payload = payload.get("defaults")
+    if isinstance(defaults_payload, dict):
+        diagnostics.extend(
+            _validate_scenario_variables_shape(
+                defaults_payload.get("scenario_variables"),
+                source_ref,
+                field_path="defaults.scenario_variables",
+            )
+        )
     if payload.get("entities") is not None and not isinstance(payload.get("entities"), dict):
         diagnostics.append(
             authoring_diagnostic(
@@ -158,6 +167,19 @@ def _validate_payload_shape(payload: Any, source_ref: str) -> list[GenerationDia
                 details={"field": "cases"},
             )
         )
+    if isinstance(payload.get("cases"), list):
+        for case_index, case_payload in enumerate(payload.get("cases", []), start=1):
+            if not isinstance(case_payload, dict):
+                continue
+            case_id = str(case_payload.get("id") or f"case-{case_index:03d}")
+            diagnostics.extend(
+                _validate_scenario_variables_shape(
+                    case_payload.get("scenario_variables"),
+                    source_ref,
+                    field_path=f"cases[{case_index}].scenario_variables",
+                    owner=case_id,
+                )
+            )
     for field_name in ("assumptions", "open_questions"):
         value = payload.get(field_name)
         if value is not None and not isinstance(value, list):
@@ -169,4 +191,45 @@ def _validate_payload_shape(payload: Any, source_ref: str) -> list[GenerationDia
                     details={"field": field_name},
                 )
             )
+    return diagnostics
+
+
+def _validate_scenario_variables_shape(
+    value: Any,
+    source_ref: str,
+    *,
+    field_path: str,
+    owner: str | None = None,
+) -> list[GenerationDiagnostic]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return [
+            authoring_diagnostic(
+                "authoring_scenario_variable_entry_invalid",
+                "scenario_variables must be a YAML array of strings.",
+                source_ref=source_ref,
+                details={"field": field_path, **({} if owner is None else {"owner": owner})},
+            )
+        ]
+    diagnostics: list[GenerationDiagnostic] = []
+    for item_index, item in enumerate(value, start=1):
+        if isinstance(item, str):
+            continue
+        diagnostics.append(
+            authoring_diagnostic(
+                "authoring_scenario_variable_entry_invalid",
+                (
+                    "Each scenario_variables entry must be a string. Quote the whole variable definition and use "
+                    "source prefixes without a space, for example "
+                    "'\"display_name = template:Invalid Update {{run_suffix}}\"'."
+                ),
+                source_ref=source_ref,
+                details={
+                    "field": f"{field_path}[{item_index}]",
+                    "entry_type": type(item).__name__,
+                    **({} if owner is None else {"owner": owner}),
+                },
+            )
+        )
     return diagnostics

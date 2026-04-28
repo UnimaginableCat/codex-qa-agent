@@ -507,17 +507,40 @@ def run_validate_authoring_bundle(args: argparse.Namespace) -> dict[str, Any]:
         raise GenerationCliInputError(diagnostics)
     bundle_dir = _resolve_bundle_dir(Path(args.path))
     overall_status, stage_results, _ = _evaluate_authoring_bundle(bundle_dir)
+    authoring_plan_path = bundle_dir / AUTHORING_PLAN_FILENAME
     return to_json_safe(
         {
             "status": overall_status.value,
             "message": (
-                "Authoring bundle is structurally valid across entity inventory, operation inventory, and authoring plan."
+                "Authoring bundle is structurally valid across entity inventory, operation inventory, and authoring plan. "
+                "No runnable scenario drafts were rendered or promoted by this authoring validation step."
                 if overall_status == StepStatus.PASS
                 else "Authoring bundle is blocked by staged authoring validation diagnostics."
             ),
             "bundle_dir": str(bundle_dir),
             "stage_order": ["entity_inventory", "operation_inventory", "authoring_plan"],
             "stage_results": stage_results,
+            "handoff": {
+                "scope": "authoring_only",
+                "scenario_drafts_rendered": False,
+                "promoted_scenarios": False,
+                "next_commands": [
+                    {
+                        "label": "compile_authoring_plan",
+                        "command": (
+                            f"python -m tools.generation.cli --compile-authoring-plan "
+                            f"--authoring-plan-file {authoring_plan_path} --output {MANAGED_AGENT_PLAN_ROOT}"
+                        ),
+                    },
+                    {
+                        "label": "render_drafts",
+                        "command": (
+                            f"python -m tools.generation.cli --authoring-plan-file {authoring_plan_path} "
+                            f"--workspace-root . --render-drafts"
+                        ),
+                    },
+                ],
+            },
         }
     )
 
@@ -737,6 +760,12 @@ def _evaluate_authoring_bundle(
         "authoring_plan": {
             "status": authoring_status.value,
             "file_path": None if authoring_result.file_path is None else str(authoring_result.file_path),
+            "case_count": authoring_result.case_count,
+            "compiled_case_count": (
+                0
+                if authoring_result.compiled_plan is None
+                else len(authoring_result.compiled_plan.planned_test_cases)
+            ),
             "diagnostics": [diagnostic.to_dict() for diagnostic in authoring_result.diagnostics],
             "payload": None if authoring_result.authoring_plan is None else authoring_result.authoring_plan.to_dict(),
         },
@@ -2021,6 +2050,33 @@ def _render_authoring_text(payload: dict[str, Any]) -> str:
                 f"Case count: {payload.get('case_count', 0)}",
             ]
         )
+    stage_results = payload.get("stage_results") or {}
+    if stage_results:
+        lines.append("Stages:")
+        for stage_name in payload.get("stage_order") or stage_results.keys():
+            stage_payload = stage_results.get(stage_name) or {}
+            stage_line = f"  - {stage_name}: {stage_payload.get('status', '')}"
+            if stage_name == "authoring_plan":
+                stage_line += (
+                    f" ({stage_payload.get('compiled_case_count', 0)}/"
+                    f"{stage_payload.get('case_count', 0)} cases compile)"
+                )
+            lines.append(stage_line)
+    handoff = payload.get("handoff") or {}
+    if handoff:
+        lines.extend(
+            [
+                "Handoff:",
+                f"  - scope: {handoff.get('scope', '')}",
+                f"  - scenario_drafts_rendered: {handoff.get('scenario_drafts_rendered', False)}",
+                f"  - promoted_scenarios: {handoff.get('promoted_scenarios', False)}",
+            ]
+        )
+        next_commands = handoff.get("next_commands") or []
+        if next_commands:
+            lines.append("Next commands:")
+            for command in next_commands:
+                lines.append(f"  - {command.get('label', '')}: {command.get('command', '')}")
     diagnostics = payload.get("diagnostics") or []
     if diagnostics:
         lines.append("Diagnostics:")
