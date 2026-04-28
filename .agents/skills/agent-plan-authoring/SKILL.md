@@ -140,7 +140,7 @@ Use the scaffolded bundle in this order:
    - controller routes
    - expected success/failure HTTP codes
    - lifecycle route `target_state`
-   - lifecycle route `same_state_behavior` and `same_state_status` when the command can be invoked on an entity already in the target state
+   - lifecycle route `same_state_behavior`, `same_state_status`, and `same_state_evidence` when the command can be invoked on an entity already in the target state
    - DB verification templates
 3. `--sync-authoring-plan`
    - after both inventories validate, synchronize `scope`, `entities`, reusable route operations, and DB verification templates into `authoring-plan.yaml`
@@ -181,6 +181,14 @@ For lifecycle routes, do not author same-state negative or idempotency cases unt
 - `target_state`
 - `same_state_behavior`: `reject` or `idempotent_success`
 - `same_state_status`
+- `same_state_evidence`: the code path or test proving the behavior, for example the domain method that no-ops when current state already equals target
+
+If `same_state_behavior: idempotent_success`, the authoring case must be a success/idempotency case, not a rejection case:
+
+- set `oracle.status_code` to the recorded 2xx `same_state_status`
+- assert the response remains in the target state
+- include `oracle.persisted_state` to verify the entity is still in the target state after the repeated call
+- name/objective should say repeated or idempotent invocation, not "rejected"
 
 ## Strict DSL Gate
 

@@ -86,7 +86,7 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
    - effect states
    - route to success/failure HTTP status expectations
    - lifecycle route target state
-   - same-state lifecycle behavior and status when reissuing the same command matters
+   - same-state lifecycle behavior, status, and evidence when reissuing the same command matters
    - DB verification templates
    - then validate this file before editing authoring plan
 3. run `--sync-authoring-plan`
@@ -94,7 +94,8 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
    - do not manually repeat inventory-backed entity/operation templates unless the sync output shows missing executable details
 4. write `authoring-plan.yaml`
    - cases should reference the first two inventories instead of inventing lifecycle and status assumptions ad hoc
-   - same-state lifecycle cases such as `archive archived`, `activate active`, and `suspend suspended` should not be authored until the route inventory explicitly says whether they reject or return an idempotent success
+   - same-state lifecycle cases such as `archive archived`, `activate active`, and `suspend suspended` should not be authored until the route inventory explicitly says whether they reject or return an idempotent success, with a code/test evidence reference
+   - idempotent same-state success cases must verify the second call's 2xx response and persisted target state after the repeated call
    - then validate this file before the bundle gate
 
 Recommended CLI stages:

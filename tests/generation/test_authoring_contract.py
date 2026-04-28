@@ -1797,6 +1797,113 @@ cases:
         self.assertEqual(diagnostics[0].details["inventory_same_state_status"], 200)
         self.assertEqual(diagnostics[0].details["authored_status"], 400)
 
+    def test_compile_file_blocks_idempotent_same_state_case_without_persisted_state(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0006"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    states: [ACTIVE, SUSPENDED, ARCHIVED]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create
+    effect_state: ACTIVE
+  - entity: user
+    operation: archive
+    effect_state: ARCHIVED
+routes:
+  - method: POST
+    path: /users/{{user_id}}/archive
+    success_status: 200
+    failure_statuses: [400, 404]
+    target_state: ARCHIVED
+    same_state_behavior: idempotent_success
+    same_state_status: 200
+    same_state_evidence: domain User.archive no-ops when already archived
+db_verifications:
+  - entity: user
+    operation: verify_archived
+    scoped_by: user_id
+    sql: SELECT status FROM users WHERE id = :user_id
+    params:
+      user_id: "{{user_id}}"
+    expected_outcomes:
+      - one row exists
+      - "`status` = `ARCHIVED`"
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      create:
+        route:
+          method: POST
+          path: /users
+      archive:
+        route:
+          method: POST
+          path: /users/{{user_id}}/archive
+cases:
+  - id: archive-archived-user-idempotent
+    kind: workflow
+    title: Re-archive archived user idempotently
+    objective: Verify archiving an already archived user is idempotent.
+    state_change: none
+    setup:
+      - use_entity: user
+        operation: create
+      - use_entity: user
+        operation: archive
+    execute:
+      route:
+        method: POST
+        path: /users/{{user_id}}/archive
+    oracle:
+      status_code: 200
+      business_checks:
+        - response JSON exists
+        - response `status` = `ARCHIVED`
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_stage_inventory_idempotency_persistence_missing"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].details["same_state_behavior"], "idempotent_success")
+        self.assertEqual(diagnostics[0].details["same_state_status"], 200)
+
 
 if __name__ == "__main__":
     unittest.main()

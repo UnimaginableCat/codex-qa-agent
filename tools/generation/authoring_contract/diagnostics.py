@@ -43,6 +43,7 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_stage_inventory_state_mismatch",
     "authoring_stage_inventory_same_state_behavior_missing",
     "authoring_stage_inventory_same_state_mismatch",
+    "authoring_stage_inventory_idempotency_persistence_missing",
 }
 
 

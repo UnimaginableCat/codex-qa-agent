@@ -1965,6 +1965,22 @@ def _same_state_inventory_contract_diagnostics(
                 },
             )
         ]
+    if same_state_behavior == "idempotent_success" and case.oracle.persisted_state is None:
+        return [
+            authoring_diagnostic(
+                "authoring_stage_inventory_idempotency_persistence_missing",
+                (
+                    "Same-state lifecycle case is documented as idempotent_success, but the authoring case does not "
+                    "verify persisted state after reissuing the command."
+                ),
+                source_ref=case_ref,
+                details={
+                    **details,
+                    "same_state_behavior": same_state_behavior,
+                    "same_state_status": same_state_status,
+                },
+            )
+        ]
     return []
 
 

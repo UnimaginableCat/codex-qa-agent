@@ -298,6 +298,20 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
                     details={"route_index": index, "same_state_behavior": same_state_behavior},
                 )
             )
+        same_state_evidence = item.get("same_state_evidence")
+        if same_state_behavior is not None and not _has_same_state_evidence(same_state_evidence):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_same_state_evidence_missing",
+                    message=(
+                        "Route same_state_behavior must include same_state_evidence with the code or test source "
+                        "used to confirm whether reissuing the command rejects or succeeds idempotently."
+                    ),
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index, "same_state_behavior": same_state_behavior},
+                )
+            )
         if isinstance(same_state_status, int) and normalized_same_state_behavior == "idempotent_success" and not (200 <= same_state_status < 300):
             diagnostics.append(
                 GenerationDiagnostic(
@@ -369,4 +383,12 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
                 )
             )
     return payload, diagnostics
+
+
+def _has_same_state_evidence(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(isinstance(item, str) and item.strip() for item in value)
+    return False
 
