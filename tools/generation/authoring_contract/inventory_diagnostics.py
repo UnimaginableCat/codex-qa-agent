@@ -155,6 +155,37 @@ def _stage_inventory_contract_diagnostics(
     )
 
 
+def suppress_inventory_backed_same_state_warnings(
+    *,
+    file_path: Path,
+    diagnostics: list[GenerationDiagnostic],
+) -> list[GenerationDiagnostic]:
+    if managed_generation_artifacts_root_for_path(file_path) is None:
+        return diagnostics
+    operation_inventory = _load_inventory_payload_if_valid(
+        inventory_path=file_path.parent / OPERATION_INVENTORY_FILENAME,
+        required_fields=("version", "source_id", "project", "surface", "entity_operations", "routes"),
+        list_fields={"entity_operations", "routes", "db_verifications"},
+    )
+    if operation_inventory is None:
+        return diagnostics
+    route_specs = _route_inventory_specs(operation_inventory)
+    same_state_route_shapes = {
+        route_shape
+        for (_, route_shape), route_spec in route_specs.items()
+        if _has_explicit_same_state_contract(route_spec)
+    }
+    filtered: list[GenerationDiagnostic] = []
+    for diagnostic in diagnostics:
+        if diagnostic.code != "authoring_same_state_lifecycle_contract_unconfirmed":
+            filtered.append(diagnostic)
+            continue
+        route_shape = _route_path_shape(str(diagnostic.details.get("route_path") or ""))
+        if route_shape not in same_state_route_shapes:
+            filtered.append(diagnostic)
+    return filtered
+
+
 def _load_inventory_payload_if_valid(
     *,
     inventory_path: Path,
@@ -355,8 +386,11 @@ def _cross_check_authoring_plan_against_stage_inventories(
             continue
         if _is_declared_failure_status(expected_status, failure_statuses):
             continue
-        expected_state = _normalized_inventory_state(route_spec.get("precondition_state")) or _expected_precondition_state(case)
-        if expected_state is None or actual_state is None or expected_state == actual_state:
+        expected_states = _normalized_inventory_states(route_spec.get("precondition_state"))
+        if not expected_states:
+            expected_state = _expected_precondition_state(case)
+            expected_states = {expected_state} if expected_state is not None else set()
+        if not expected_states or actual_state is None or actual_state in expected_states:
             continue
         diagnostics.append(
             authoring_diagnostic(
@@ -364,7 +398,7 @@ def _cross_check_authoring_plan_against_stage_inventories(
                 "Workflow setup state derived from operation-inventory.yaml does not satisfy the case precondition.",
                 source_ref=case_ref,
                 details={
-                    "expected_state": expected_state,
+                    "expected_state": _single_or_sorted_state(expected_states),
                     "actual_state": actual_state,
                     "route_path": authored_route_path,
                     "route_shape": route_key[1],
@@ -449,3 +483,37 @@ def _route_path_shape(path: str) -> str:
 
 def _is_declared_failure_status(expected_status: Any, failure_statuses: set[int]) -> bool:
     return isinstance(expected_status, int) and not (200 <= expected_status < 300) and expected_status in failure_statuses
+
+
+def _normalized_inventory_states(value: Any) -> set[str]:
+    if isinstance(value, list):
+        return {
+            normalized
+            for item in value
+            if (normalized := _normalized_inventory_state(item)) is not None
+        }
+    normalized = _normalized_inventory_state(value)
+    return set() if normalized is None else {normalized}
+
+
+def _single_or_sorted_state(states: set[str]) -> str | list[str]:
+    if len(states) == 1:
+        return next(iter(states))
+    return sorted(states)
+
+
+def _has_explicit_same_state_contract(route_spec: dict[str, Any]) -> bool:
+    return (
+        _normalized_inventory_state(route_spec.get("target_state")) is not None
+        and str(route_spec.get("same_state_behavior") or "").strip() != ""
+        and _maybe_int(route_spec.get("same_state_status")) is not None
+        and _has_same_state_evidence(route_spec.get("same_state_evidence"))
+    )
+
+
+def _has_same_state_evidence(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(isinstance(item, str) and item.strip() for item in value)
+    return False

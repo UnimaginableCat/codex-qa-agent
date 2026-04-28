@@ -240,6 +240,17 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
                     details={"route_index": index},
                 )
             )
+        precondition_state = item.get("precondition_state")
+        if not _is_valid_optional_state_or_state_list(precondition_state):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_precondition_state_invalid",
+                    message="Route precondition_state must be a string or YAML array of strings when present.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"route_index": index},
+                )
+            )
         target_state = item.get("target_state")
         if target_state is not None and not isinstance(target_state, str):
             diagnostics.append(
@@ -390,5 +401,15 @@ def _has_same_state_evidence(value: Any) -> bool:
         return bool(value.strip())
     if isinstance(value, list):
         return any(isinstance(item, str) and item.strip() for item in value)
+    return False
+
+
+def _is_valid_optional_state_or_state_list(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return True
+    if isinstance(value, list):
+        return all(isinstance(item, str) and item.strip() for item in value)
     return False
 

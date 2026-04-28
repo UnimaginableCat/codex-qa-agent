@@ -2175,6 +2175,122 @@ cases:
             "authoring_stage_inventory_state_mismatch",
             {diagnostic.code for diagnostic in result.diagnostics},
         )
+        self.assertNotIn(
+            "authoring_same_state_lifecycle_contract_unconfirmed",
+            {diagnostic.code for diagnostic in result.diagnostics},
+        )
+
+    def test_compile_file_allows_multiple_success_precondition_states(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0010"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    states: [ACTIVE, SUSPENDED, ARCHIVED]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create_active
+    effect_state: ACTIVE
+    captures:
+      - response.json.id -> user_id
+  - entity: user
+    operation: suspend
+    effect_state: SUSPENDED
+routes:
+  - method: POST
+    path: /users/{{user_id}}/archive
+    success_status: 200
+    failure_statuses: [400, 404]
+    precondition_state: [ACTIVE, SUSPENDED]
+    target_state: ARCHIVED
+db_verifications:
+  - entity: user
+    operation: verify_archived
+    scoped_by: user_id
+    sql: SELECT status FROM users WHERE id = :user_id
+    params:
+      user_id: "{{user_id}}"
+    expected_outcomes:
+      - one row exists
+      - "`status` = `ARCHIVED`"
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      create_active:
+        route:
+          method: POST
+          path: /users
+        captures:
+          - response.json.id -> user_id
+      suspend:
+        route:
+          method: POST
+          path: /users/{{user_id}}/suspend
+      verify_archived:
+        sql: SELECT status FROM users WHERE id = :user_id
+        params:
+          user_id: "{{user_id}}"
+        expected_outcomes:
+          - one row exists
+          - "`status` = `ARCHIVED`"
+cases:
+  - id: archive-suspended-user
+    kind: workflow
+    title: Archive suspended user
+    objective: Archive succeeds when the user is suspended.
+    state_change: mutate
+    setup:
+      - use_entity: user
+        operation: create_active
+      - use_entity: user
+        operation: suspend
+    execute:
+      route:
+        method: POST
+        path: /users/{{user_id}}/archive
+    oracle:
+      status_code: 200
+      persisted_state:
+        entity: user
+        operation: verify_archived
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertNotIn(
+            "authoring_stage_inventory_state_mismatch",
+            {diagnostic.code for diagnostic in result.diagnostics},
+        )
 
 
 if __name__ == "__main__":

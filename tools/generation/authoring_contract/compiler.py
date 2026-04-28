@@ -37,6 +37,7 @@ from .helpers import (
 from .inventory_diagnostics import (
     _required_stage_inventory_diagnostics,
     _stage_inventory_contract_diagnostics,
+    suppress_inventory_backed_same_state_warnings,
 )
 from .loaders import AuthoringPlanLoader
 from .models import (
@@ -97,6 +98,10 @@ class AuthoringPlanCompiler:
         )
         result = self._compile(load_result.authoring_plan, file_path=file_path, validation_only=validation_only)
         result.diagnostics = [*load_result.diagnostics, *result.diagnostics]
+        result.diagnostics = suppress_inventory_backed_same_state_warnings(
+            file_path=file_path,
+            diagnostics=result.diagnostics,
+        )
         result.status = derive_authoring_status(result.diagnostics)
         result.message = build_authoring_message(result.status, result.diagnostics, compiled=not validation_only)
         return result
