@@ -15,7 +15,11 @@ from uuid import UUID
 def to_json_safe(value: Any) -> Any:
     """Recursively normalize common Python values to JSON-compatible values."""
 
-    if value is None or isinstance(value, str | int | float | bool):
+    if value is None:
+        return value
+    if isinstance(value, Enum):
+        return to_json_safe(value.value)
+    if isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, UUID):
         return str(value)
@@ -25,8 +29,6 @@ def to_json_safe(value: Any) -> Any:
         return str(value)
     if isinstance(value, Path):
         return str(value)
-    if isinstance(value, Enum):
-        return to_json_safe(value.value)
     if is_dataclass(value):
         return to_json_safe(asdict(value))
     if isinstance(value, Mapping):

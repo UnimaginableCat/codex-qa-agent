@@ -460,6 +460,94 @@ db_verifications:
         self.assertEqual(verify_operation["expected_outcomes"], ["one row exists"])
         self.assertEqual(sync_payload["authoring_plan"]["cases"], [])
 
+    def test_sync_authoring_plan_preserves_existing_str_enum_cases(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            bundle_dir = Path(json.loads(init_stdout.getvalue())["bundle_dir"])
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations: []
+routes:
+  - method: GET
+    path: /users
+    success_status: 200
+    failure_statuses: [401]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "authoring-plan.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+cases:
+  - id: list-users
+    kind: api
+    objective: List users.
+    state_change: read_only
+    execute:
+      route:
+        method: GET
+        path: /users
+    oracle:
+      status_code: 200
+      business_checks:
+        - response JSON is an array
+""",
+                encoding="utf-8",
+            )
+
+            sync_stdout = io.StringIO()
+            with redirect_stdout(sync_stdout):
+                sync_exit_code = cli.main(["--sync-authoring-plan", "--path", str(bundle_dir)])
+            sync_payload = json.loads(sync_stdout.getvalue())
+            synced_text = (bundle_dir / "authoring-plan.yaml").read_text(encoding="utf-8")
+
+        self.assertEqual(sync_exit_code, 0)
+        self.assertEqual(sync_payload["status"], "PASS")
+        self.assertEqual(sync_payload["case_count"], 1)
+        self.assertEqual(sync_payload["authoring_plan"]["cases"][0]["state_change"], "read_only")
+        self.assertIn("state_change: read_only", synced_text)
+
     def test_sync_authoring_plan_text_output_reports_followup_validation_status(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

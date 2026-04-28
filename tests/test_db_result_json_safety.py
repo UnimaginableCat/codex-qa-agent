@@ -11,6 +11,7 @@ from uuid import UUID
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.common import ExecutionResult, StepStatus
+from tools.common.json_safe import to_json_safe
 from tools.db.models import QueryData
 
 
@@ -76,6 +77,12 @@ class DbResultJsonSafetyTests(unittest.TestCase):
         self.assertEqual(event["created_at"], created_at.isoformat())
         self.assertEqual(event["amounts"], ["10.50", "20.75"])
         self.assertEqual(event["related_ids"], [str(row_id)])
+        json.dumps(payload, ensure_ascii=False)
+
+    def test_str_enum_is_json_safe_string(self) -> None:
+        payload = to_json_safe({"status": StepStatus.PASS})
+
+        self.assertEqual(payload, {"status": "PASS"})
         json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
