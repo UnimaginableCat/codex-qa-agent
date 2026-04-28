@@ -37,6 +37,7 @@ from tools.generation.review import (
     ScenarioDirectoryRevalidationService,
     ScenarioPromotionBatchRequest,
     ScenarioPromotionRequest,
+    ScenarioPreflightStatus,
     ScenarioRevalidationRequest,
     ScenarioRevalidationService,
 )
@@ -735,6 +736,7 @@ def run_validate_scenario(args: argparse.Namespace) -> dict[str, Any]:
         if result.environment_readiness_category is not None
         else result.execution_readiness_category.value
     )
+    validation_notes = _validation_notes_for_result(result.validation_mode, compile_validation, preflight_validation)
     return to_json_safe(
         {
             "status": StepStatus.PASS.value,
@@ -759,6 +761,7 @@ def run_validate_scenario(args: argparse.Namespace) -> dict[str, Any]:
             "readiness_category": readiness_category,
             "compile_validation": None if compile_validation is None else compile_validation.to_dict(),
             "preflight_validation": None if preflight_validation is None else preflight_validation.to_dict(),
+            "validation_notes": validation_notes,
             "based_on_generated_draft": result.based_on_generated_draft,
             "generation_run_id": result.generation_run_id,
             "draft_id": result.draft_id,
@@ -777,6 +780,7 @@ def run_validate_scenario_dir(args: argparse.Namespace) -> dict[str, Any]:
             workspace_root=Path(args.workspace_root),
         )
     )
+    validation_notes = _validation_notes_for_directory(result.validation_mode, result.results)
     return to_json_safe(
         {
             "status": result.status.value,
@@ -786,6 +790,7 @@ def run_validate_scenario_dir(args: argparse.Namespace) -> dict[str, Any]:
             "failure_count": result.failure_count,
             "readiness_counts": result.readiness_counts,
             "failure_items": result.failure_items,
+            "validation_notes": validation_notes,
             "results": [item.to_dict() for item in result.results],
         }
     )
@@ -1445,6 +1450,11 @@ def _render_revalidation_text(payload: dict[str, Any]) -> str:
             lines.append(f"  - {issue.get('issue_type', '')}: {issue.get('message', '')}")
         for warning in preflight_warnings:
             lines.append(f"  - warning/{warning.get('issue_type', '')}: {warning.get('message', '')}")
+    validation_notes = payload.get("validation_notes") or []
+    if validation_notes:
+        lines.append("Validation notes:")
+        for note in validation_notes:
+            lines.append(f"  - {note}")
     lines.append("Edit targets:")
     edit_targets = (payload.get("edit_targets") or {}).get("targets", [])
     if edit_targets:
@@ -1488,7 +1498,46 @@ def _render_revalidation_dir_text(payload: dict[str, Any]) -> str:
             gap_codes = item.get("gap_codes") or []
             if gap_codes:
                 lines.append(f"    Gaps: {', '.join(str(code) for code in gap_codes)}")
+    validation_notes = payload.get("validation_notes") or []
+    if validation_notes:
+        lines.append("Validation notes:")
+        for note in validation_notes:
+            lines.append(f"  - {note}")
     return "\n".join(lines).rstrip()
+
+
+def _validation_notes_for_result(
+    validation_mode: str,
+    compile_validation: Any,
+    preflight_validation: Any,
+) -> list[str]:
+    if validation_mode == "compile" and compile_validation is not None:
+        warnings = getattr(compile_validation, "warnings", [])
+        if warnings:
+            return [
+                "Compile mode is structural only: env-backed external inputs are declared but not resolved here.",
+                "Run --mode preflight to verify that the selected environment file resolves all required external variables.",
+            ]
+    if validation_mode == "preflight" and preflight_validation is not None:
+        if getattr(preflight_validation, "preflight_status", None) == ScenarioPreflightStatus.SUCCESS:
+            return [
+                "Preflight mode includes environment resolution and dependency checks in addition to compile validation."
+            ]
+    return []
+
+
+def _validation_notes_for_directory(validation_mode: str, results: list[Any]) -> list[str]:
+    if validation_mode != "compile":
+        return []
+    for item in results:
+        compile_validation = getattr(item, "compile_validation", None)
+        warnings = [] if compile_validation is None else getattr(compile_validation, "warnings", [])
+        if warnings:
+            return [
+                "Compile directory validation is structural only: env-backed external inputs remain unresolved by design.",
+                "Use --mode preflight for environment-aware validation of the promoted scenario directory.",
+            ]
+    return []
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:

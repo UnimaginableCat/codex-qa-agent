@@ -34,6 +34,7 @@ class AuthoringDefaults:
     environment: str = ""
     auth: str = ""
     actor: str = ""
+    scenario_variables: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -44,6 +45,7 @@ class AuthoringDefaults:
             environment=str(payload.get("environment", "")),
             auth=str(payload.get("auth", "")),
             actor=str(payload.get("actor", "")),
+            scenario_variables=[str(item) for item in payload.get("scenario_variables", [])],
         )
 
 
@@ -235,6 +237,7 @@ class AuthoringCase:
     oracle: AuthoringOracle | None = None
     priority: str = "normal"
     tags: list[str] = field(default_factory=list)
+    scenario_variables: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -263,6 +266,7 @@ class AuthoringCase:
             oracle=None if not isinstance(oracle_payload, dict) else AuthoringOracle.from_dict(oracle_payload),
             priority=str(payload.get("priority", "normal")),
             tags=[str(item) for item in payload.get("tags", [])],
+            scenario_variables=[str(item) for item in payload.get("scenario_variables", [])],
             metadata=dict(payload.get("metadata") or {}),
         )
 

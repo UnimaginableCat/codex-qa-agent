@@ -48,6 +48,7 @@ class AuthoringPlanTemplateService:
                 environment="env/replace.env",
                 auth="bearer",
                 actor="api-client",
+                scenario_variables=["run_suffix = generated:run_suffix"],
             ),
             entities={
                 "primary_entity": AuthoringEntitySpec(
@@ -67,9 +68,10 @@ class AuthoringPlanTemplateService:
                     title="Create primary entity",
                     objective="Replace with case objective.",
                     state_change="create",
+                    scenario_variables=["primary_email = template:autotest.{{run_suffix}}@example.com"],
                     execute=AuthoringExecute(
                         route=AuthoringRoute(method="POST", path="/replace/path"),
-                        body={"field": "value"},
+                        body={"field": "value", "email": "{{primary_email}}"},
                     ),
                     oracle=AuthoringOracle(
                         status_code=201,

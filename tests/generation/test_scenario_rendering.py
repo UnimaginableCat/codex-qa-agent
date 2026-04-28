@@ -76,6 +76,50 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertEqual(len(scenario.variables), 1)
         self.assertEqual(scenario.variables[0].name, "actor")
 
+    def test_renderer_merges_first_class_scenario_variables_with_actor(self) -> None:
+        plan = NormalizedTestPlan(
+            plan_id="plan-users",
+            source_id="users",
+            project="code/demo",
+            title="Users API",
+            scenario_variables=[
+                "run_suffix = generated:run_suffix",
+                "internal_api_token = env:INTERNAL_API_TOKEN",
+            ],
+            test_cases=[
+                PlannedTestCase(
+                    case_id="tc-actor-variables-001",
+                    title="Create user",
+                    objective="Verify create user.",
+                    planned_route=PlannedRouteIntent(http_method="POST", endpoint_path="/users"),
+                    scenario_variables=[
+                        "primary_email = template:autotest.{{run_suffix}}@example.com",
+                        "internal_api_token = env:INTERNAL_API_TOKEN",
+                    ],
+                    metadata={"default_actor": "api-client"},
+                )
+            ],
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("## Variables", draft.markdown)
+        self.assertIn("- run_suffix = generated:run_suffix", draft.markdown)
+        self.assertIn("- internal_api_token = env:INTERNAL_API_TOKEN", draft.markdown)
+        self.assertIn("- primary_email = template:autotest.{{run_suffix}}@example.com", draft.markdown)
+        self.assertIn("- actor = literal:api-client", draft.markdown)
+        self.assertEqual(draft.markdown.count("internal_api_token = env:INTERNAL_API_TOKEN"), 1)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "draft.md"
+            path.write_text(draft.markdown, encoding="utf-8")
+            scenario = MarkdownScenarioParser().parse(path)
+
+        self.assertEqual(
+            [variable.name for variable in scenario.variables],
+            ["run_suffix", "internal_api_token", "primary_email", "actor"],
+        )
+
     def test_renderer_defers_case_without_authored_route(self) -> None:
         plan = _plan([PlannedTestCase(case_id="tc-001", title="Create user", objective="Verify create user.")])
 

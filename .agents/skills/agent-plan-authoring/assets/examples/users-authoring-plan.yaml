@@ -16,6 +16,9 @@ defaults:
   environment: env/demo.env
   auth: bearer
   actor: admin-api-client
+  scenario_variables:
+    - run_suffix = generated:run_suffix
+    - generated_email = template:autotest.{{run_suffix}}@example.com
 
 entities:
   user:
@@ -45,6 +48,8 @@ cases:
     kind: api
     objective: Admin creates user successfully
     state_change: create
+    scenario_variables:
+      - expected_email = derived:generated_email|lower
     execute:
       route:
         method: POST

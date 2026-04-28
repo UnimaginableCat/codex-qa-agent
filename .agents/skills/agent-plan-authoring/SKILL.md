@@ -92,6 +92,8 @@ start inside the authoring branch rather than being classified first.
 - Use deterministic `oracle.status_code`, `oracle.business_checks`, `oracle.captures`, and `oracle.persisted_state`.
 - Use `defaults.environment` when one env file should flow into rendered scenario `## Environment`.
 - Use `defaults.actor` when a stable execution actor should flow into rendered scenario variables as `actor = literal:<value>` and select actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
+- Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
+- Keep variable definitions in first-class `scenario_variables` fields. Do not hide them under `metadata`.
 - Do not rely on the compiler to invent SQL, routes, or capture targets.
 
 ## Strict DSL Gate
@@ -110,8 +112,13 @@ Before writing a broad full-coverage plan, make the first `1-2` cases compile-sa
   - `no rows exist`
   - `` `status` = `ACTIVE` ``
   - `` `email` is null ``
-  - `` `email` starts with `autotest.` ``
+- `` `email` starts with `autotest.` ``
 - Capture rules must use `<source> -> <variable_name>`.
+- Variable rules must use supported machine-readable syntax such as:
+  - `run_suffix = generated:run_suffix`
+  - `internal_api_token = env:INTERNAL_API_TOKEN`
+  - `primary_email = template:autotest.{{run_suffix}}@example.com`
+  - `normalized_email = derived:primary_email|lower`
 
 Do not write unsupported prose-like checks such as:
 

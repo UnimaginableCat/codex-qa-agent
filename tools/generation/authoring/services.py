@@ -1025,7 +1025,7 @@ def _validate_agent_plan_payload_shape(
             )
         ]
 
-    list_fields = ("planned_test_cases", "assumptions", "open_questions")
+    list_fields = ("planned_test_cases", "assumptions", "open_questions", "scenario_variables")
     for field_name in list_fields:
         value = payload.get(field_name)
         if value is not None and not isinstance(value, list):
@@ -1065,6 +1065,7 @@ def _validate_agent_plan_payload_shape(
                 "unresolved_items",
                 "gaps",
                 "assumptions",
+                "scenario_variables",
             ):
                 value = item.get(field_name)
                 if value is not None and not isinstance(value, list):

@@ -34,6 +34,8 @@ defaults:
   environment: env/demo.env
   auth: bearer
   actor: admin-api-client
+  scenario_variables:
+    - run_suffix = generated:run_suffix
 
 entities: {}
 cases: []
@@ -53,6 +55,7 @@ Compiler behavior:
 - resolves persisted-state verification via entity DB templates
 - carries `defaults.environment` into rendered scenario `## Environment`
 - carries `defaults.actor` into rendered scenario `## Variables` as `actor = literal:<value>`
+- carries first-class `defaults.scenario_variables[]` and `cases[].scenario_variables[]` into rendered scenario `## Variables`
 - uses that rendered `actor` variable to select actor-scoped API/DB env keys like `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`, with fallback to base keys
 - uses `defaults.auth` as fallback auth strategy when case/setup API auth is not authored explicitly
 - runs existing `validate_agent_plan_input(...)` after compilation
@@ -93,6 +96,15 @@ Capture syntax is strict too:
 - good: `response.json.id -> user_id`
 - bad: `capture response id as user_id`
 
+Variable syntax is strict too:
+
+- good: `run_suffix = generated:run_suffix`
+- good: `internal_api_token = env:INTERNAL_API_TOKEN`
+- good: `primary_email = template:autotest.{{run_suffix}}@example.com`
+- bad: `run_suffix generated dynamically`
+- bad: `internal token from env`
+- bad: `display_name = Fixed literal without literal prefix`
+
 Supported `state_change` values:
 
 - mutating: `create`, `update`, `delete`, `mutate`
@@ -105,3 +117,4 @@ Compiler does not:
 - infer missing route templates
 - infer missing capture targets
 - interpret broad prose as executable detail
+- use `metadata.scenario_variables` as the primary authoring path; use first-class `scenario_variables` fields instead

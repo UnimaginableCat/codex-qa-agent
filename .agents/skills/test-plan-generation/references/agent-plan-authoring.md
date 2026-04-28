@@ -52,6 +52,7 @@ Top-level fields:
 - `project`
 - `title`
 - `goal`
+- optional `scenario_variables[]`
 - `planned_test_cases[]`
 - `assumptions[]`
 - `open_questions[]`
@@ -81,6 +82,7 @@ Each case should contain:
 - optional `db_verification`
 - optional `requires_db_verification`
 - optional `assumptions[]`
+- optional `scenario_variables[]`
 - optional `metadata`
 
 ## Validation Rules
@@ -118,6 +120,8 @@ Each case should contain:
 - If a case is intended for downstream execution, do not leave it in a prose-only state after validation; add the concrete `route` or full `workflow_steps[]`, request details, captures, and DB verification that the runner will need.
 - Put uncertain details into `unresolved_items[]` or `open_questions[]`.
 - Do not hide primary planning fields inside `metadata`.
+- Use first-class `scenario_variables[]` for machine-readable variables that must survive compile, normalize, render, and promotion.
+- Keep env-backed variables explicit, for example `internal_api_token = env:INTERNAL_API_TOKEN`, and rely on preflight to resolve them.
 
 ## Seed-Case Gate
 

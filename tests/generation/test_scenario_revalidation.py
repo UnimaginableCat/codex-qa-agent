@@ -199,6 +199,41 @@ class ScenarioRevalidationTests(unittest.TestCase):
             any(target.section_name == "Variables" for target in result.edit_targets.targets)
         )
 
+    def test_cli_compile_mode_explains_external_inputs_are_structural_only(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = _write_scenario(Path(tmp), _external_variable_scenario())
+
+            json_stdout = io.StringIO()
+            with redirect_stdout(json_stdout):
+                json_code = cli.main(
+                    ["--validate-scenario", "--path", str(scenario_path), "--mode", "compile"]
+                )
+            json_payload = json.loads(json_stdout.getvalue())
+
+            text_stdout = io.StringIO()
+            with redirect_stdout(text_stdout):
+                text_code = cli.main(
+                    [
+                        "--validate-scenario",
+                        "--path",
+                        str(scenario_path),
+                        "--mode",
+                        "compile",
+                        "--output-format",
+                        "text",
+                    ]
+                )
+            text_output = text_stdout.getvalue()
+
+        self.assertEqual(json_code, 0)
+        self.assertIn("validation_notes", json_payload)
+        self.assertTrue(json_payload["validation_notes"])
+        self.assertIn("Compile mode is structural only", json_payload["validation_notes"][0])
+        self.assertEqual(text_code, 0)
+        self.assertIn("Validation notes:", text_output)
+        self.assertIn("Compile mode is structural only", text_output)
+        self.assertIn("Run --mode preflight", text_output)
+
     def test_compile_mode_skips_compile_when_parser_invalid(self) -> None:
         with TemporaryDirectory() as tmp:
             scenario_path = _write_scenario(Path(tmp), _invalid_json_body_scenario())
@@ -439,6 +474,54 @@ class ScenarioRevalidationTests(unittest.TestCase):
         self.assertIn("Preflight: failed", text_output)
         self.assertIn("Preflight issues:", text_output)
 
+    def test_cli_preflight_mode_explains_it_includes_environment_resolution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _prepare_workspace(root, env_file=True, project=True)
+            scenario_path = _write_scenario(root, _runner_ready_post_scenario())
+
+            with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
+                json_stdout = io.StringIO()
+                with redirect_stdout(json_stdout):
+                    json_code = cli.main(
+                        [
+                            "--validate-scenario",
+                            "--path",
+                            str(scenario_path),
+                            "--mode",
+                            "preflight",
+                            "--workspace-root",
+                            str(root),
+                        ]
+                    )
+                json_payload = json.loads(json_stdout.getvalue())
+
+                text_stdout = io.StringIO()
+                with redirect_stdout(text_stdout):
+                    text_code = cli.main(
+                        [
+                            "--validate-scenario",
+                            "--path",
+                            str(scenario_path),
+                            "--mode",
+                            "preflight",
+                            "--workspace-root",
+                            str(root),
+                            "--output-format",
+                            "text",
+                        ]
+                    )
+                text_output = text_stdout.getvalue()
+
+        self.assertEqual(json_code, 0)
+        self.assertEqual(json_payload["preflight_status"], "success")
+        self.assertIn("validation_notes", json_payload)
+        self.assertTrue(json_payload["validation_notes"])
+        self.assertIn("Preflight mode includes environment resolution", json_payload["validation_notes"][0])
+        self.assertEqual(text_code, 0)
+        self.assertIn("Validation notes:", text_output)
+        self.assertIn("Preflight mode includes environment resolution", text_output)
+
     def test_directory_revalidation_compile_mode_summarizes_runner_ready_and_failures(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -498,6 +581,41 @@ class ScenarioRevalidationTests(unittest.TestCase):
         self.assertIn("Validation mode: compile", text_output)
         self.assertIn("Failures:", text_output)
         self.assertEqual(text_code, 1)
+
+    def test_cli_validate_scenario_dir_compile_mode_explains_preflight_next_step(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requires-env.md").write_text(_external_variable_scenario(), encoding="utf-8")
+
+            json_stdout = io.StringIO()
+            with redirect_stdout(json_stdout):
+                json_code = cli.main(
+                    ["--validate-scenario-dir", "--path", str(root), "--mode", "compile"]
+                )
+            json_payload = json.loads(json_stdout.getvalue())
+
+            text_stdout = io.StringIO()
+            with redirect_stdout(text_stdout):
+                text_code = cli.main(
+                    [
+                        "--validate-scenario-dir",
+                        "--path",
+                        str(root),
+                        "--mode",
+                        "compile",
+                        "--output-format",
+                        "text",
+                    ]
+                )
+            text_output = text_stdout.getvalue()
+
+        self.assertEqual(json_code, 1)
+        self.assertEqual(json_payload["status"], "ERROR")
+        self.assertTrue(json_payload["validation_notes"])
+        self.assertIn("Compile directory validation is structural only", json_payload["validation_notes"][0])
+        self.assertEqual(text_code, 1)
+        self.assertIn("Validation notes:", text_output)
+        self.assertIn("Use --mode preflight", text_output)
 
 
 def _write_scenario(root: Path, content: str) -> Path:

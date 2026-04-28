@@ -177,6 +177,42 @@ cases:
         self.assertEqual(compiled_plan.planned_test_cases[1].workflow_steps[0].route.endpoint_path, "/users")
         self.assertEqual(compiled_plan.planned_test_cases[1].workflow_steps[1].route.endpoint_path, "/users/{{user_id}}")
 
+    def test_compile_propagates_first_class_scenario_variables(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=["run_suffix = generated:run_suffix"],
+            ),
+            cases=[
+                AuthoringCase(
+                    id="create-user-success",
+                    kind="api",
+                    objective="Create user successfully",
+                    state_change="none",
+                    scenario_variables=["internal_api_token = env:INTERNAL_API_TOKEN"],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/users"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        self.assertEqual(result.compiled_plan.scenario_variables, ["run_suffix = generated:run_suffix"])
+        self.assertEqual(
+            result.compiled_plan.planned_test_cases[0].scenario_variables,
+            ["internal_api_token = env:INTERNAL_API_TOKEN"],
+        )
+
     def test_compile_db_check_promotes_db_expected_outcomes_to_case_level(self) -> None:
         plan = AuthoringPlan(
             version=1,

@@ -805,7 +805,12 @@ def _compile_summary(
     if compile_status == ScenarioCompileStatus.FAILED:
         return f"Compile-only validation failed with {len(issues)} issue(s)."
     if readiness == ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE:
-        return f"Compile-only validation passed with {len(warnings)} warning(s) or remaining checklist gaps."
+        if warnings:
+            return (
+                "Compile-only validation passed, but external inputs are still required before execution. "
+                "Environment-backed variables are not resolved in compile mode; run preflight to verify runtime readiness."
+            )
+        return "Compile-only validation passed with remaining checklist gaps before runner execution."
     return "Compile-only validation passed and the scenario is structurally runner-ready."
 
 

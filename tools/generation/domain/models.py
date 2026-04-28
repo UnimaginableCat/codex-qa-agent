@@ -224,6 +224,7 @@ class AgentPlannedTestCaseInput:
     unresolved_items: list[str] = field(default_factory=list)
     gaps: list[PlannedCaseGap] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    scenario_variables: list[str] = field(default_factory=list)
     route: PlannedRouteIntent | None = None
     db_verification: PlannedDbVerification | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -256,6 +257,7 @@ class AgentPlannedTestCaseInput:
             unresolved_items=[str(item) for item in payload.get("unresolved_items", [])],
             gaps=[PlannedCaseGap.from_dict(item) for item in payload.get("gaps", [])],
             assumptions=[str(item) for item in payload.get("assumptions", [])],
+            scenario_variables=[str(item) for item in payload.get("scenario_variables", [])],
             route=(
                 None
                 if payload.get("route") is None
@@ -278,6 +280,7 @@ class AgentTestPlanInput:
     project: str
     title: str
     goal: str = ""
+    scenario_variables: list[str] = field(default_factory=list)
     planned_test_cases: list[AgentPlannedTestCaseInput] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
@@ -294,6 +297,7 @@ class AgentTestPlanInput:
             project=str(payload.get("project", "")),
             title=str(payload.get("title", "")),
             goal=str(payload.get("goal", "")),
+            scenario_variables=[str(item) for item in payload.get("scenario_variables", [])],
             planned_test_cases=[
                 AgentPlannedTestCaseInput.from_dict(item)
                 for item in payload.get("planned_test_cases", [])
@@ -361,6 +365,7 @@ class PlannedTestCase:
     priority: str = "normal"
     assumptions: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
+    scenario_variables: list[str] = field(default_factory=list)
     gaps: list[PlannedCaseGap] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     planned_route: PlannedRouteIntent | None = None
@@ -394,6 +399,7 @@ class PlannedTestCase:
             priority=str(payload.get("priority", "normal")),
             assumptions=[str(item) for item in payload.get("assumptions", [])],
             open_questions=[str(item) for item in payload.get("open_questions", [])],
+            scenario_variables=[str(item) for item in payload.get("scenario_variables", [])],
             gaps=[PlannedCaseGap.from_dict(item) for item in payload.get("gaps", [])],
             tags=[str(item) for item in payload.get("tags", [])],
             planned_route=(
@@ -493,6 +499,7 @@ class NormalizedTestPlan:
     title: str
     test_cases: list[PlannedTestCase] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    scenario_variables: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -509,6 +516,7 @@ class NormalizedTestPlan:
                 PlannedTestCase.from_dict(item) for item in payload.get("test_cases", [])
             ],
             assumptions=[str(item) for item in payload.get("assumptions", [])],
+            scenario_variables=[str(item) for item in payload.get("scenario_variables", [])],
             metadata=dict(payload.get("metadata") or {}),
         )
 

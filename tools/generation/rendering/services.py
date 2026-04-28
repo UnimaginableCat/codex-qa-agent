@@ -978,10 +978,23 @@ def _resolved_actor(plan: NormalizedTestPlan, test_case: PlannedTestCase) -> str
 
 
 def _rendered_scenario_variables(plan: NormalizedTestPlan, test_case: PlannedTestCase) -> list[str]:
+    variables = _dedupe_preserve_order(
+        [
+            *list(plan.scenario_variables),
+            *list(test_case.scenario_variables),
+            *_string_list_metadata(plan.metadata.get("scenario_variables")),
+            *_string_list_metadata(test_case.metadata.get("scenario_variables")),
+            *_string_list_metadata(
+                (plan.metadata.get("defaults") or {}).get("scenario_variables")
+                if isinstance(plan.metadata.get("defaults"), dict)
+                else None
+            ),
+        ]
+    )
     actor = _resolved_actor(plan, test_case)
     if not actor:
-        return []
-    return [f"actor = literal:{actor}"]
+        return variables
+    return _dedupe_preserve_order([*variables, f"actor = literal:{actor}"])
 
 
 def _has_auth_header_signal(headers: dict[str, Any]) -> bool:
@@ -1046,6 +1059,14 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+def _string_list_metadata(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
 
 
 def _escape_line(value: str) -> str:

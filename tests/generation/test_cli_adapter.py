@@ -98,6 +98,8 @@ class GenerationCliAdapterTests(unittest.TestCase):
         self.assertTrue(output_path.parent.name.startswith("gen-"))
         self.assertIn("source_id: users-api", output_text)
         self.assertIn("project: code/demo", output_text)
+        self.assertIn("scenario_variables:", output_text)
+        self.assertIn("run_suffix = generated:run_suffix", output_text)
 
     def test_validate_agent_plan_returns_pass_for_valid_file(self) -> None:
         with TemporaryDirectory() as tmp:

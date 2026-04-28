@@ -36,6 +36,7 @@ class NormalizedTestPlanAssembler:
                 for draft in normalized_source.test_case_drafts
             ],
             assumptions=list(normalized_source.assumptions),
+            scenario_variables=[],
             metadata={
                 "generation_phase": "prose_plan_generation",
                 "normalizer": normalized_source.metadata.get("normalizer", "unknown"),
@@ -56,6 +57,7 @@ class NormalizedTestPlanAssembler:
                 for index, case_input in enumerate(agent_plan.planned_test_cases, start=1)
             ],
             assumptions=list(agent_plan.assumptions),
+            scenario_variables=list(agent_plan.scenario_variables),
             metadata={
                 **dict(agent_plan.metadata),
                 "generation_phase": "agent_plan_generation",
@@ -193,6 +195,7 @@ class NormalizedTestPlanAssembler:
             priority=case_input.priority,
             assumptions=list(case_input.assumptions),
             open_questions=list(case_input.unresolved_items),
+            scenario_variables=list(case_input.scenario_variables),
             gaps=list(case_input.gaps) or _infer_case_gaps(case_input.unresolved_items, source="agent_authored"),
             tags=list(case_input.tags),
             planned_route=None if case_input.route is None else case_input.route,
