@@ -92,8 +92,10 @@ start inside the authoring branch rather than being classified first.
 - Use deterministic `oracle.status_code`, `oracle.business_checks`, `oracle.captures`, and `oracle.persisted_state`.
 - Use `defaults.environment` when one env file should flow into rendered scenario `## Environment`.
 - Use `defaults.actor` when a stable execution actor should flow into rendered scenario variables as `actor = literal:<value>` and select actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
+- Use `defaults.headers` for shared request headers that should be applied across authored API and workflow requests.
 - Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
 - Keep variable definitions in first-class `scenario_variables` fields. Do not hide them under `metadata`.
+- Prefer `defaults.headers` plus env-backed variables for custom tokens such as `X-Leadflow-Internal-Token`; do not encode custom header semantics as fake auth types.
 - For controller or endpoint full-coverage plans, prefer API and workflow cases plus persisted-state DB verification inside those cases.
 - Do not add standalone schema-readiness `db-check` cases by default when the expected downstream path includes render, review, and promote.
 - Use standalone `db-check` only when the user explicitly asks for schema or infrastructure verification, or when the workflow is expected to stop at authoring or compile instead of promoted runnable scenarios.

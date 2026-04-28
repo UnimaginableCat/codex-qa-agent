@@ -34,8 +34,11 @@ defaults:
   environment: env/demo.env
   auth: bearer
   actor: admin-api-client
+  headers:
+    X-Internal-Token: "{{internal_api_token}}"
   scenario_variables:
     - run_suffix = generated:run_suffix
+    - internal_api_token = env:INTERNAL_API_TOKEN
 
 entities: {}
 cases: []
@@ -55,6 +58,7 @@ Compiler behavior:
 - resolves persisted-state verification via entity DB templates
 - carries `defaults.environment` into rendered scenario `## Environment`
 - carries `defaults.actor` into rendered scenario `## Variables` as `actor = literal:<value>`
+- merges `defaults.headers` into authored API/workflow request headers, with case-level and entity-operation headers taking precedence on key conflicts
 - carries first-class `defaults.scenario_variables[]` and `cases[].scenario_variables[]` into rendered scenario `## Variables`
 - uses that rendered `actor` variable to select actor-scoped API/DB env keys like `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`, with fallback to base keys
 - uses `defaults.auth` as fallback auth strategy when case/setup API auth is not authored explicitly
@@ -110,6 +114,13 @@ Variable syntax is strict too:
 - bad: `run_suffix generated dynamically`
 - bad: `internal token from env`
 - bad: `display_name = Fixed literal without literal prefix`
+
+Header guidance:
+
+- use `defaults.headers` for shared non-secret or env-backed headers across many requests
+- use per-case `execute.headers` or entity-operation `request_headers` when a header is specific to one flow
+- if the same header appears in both `defaults.headers` and a case or entity operation, the more specific authored header wins
+- do not invent custom `defaults.auth` values for header-based auth schemes; model them as explicit headers instead
 
 Supported `state_change` values:
 

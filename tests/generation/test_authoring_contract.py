@@ -93,6 +93,103 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(workflow_case.workflow_steps[0].auth_strategy, ["bearer"])
         self.assertEqual(workflow_case.workflow_steps[0].metadata["default_actor"], "api-client")
 
+    def test_compile_merges_default_headers_into_setup_and_case_requests(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "internal_api_token = env:INTERNAL_API_TOKEN",
+                    "generated_email = template:autotest@example.com",
+                ],
+                headers={
+                    "X-Leadflow-Internal-Token": "{{internal_api_token}}",
+                    "Content-Type": "application/json",
+                }
+            ),
+            entities={
+                "user": AuthoringEntitySpec(
+                    operations={
+                        "create": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users"),
+                            request_headers={"X-Request-Source": "setup"},
+                            request_body={"email": "{{generated_email}}"},
+                            captures=["response.json.id -> user_id"],
+                        ),
+                        "verify_exists": AuthoringEntityOperation(
+                            sql="SELECT id FROM users WHERE id = :user_id",
+                            params={"user_id": "{{user_id}}"},
+                            expected_outcomes=["one row exists"],
+                        ),
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="get-user-success",
+                    kind="workflow",
+                    objective="Get created user",
+                    state_change="none",
+                    setup=[AuthoringSetupStep(use_entity="user", operation="create")],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/users/{{user_id}}"),
+                        headers={"Content-Type": "application/custom+json"},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+                AuthoringCase(
+                    id="create-user-success",
+                    kind="api",
+                    objective="Create user successfully",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users"),
+                        headers={"X-Request-Source": "case"},
+                        body={"email": "{{generated_email}}"},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> user_id"],
+                        persisted_state=AuthoringPersistedStateRef(entity="user", operation="verify_exists"),
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        workflow_case = result.compiled_plan.planned_test_cases[0]
+        self.assertEqual(
+            workflow_case.workflow_steps[0].request_headers,
+            {
+                "X-Leadflow-Internal-Token": "{{internal_api_token}}",
+                "Content-Type": "application/json",
+                "X-Request-Source": "setup",
+            },
+        )
+        self.assertEqual(
+            workflow_case.workflow_steps[1].request_headers,
+            {
+                "X-Leadflow-Internal-Token": "{{internal_api_token}}",
+                "Content-Type": "application/custom+json",
+            },
+        )
+        api_case = result.compiled_plan.planned_test_cases[1]
+        self.assertEqual(
+            api_case.request_headers,
+            {
+                "X-Leadflow-Internal-Token": "{{internal_api_token}}",
+                "Content-Type": "application/json",
+                "X-Request-Source": "case",
+            },
+        )
+
     def test_compile_valid_authoring_plan_to_agent_plan(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "authoring-plan.yaml"

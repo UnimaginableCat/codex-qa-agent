@@ -108,6 +108,10 @@ Each case should contain:
 - Do not author `defaults.actor` as prose-only business commentary; if it is present, downstream
   runtime will use it to select actor-scoped `API_*` and `DATABASE_*` keys before falling back to
   base env values.
+- For shared custom headers in authoring DSL, prefer `defaults.headers` with env-backed variables,
+  for example `X-Leadflow-Internal-Token: "{{internal_api_token}}"`.
+- Do not model custom header auth schemes as invented `defaults.auth` values; keep them as explicit
+  headers and let runtime-supported auth types stay limited to the real enum.
 - Keep `actions[]` at planning level, not runner-step level.
 - Use `workflow_steps[]` for true cross-endpoint lifecycle coverage.
 - For successful mutating workflows, include persisted-state verification.

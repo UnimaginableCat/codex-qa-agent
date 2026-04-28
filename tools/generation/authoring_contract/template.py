@@ -48,6 +48,7 @@ class AuthoringPlanTemplateService:
                 environment="env/replace.env",
                 auth="bearer",
                 actor="api-client",
+                headers={"X-Internal-Token": "{{internal_api_token}}"},
                 scenario_variables=["run_suffix = generated:run_suffix"],
             ),
             entities={

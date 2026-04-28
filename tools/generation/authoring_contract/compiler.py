@@ -432,7 +432,7 @@ class AuthoringPlanCompiler:
                         step_type="api",
                         title=title,
                         route=route_intent,
-                        request_headers=dict(case.execute.headers),
+                        request_headers=_merge_default_headers(authoring_plan, case.execute.headers),
                         request_params=dict(case.execute.params),
                         request_body=case.execute.body,
                         requires_request_body=case.execute.body is not None,
@@ -490,7 +490,7 @@ class AuthoringPlanCompiler:
                 case_id=case.id,
                 actions=[] if route_intent is None else [f"{route_intent.http_method} {route_intent.endpoint_path}"],
                 auth_strategy=auth_strategy,
-                request_headers={} if case.execute is None else dict(case.execute.headers),
+                request_headers={} if case.execute is None else _merge_default_headers(authoring_plan, case.execute.headers),
                 request_params={} if case.execute is None else dict(case.execute.params),
                 request_body=None if case.execute is None else case.execute.body,
                 requires_request_body=bool(case.execute is not None and case.execute.body is not None),
@@ -553,7 +553,7 @@ class AuthoringPlanCompiler:
                             http_method=operation.route.method.upper(),
                             endpoint_path=operation.route.path,
                         ),
-                        request_headers=dict(operation.request_headers),
+                        request_headers=_merge_default_headers(authoring_plan, operation.request_headers),
                         request_params=dict(operation.request_params),
                         request_body=operation.request_body,
                         requires_request_body=operation.request_body is not None,
@@ -778,6 +778,12 @@ def _build_route_intent(execute: Any) -> PlannedRouteIntent | None:
         http_method=execute.route.method.upper(),
         endpoint_path=execute.route.path,
     )
+
+
+def _merge_default_headers(authoring_plan: AuthoringPlan, authored_headers: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(authoring_plan.defaults.headers)
+    merged.update(dict(authored_headers or {}))
+    return merged
 
 
 def _api_expected_outcomes(oracle: Any) -> list[str]:

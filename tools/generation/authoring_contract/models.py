@@ -34,6 +34,7 @@ class AuthoringDefaults:
     environment: str = ""
     auth: str = ""
     actor: str = ""
+    headers: dict[str, Any] = field(default_factory=dict)
     scenario_variables: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -45,6 +46,7 @@ class AuthoringDefaults:
             environment=str(payload.get("environment", "")),
             auth=str(payload.get("auth", "")),
             actor=str(payload.get("actor", "")),
+            headers=dict(payload.get("headers") or {}),
             scenario_variables=[str(item) for item in payload.get("scenario_variables", [])],
         )
 

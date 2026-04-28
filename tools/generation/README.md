@@ -52,6 +52,11 @@ When scaffolded through the CLI, `authoring-plan.yaml` lives inside the generati
 rendered scenario variable `actor = literal:<value>` and acts as an execution profile selector for
 actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
 
+`defaults.headers` in `authoring-plan.yaml` is the preferred way to apply shared custom request
+headers across authored API and workflow requests. It is especially useful for env-backed headers
+such as `X-Leadflow-Internal-Token: "{{internal_api_token}}"`. Case-level or entity-operation
+headers override the same keys from `defaults.headers`.
+
 `entities.<entity>.id_field` is now executable authoring contract too. It names the canonical entity
 identity variable used across setup chains and persisted-state templates, for example `user_id`.
 
@@ -87,6 +92,17 @@ Authoring-plan scaffold:
   --project code/demo `
   --name "Users API" `
   --goal "Cover user API behavior."
+```
+
+Typical authoring pattern for custom internal-token headers:
+
+```yaml
+defaults:
+  environment: env/demo.env
+  headers:
+    X-Leadflow-Internal-Token: "{{internal_api_token}}"
+  scenario_variables:
+    - internal_api_token = env:INTERNAL_API_TOKEN
 ```
 
 Authoring-plan validate-only:
