@@ -1,0 +1,4 @@
+interface:
+  display_name: "QA Generation Pipeline"
+  short_description: "Orchestrate QA plan generation through scenario execution"
+  default_prompt: "Run the full QA generation pipeline for a target project: authoring, compile, render, review, promote, validate, and execute generated scenarios."

@@ -88,6 +88,7 @@ for later phases.
 - Stop at `NormalizedTestPlan` unless the user asked for downstream phases.
 - When the user asks for scenario markdown previews, stop after `render`.
 - When the user asks for real scenario files, continue through `review` and then `promote`.
+- When the user asks to run the generated scenarios after promotion, hand off to `qa-generation-pipeline` or `runner-execution`; this skill does not execute scenarios.
 - When the user asks to convert the whole rendered set, prefer `--promote-all-drafts` over shell loops.
 - When the user asks only for validation/readiness, do not re-generate unless required artifacts are missing.
 
@@ -132,6 +133,7 @@ Draft rendering is authored-route-first:
 # Guardrails
 
 - Do not run or modify `scenario_runner` from this skill.
+- Do not treat promote or validate as execution; actual generated scenario runs belong to `qa-generation-pipeline` coordinating `runner-execution`.
 - Do not author `authoring-plan.yaml` from scratch in this skill when `agent-plan-authoring` is the correct branch.
 - Do not scaffold a new authoring bundle here unless the user explicitly bypassed routing and asked to start with downstream CLI primitives.
 - Do not expand coverage scope or invent new cases unless the user explicitly asks for downstream rewriting.

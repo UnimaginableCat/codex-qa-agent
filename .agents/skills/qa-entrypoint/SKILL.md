@@ -12,6 +12,7 @@ Use it first when the user request is broad, ambiguous, or expressed in workspac
 - inspect a failed run
 - explain which skill flow to use
 - generate a test plan
+- run the full generation pipeline from authoring through generated scenario execution
 - decompose coverage into authoring DSL
 - compile or promote generated plan artifacts
 - investigate env, API, DB, or reporting issues without naming the exact skill
@@ -87,7 +88,12 @@ Choose one primary branch first:
    Use when the desired output is a compiled `agent-plan.json`, `NormalizedTestPlan`, rendered drafts, review output, promoted scenarios, or generation diagnostics from existing authored input.
    Primary skill: `test-plan-generation`
 
-4. Focused investigation branch
+4. Full generation pipeline branch
+   Use when the request crosses both generation and execution, for example authoring -> compile -> render -> review -> promote -> validate -> run, "full generation pipeline", or "generate scenarios and execute them".
+   Primary skill: `qa-generation-pipeline`
+   Secondary skills: `agent-plan-authoring`, `test-plan-generation`, `runner-execution`, and `reporting` as needed.
+
+5. Focused investigation branch
    Use only when the user explicitly asks for a narrow investigation or when runner artifacts show a real need for deeper inspection.
    Primary skill depends on the question:
    - `env-resolution` for env/config/auth readiness
@@ -95,7 +101,7 @@ Choose one primary branch first:
    - `api-workflow` for manual HTTP execution
    - `db-verification` for read-only persistence checks
 
-5. Final synthesis branch
+6. Final synthesis branch
    Use when execution/investigation already happened and the main remaining task is consolidating outcome and evidence.
    Primary skill: `reporting`
 
@@ -116,6 +122,7 @@ Do not start with broad code analysis for a runnable scenario unless the user ex
 
 - Prefer one primary skill for the main branch and add secondary skills only when the branch requires them.
 - Prefer `runner-execution` over manual API/DB replay when a runnable scenario exists.
+- Prefer `qa-generation-pipeline` when the request explicitly asks to carry generated coverage through to scenario execution.
 - Prefer `agent-plan-authoring` when the request is about decomposition, coverage design, or creating/filling the staged bundle under `artifacts/agent/generation/<run_id>/` with `entity-inventory.yaml`, `operation-inventory.yaml`, and `authoring-plan.yaml`.
 - Prefer `test-plan-generation` when the request starts from an existing generation bundle and asks for compile, generate, render, review, promote, or validate.
 - Before routing an existing staged authoring bundle into compile or generate, require `--validate-authoring-bundle` as the final authoring gate.

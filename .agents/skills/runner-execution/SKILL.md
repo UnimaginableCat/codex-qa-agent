@@ -36,6 +36,7 @@ Do not silently fall back to system `python` or `py`. If the project venv is mis
 Use the runner as the first source of execution truth for runnable scenarios.
 
 - Scenario directory input: use `tools.scenario_runner.batch_cli` for a directory/suite of markdown scenarios instead of building ad hoc shell or inline Python loops.
+- Generated scenario directory input such as `scenarios/generated/<source>-<run_id>/`: treat it as a normal scenario suite and execute it with `tools.scenario_runner.batch_cli`.
 - Auto mode: use for explicitly non-interactive or compatibility-focused runs.
 - Guided mode: use as the default for scenario runs when the user did not request auto/non-interactive mode.
 - Manual/resume mode: use only when inspecting an existing pause-state or continuing with an explicit operator action.
