@@ -186,12 +186,14 @@ class AuthoringEntityOperation:
     request_headers: dict[str, Any] = field(default_factory=dict)
     request_params: dict[str, Any] = field(default_factory=dict)
     request_body: Any = None
+    request_constraints: list[dict[str, Any]] = field(default_factory=list)
     auth_strategy: list[str] = field(default_factory=list)
     oracle: AuthoringOracle | None = None
     sql: str = ""
     params: dict[str, Any] = field(default_factory=dict)
     expected_outcomes: list[str] = field(default_factory=list)
     captures: list[str] = field(default_factory=list)
+    column_types: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -222,12 +224,16 @@ class AuthoringEntityOperation:
             request_headers=headers,
             request_params=request_params,
             request_body=request_body,
+            request_constraints=[
+                dict(item) for item in payload.get("request_constraints", []) if isinstance(item, dict)
+            ],
             auth_strategy=auth_strategy,
             oracle=None if not isinstance(oracle_payload, dict) else AuthoringOracle.from_dict(oracle_payload),
             sql=str(payload.get("sql", "")),
             params=dict(payload.get("params") or {}),
             expected_outcomes=[str(item) for item in payload.get("expected_outcomes", [])],
             captures=[str(item) for item in payload.get("captures", []) or payload.get("capture", [])],
+            column_types={str(key): str(value) for key, value in dict(payload.get("column_types") or {}).items()},
         )
 
 

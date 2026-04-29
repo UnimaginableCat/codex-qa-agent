@@ -419,6 +419,9 @@ entity_operations:
       path: /users
     request_body:
       email: "{{submitted_email}}"
+    request_constraints:
+      - field: email
+        format: lowercase
     captures:
       - user_id
 routes:
@@ -435,6 +438,8 @@ db_verifications:
       user_id: "{{user_id}}"
     expected_outcomes:
       - one row exists
+    column_types:
+      id: uuid
 """,
                 encoding="utf-8",
             )
@@ -456,10 +461,12 @@ db_verifications:
         self.assertEqual(create_operation["route"]["method"], "POST")
         self.assertEqual(create_operation["route"]["path"], "/users")
         self.assertEqual(create_operation["oracle"]["status_code"], 201)
+        self.assertEqual(create_operation["request_constraints"], [{"field": "email", "format": "lowercase"}])
         self.assertEqual(create_operation["captures"], ["response.json.user_id -> user_id"])
         verify_operation = synced_user["operations"]["verify_exists"]
         self.assertEqual(verify_operation["sql"], "SELECT id FROM users WHERE id = :user_id")
         self.assertEqual(verify_operation["expected_outcomes"], ["one row exists"])
+        self.assertEqual(verify_operation["column_types"], {"id": "uuid"})
         self.assertEqual(sync_payload["authoring_plan"]["cases"], [])
 
     def test_sync_authoring_plan_preserves_existing_str_enum_cases(self) -> None:

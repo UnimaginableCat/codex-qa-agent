@@ -89,6 +89,13 @@ class AuthoringPlanTemplateService:
                     "entity": "primary_entity",
                     "operation": "create_active",
                     "effect_state": "ACTIVE",
+                    "request_constraints": [
+                        {
+                            "field": "externalId",
+                            "format": "numeric_string",
+                            "when": {"provider": "SMS"},
+                        }
+                    ],
                     "captures": ["entity_id"],
                 },
                 {
@@ -113,6 +120,7 @@ class AuthoringPlanTemplateService:
                     "entity": "primary_entity",
                     "operation": "verify_exists",
                     "scoped_by": "entity_id",
+                    "column_types": {"external_id": "string"},
                 }
             ],
             "notes": [
@@ -120,6 +128,8 @@ class AuthoringPlanTemplateService:
                 "For lifecycle routes, record both precondition_state and effect_state before writing workflow cases.",
                 "For same-state lifecycle coverage, add target_state, same_state_behavior, same_state_status, and same_state_evidence before authoring cases such as archive archived or activate active.",
                 "When same_state_behavior is idempotent_success, author a repeated-call workflow case that expects the 2xx status and verifies persisted state after the second call.",
+                "Use request_constraints for domain-specific request fields instead of adding controller-specific validator code.",
+                "Use column_types on DB verifications when expectation typing matters, for example numeric-looking values stored in string columns.",
             ],
             "metadata": {
                 "template_version": AUTHORING_OPERATION_INVENTORY_TEMPLATE_VERSION,

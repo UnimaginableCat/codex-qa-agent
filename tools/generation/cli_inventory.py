@@ -240,6 +240,19 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
                     details={"route_index": index},
                 )
             )
+        request_constraints = item.get("request_constraints")
+        if request_constraints is not None and not _is_valid_request_constraints(request_constraints):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_request_constraints_invalid",
+                    message=(
+                        "Entity operation request_constraints must be a YAML array of objects with field and format."
+                    ),
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"operation_index": index, "entity": entity_name, "operation": operation_name},
+                )
+            )
         precondition_state = item.get("precondition_state")
         if not _is_valid_optional_state_or_state_list(precondition_state):
             diagnostics.append(
@@ -393,6 +406,17 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
                     details={"entity": entity_name, "operation": operation_name},
                 )
             )
+        column_types = item.get("column_types")
+        if column_types is not None and not _is_string_mapping(column_types):
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="adapter_operation_inventory_column_types_invalid",
+                    message="DB verification column_types must be a YAML object mapping column names to type names.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(path),
+                    details={"db_verification_index": index, "entity": entity_name, "operation": operation_name},
+                )
+            )
     return payload, diagnostics
 
 
@@ -402,6 +426,25 @@ def _has_same_state_evidence(value: Any) -> bool:
     if isinstance(value, list):
         return any(isinstance(item, str) and item.strip() for item in value)
     return False
+
+
+def _is_valid_request_constraints(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    for item in value:
+        if not isinstance(item, dict):
+            return False
+        if not str(item.get("field") or "").strip():
+            return False
+        if not str(item.get("format") or "").strip():
+            return False
+        if item.get("when") is not None and not isinstance(item.get("when"), dict):
+            return False
+    return True
+
+
+def _is_string_mapping(value: Any) -> bool:
+    return isinstance(value, dict) and all(str(key).strip() and str(item).strip() for key, item in value.items())
 
 
 def _is_valid_optional_state_or_state_list(value: Any) -> bool:

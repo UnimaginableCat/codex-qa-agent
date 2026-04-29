@@ -135,12 +135,17 @@ def _sync_route_operation_from_inventory(
         request_headers=dict(operation_item.get("request_headers") or operation_item.get("headers") or existing_operation.request_headers),
         request_params=dict(operation_item.get("request_params") or operation_item.get("params") or existing_operation.request_params),
         request_body=operation_item.get("request_body", existing_operation.request_body),
+        request_constraints=_dict_list_from_payload(
+            operation_item.get("request_constraints"),
+            fallback=existing_operation.request_constraints,
+        ),
         auth_strategy=_string_list_from_payload(operation_item.get("auth_strategy"), fallback=existing_operation.auth_strategy),
         oracle=oracle,
         sql=existing_operation.sql,
         params=dict(existing_operation.params),
         expected_outcomes=list(existing_operation.expected_outcomes),
         captures=_capture_rules_from_inventory(operation_item.get("captures"), fallback=existing_operation.captures),
+        column_types=dict(existing_operation.column_types),
     )
 
 
@@ -155,6 +160,7 @@ def _sync_db_operation_from_inventory(
         request_headers=dict(existing_operation.request_headers),
         request_params=dict(existing_operation.request_params),
         request_body=existing_operation.request_body,
+        request_constraints=list(existing_operation.request_constraints),
         auth_strategy=list(existing_operation.auth_strategy),
         oracle=existing_operation.oracle,
         sql=str(verification_item.get("sql") or existing_operation.sql or ""),
@@ -164,6 +170,10 @@ def _sync_db_operation_from_inventory(
             fallback=existing_operation.expected_outcomes,
         ),
         captures=_string_list_from_payload(verification_item.get("captures"), fallback=existing_operation.captures),
+        column_types={
+            str(key): str(value)
+            for key, value in dict(verification_item.get("column_types") or existing_operation.column_types).items()
+        },
     )
 
 
@@ -216,6 +226,12 @@ def _string_list_from_payload(value: Any, *, fallback: list[str]) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return list(fallback)
+
+
+def _dict_list_from_payload(value: Any, *, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    return [dict(item) for item in fallback]
 
 
 

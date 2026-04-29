@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import re
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -386,6 +387,8 @@ def _resolve_known_runtime_name(name: str, run_context: RunContext, resolved: di
     if not is_known_runtime_variable_name(name):
         return resolved.get(name)
     normalized_name = name.strip().lower()
+    if normalized_name in {"numeric_suffix", "numeric_timestamp_suffix"} or normalized_name.endswith("_numeric_suffix"):
+        return _numeric_run_suffix(run_context.run_id)
     if normalized_name == "run_id" or normalized_name.endswith("_run_id"):
         return run_context.run_id
     if normalized_name == "run_suffix" or normalized_name.endswith("_suffix"):
@@ -407,6 +410,9 @@ def is_known_runtime_variable_name(name: str) -> bool:
         (
             normalized_name == "run_id",
             normalized_name.endswith("_run_id"),
+            normalized_name == "numeric_suffix",
+            normalized_name == "numeric_timestamp_suffix",
+            normalized_name.endswith("_numeric_suffix"),
             normalized_name == "run_suffix",
             normalized_name.endswith("_suffix"),
             normalized_name in {"timestamp", "generated_timestamp", "current_timestamp", "timestamp_suffix"},
@@ -424,6 +430,10 @@ def _runtime_name(definition: ScenarioVariableDefinition) -> str:
     if definition.name == "run_suffix":
         return "run_suffix"
     return raw_value or definition.name
+
+
+def _numeric_run_suffix(run_id: str) -> str:
+    return "".join(re.findall(r"\d+", run_id.removeprefix("run-")))
 
 
 def _load_env_values(

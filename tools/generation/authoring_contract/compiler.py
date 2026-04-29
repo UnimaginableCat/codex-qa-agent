@@ -16,7 +16,9 @@ from tools.generation.domain.models import (
 from .diagnostics import authoring_diagnostic, build_authoring_message, derive_authoring_status
 from .case_diagnostics import (
     _boundary_case_diagnostics,
+    _db_string_placeholder_quoting_diagnostics,
     _normalized_email_expectation_diagnostics,
+    _request_constraint_diagnostics,
     _workflow_same_state_contract_warning,
     _workflow_setup_state_mismatch_diagnostics,
 )
@@ -395,6 +397,22 @@ class AuthoringPlanCompiler:
                 persisted_verification=persisted_verification,
             )
         )
+        diagnostics.extend(
+            _request_constraint_diagnostics(
+                authoring_plan=authoring_plan,
+                case=case,
+                case_ref=case_ref,
+                setup_steps=setup_steps,
+            )
+        )
+        diagnostics.extend(
+            _db_string_placeholder_quoting_diagnostics(
+                authoring_plan=authoring_plan,
+                case=case,
+                case_ref=case_ref,
+                persisted_verification=persisted_verification,
+            )
+        )
         diagnostics.extend(_workflow_setup_state_mismatch_diagnostics(case=case, case_ref=case_ref))
         diagnostics.extend(_workflow_same_state_contract_warning(case=case, case_ref=case_ref))
 
@@ -591,7 +609,10 @@ class AuthoringPlanCompiler:
                             authoring_plan=authoring_plan,
                         ),
                         capture=list(operation.captures or ([] if operation.oracle is None else operation.oracle.captures)),
-                        metadata=_authoring_defaults_metadata(authoring_plan),
+                        metadata={
+                            **_authoring_defaults_metadata(authoring_plan),
+                            "request_constraints": [dict(item) for item in operation.request_constraints],
+                        },
                     )
                 )
                 available_names.update(

@@ -183,6 +183,45 @@ Quote each YAML `scenario_variables` entry as one string and write source prefix
 after the colon, for example `"display_name = template:Invalid Update {{run_suffix}}"`.
 Unquoted `template: value` entries are parsed by YAML as maps instead of strings.
 
+When a target API has domain-specific field formats, record them declaratively in
+`operation-inventory.yaml` instead of adding controller-specific validation code:
+
+```yaml
+entity_operations:
+  - entity: user_identity
+    operation: link_telegram
+    route:
+      method: POST
+      path: /api/internal/v1/users/{{user_id}}/identities
+    request_constraints:
+      - field: subject
+        format: numeric_string
+        when:
+          provider: TELEGRAM
+```
+
+For generated digits-only values, use `generated:numeric_suffix`:
+
+```yaml
+defaults:
+  scenario_variables:
+    - "numeric_suffix = generated:numeric_suffix"
+    - "telegram_subject = template:700{{numeric_suffix}}"
+```
+
+When DB expectations compare numeric-looking generated values against string columns, declare
+`column_types` on the DB verification and quote the placeholder inside the expected string:
+
+```yaml
+db_verifications:
+  - entity: user_identity
+    operation: verify_telegram_identity
+    column_types:
+      subject: string
+    expected_outcomes:
+      - '`subject` = `"{{telegram_subject}}"`'
+```
+
 Authoring-plan validate-only:
 
 ```powershell

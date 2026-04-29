@@ -420,6 +420,258 @@ def _normalized_email_expectation_diagnostics(
     ]
 
 
+def _request_constraint_diagnostics(
+    *,
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    setup_steps: list[PlannedWorkflowStep],
+) -> list[GenerationDiagnostic]:
+    variable_definitions = _scenario_variable_definitions(authoring_plan, case)
+    risky_bindings: list[dict[str, Any]] = []
+
+    for scope, body, constraints in _iter_constrained_api_request_bodies(authoring_plan, case, setup_steps):
+        for constraint in constraints:
+            if not _request_constraint_applies(body, constraint):
+                continue
+            field_path = str(constraint.get("field") or "").strip()
+            value = _get_path_value(body, field_path)
+            if _constraint_value_satisfies(value, constraint, variable_definitions):
+                continue
+            risky_bindings.append(
+                {
+                    "scope": scope,
+                    "field": field_path,
+                    "format": str(constraint.get("format") or "").strip(),
+                    "value": value,
+                    "when": dict(constraint.get("when") or {}) if isinstance(constraint.get("when"), dict) else {},
+                }
+            )
+
+    if not risky_bindings:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_request_constraint_unsatisfied",
+            (
+                "Authored request body does not satisfy a declarative request constraint from the operation contract. "
+                "For numeric string fields, use a numeric literal or `numeric_suffix = generated:numeric_suffix`."
+            ),
+            source_ref=case_ref,
+            details={"bindings": risky_bindings},
+        )
+    ]
+
+
+def _db_string_placeholder_quoting_diagnostics(
+    *,
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    persisted_verification: PlannedDbVerification | None,
+) -> list[GenerationDiagnostic]:
+    if persisted_verification is None:
+        return []
+    column_types = _persisted_state_column_types(authoring_plan, case)
+    if not column_types:
+        return []
+    variable_definitions = _scenario_variable_definitions(authoring_plan, case)
+    risky_bindings: list[dict[str, Any]] = []
+    for expectation in persisted_verification.expected_outcomes:
+        binding = _db_string_placeholder_binding(expectation, column_types)
+        if binding is None:
+            continue
+        variable_name, field_path = binding
+        if not _variable_guarantees_numeric(variable_name, variable_definitions):
+            continue
+        risky_bindings.append({"field": field_path, "variable": variable_name, "rule": expectation})
+    if not risky_bindings:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_db_string_placeholder_requires_quotes",
+            (
+                "DB expectation compares a string-like column to a numeric generated placeholder. Quote the placeholder "
+                "inside the expectation, for example ``subject` = `\"{{telegram_subject}}\"``."
+            ),
+            source_ref=case_ref,
+            details={"bindings": risky_bindings},
+        )
+    ]
+
+
+def _iter_api_request_bodies(
+    case: AuthoringCase,
+    setup_steps: list[PlannedWorkflowStep],
+) -> list[tuple[str, Any]]:
+    bodies: list[tuple[str, Any]] = []
+    for step in setup_steps:
+        if step.step_type.strip().lower() == "api":
+            bodies.append((step.title or "setup", step.request_body))
+    if case.execute is not None:
+        bodies.append(("execute", case.execute.body))
+    return bodies
+
+
+def _iter_constrained_api_request_bodies(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    setup_steps: list[PlannedWorkflowStep],
+) -> list[tuple[str, Any, list[dict[str, Any]]]]:
+    bodies: list[tuple[str, Any, list[dict[str, Any]]]] = []
+    for step in setup_steps:
+        if step.step_type.strip().lower() != "api":
+            continue
+        constraints = _dict_list(step.metadata.get("request_constraints"))
+        if constraints:
+            bodies.append((step.title or "setup", step.request_body, constraints))
+    if case.execute is not None:
+        constraints = _request_constraints_for_execute(authoring_plan, case)
+        if constraints:
+            bodies.append(("execute", case.execute.body, constraints))
+    return bodies
+
+
+def _request_constraints_for_execute(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+) -> list[dict[str, Any]]:
+    if case.execute is None or case.execute.route is None:
+        return []
+    method = case.execute.route.method.strip().upper()
+    path = case.execute.route.path.strip()
+    for entity_spec in authoring_plan.entities.values():
+        for operation in entity_spec.operations.values():
+            if operation.route is None:
+                continue
+            if operation.route.method.strip().upper() == method and operation.route.path.strip() == path:
+                return [dict(item) for item in operation.request_constraints]
+    return []
+
+
+def _request_constraint_applies(body: Any, constraint: dict[str, Any]) -> bool:
+    if not isinstance(body, dict):
+        return False
+    field_path = str(constraint.get("field") or "").strip()
+    if not field_path:
+        return False
+    condition = constraint.get("when")
+    if isinstance(condition, dict):
+        for key, expected_value in condition.items():
+            actual_value = _get_path_value(body, str(key))
+            if str(actual_value).strip().lower() != str(expected_value).strip().lower():
+                return False
+    return True
+
+
+def _constraint_value_satisfies(
+    value: Any,
+    constraint: dict[str, Any],
+    definitions: dict[str, ScenarioVariableDefinition],
+) -> bool:
+    constraint_format = str(constraint.get("format") or "").strip().lower()
+    if constraint_format in {"numeric_string", "digits", "digits_only"}:
+        return _value_guarantees_numeric(value, definitions)
+    return True
+
+
+def _get_path_value(value: Any, path: str) -> Any:
+    current = value
+    for part in [item for item in path.split(".") if item]:
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _value_guarantees_numeric(
+    value: Any,
+    definitions: dict[str, ScenarioVariableDefinition],
+    *,
+    _stack: set[str] | None = None,
+) -> bool:
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, int):
+        return value >= 0
+    if isinstance(value, float):
+        return value.is_integer() and value >= 0
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    if not stripped:
+        return False
+    dependencies = _extract_placeholders(stripped)
+    literal_text = _PLACEHOLDER_PATTERN.sub("", stripped).strip()
+    if literal_text and not literal_text.isdigit():
+        return False
+    if not dependencies:
+        return stripped.isdigit()
+    return all(_variable_guarantees_numeric(dependency, definitions, _stack=_stack) for dependency in dependencies)
+
+
+def _db_string_placeholder_binding(
+    expectation: str,
+    column_types: dict[str, str],
+) -> tuple[str, str] | None:
+    match = _EXPECTATION_COMPARISON_RE.fullmatch(expectation.strip())
+    if match is None:
+        return None
+    field_path = _strip_wrapping_quotes(match.group("left").strip()).strip()
+    if not _path_targets_string_db_column(field_path, column_types):
+        return None
+    right = match.group("right").strip()
+    if _rhs_quotes_placeholder_as_string(right):
+        return None
+    placeholder_name = _exact_placeholder_name(right)
+    if placeholder_name is None:
+        return None
+    return placeholder_name, field_path
+
+
+def _path_targets_string_db_column(path: str, column_types: dict[str, str]) -> bool:
+    if not path.strip():
+        return False
+    last_part = _numeric_path_parts(path)[-1] if _numeric_path_parts(path) else path
+    normalized = _normalize_case_field_name(last_part)
+    normalized_types = {
+        _normalize_case_field_name(str(key)): str(value).strip().lower()
+        for key, value in column_types.items()
+    }
+    return normalized_types.get(normalized) in {"str", "string", "text", "varchar", "uuid"}
+
+
+def _rhs_quotes_placeholder_as_string(value: str) -> bool:
+    normalized = value.strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] == "`":
+        normalized = normalized[1:-1].strip()
+    if len(normalized) < 2 or normalized[0] != normalized[-1] or normalized[0] not in {'"', "'"}:
+        return False
+    return _exact_placeholder_name(normalized[1:-1]) is not None
+
+
+def _persisted_state_column_types(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+) -> dict[str, str]:
+    if case.oracle is None or case.oracle.persisted_state is None:
+        return {}
+    state_ref = case.oracle.persisted_state
+    entity_spec = authoring_plan.entities.get(state_ref.entity.strip())
+    if entity_spec is None:
+        return {}
+    operation = entity_spec.operations.get(state_ref.operation.strip())
+    if operation is None:
+        return {}
+    return dict(operation.column_types)
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
 def _scenario_variable_definitions(
     authoring_plan: AuthoringPlan,
     case: AuthoringCase,
@@ -532,6 +784,33 @@ def _variable_guarantees_lowercase(
         return guaranteed
     if definition.source == ScenarioVariableSource.GENERATED:
         return definition.raw_value.strip().lower().endswith(":uuid")
+    return False
+
+
+def _variable_guarantees_numeric(
+    variable_name: str,
+    definitions: dict[str, ScenarioVariableDefinition],
+    *,
+    _stack: set[str] | None = None,
+) -> bool:
+    definition = definitions.get(variable_name)
+    if definition is None:
+        return False
+    stack = set() if _stack is None else set(_stack)
+    if variable_name in stack:
+        return False
+    stack.add(variable_name)
+    if definition.source == ScenarioVariableSource.LITERAL:
+        return definition.raw_value.strip().isdigit()
+    if definition.source == ScenarioVariableSource.TEMPLATE:
+        return _value_guarantees_numeric(definition.raw_value, definitions, _stack=stack)
+    if definition.source == ScenarioVariableSource.DERIVED:
+        if not definition.source_name:
+            return False
+        return _variable_guarantees_numeric(definition.source_name, definitions, _stack=stack)
+    if definition.source == ScenarioVariableSource.GENERATED:
+        generated_name = definition.raw_value.split(":", 1)[-1].strip().lower()
+        return generated_name in {"numeric_suffix", "numeric_timestamp_suffix"} or generated_name.endswith("_numeric_suffix")
     return False
 
 

@@ -391,6 +391,51 @@ class ScenarioVariableTests(unittest.TestCase):
         )
         self.assertEqual(executor.step_payload["body"]["displayName"], executor.run_variables["primary_display_name"])
 
+    def test_generated_numeric_suffix_resolves_to_digits_only(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Numeric Suffix
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - numeric_suffix = generated:numeric_suffix
+                - telegram_subject = template:700{{numeric_suffix}}
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: link telegram
+                Method: POST
+                Path: /users/u1/identities
+                Body:
+                ```json
+                {"provider": "TELEGRAM", "subject": "{{telegram_subject}}"}
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertRegex(executor.run_variables["numeric_suffix"], r"^\d+$")
+        self.assertRegex(executor.step_payload["body"]["subject"], r"^700\d+$")
+
     def test_email_suffix_regression_requires_machine_readable_derived_variable(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

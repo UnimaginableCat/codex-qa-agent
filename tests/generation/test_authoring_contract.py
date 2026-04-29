@@ -1218,6 +1218,214 @@ cases:
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertFalse(any(diagnostic.code == "authoring_expected_value_case_ambiguous" for diagnostic in result.diagnostics))
 
+    def test_compile_blocks_telegram_subject_from_nonnumeric_generated_suffix(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="identity-plan",
+            project="code/demo",
+            title="Identity API",
+            goal="Cover identity API.",
+            scope=AuthoringScope(surface="identity-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "run_suffix = generated:run_suffix",
+                    "telegram_subject = template:700{{run_suffix}}",
+                ]
+            ),
+            entities={"user_identity": _identity_entity_with_numeric_subject_constraint()},
+            cases=[
+                AuthoringCase(
+                    id="link-telegram",
+                    kind="api",
+                    objective="Link TELEGRAM identity.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users/u1/identities"),
+                        body={"provider": "TELEGRAM", "subject": "{{telegram_subject}}"},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(any(diagnostic.code == "authoring_request_constraint_unsatisfied" for diagnostic in result.diagnostics))
+
+    def test_compile_does_not_apply_numeric_request_rule_without_declarative_constraint(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="identity-plan",
+            project="code/demo",
+            title="Identity API",
+            goal="Cover identity API.",
+            scope=AuthoringScope(surface="identity-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "run_suffix = generated:run_suffix",
+                    "telegram_subject = template:700{{run_suffix}}",
+                ]
+            ),
+            cases=[
+                AuthoringCase(
+                    id="link-telegram",
+                    kind="api",
+                    objective="Link TELEGRAM identity.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users/u1/identities"),
+                        body={"provider": "TELEGRAM", "subject": "{{telegram_subject}}"},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(any(diagnostic.code == "authoring_request_constraint_unsatisfied" for diagnostic in result.diagnostics))
+
+    def test_compile_allows_telegram_subject_from_numeric_generated_suffix(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="identity-plan",
+            project="code/demo",
+            title="Identity API",
+            goal="Cover identity API.",
+            scope=AuthoringScope(surface="identity-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "numeric_suffix = generated:numeric_suffix",
+                    "telegram_subject = template:700{{numeric_suffix}}",
+                ]
+            ),
+            entities={"user_identity": _identity_entity_with_numeric_subject_constraint()},
+            cases=[
+                AuthoringCase(
+                    id="link-telegram",
+                    kind="api",
+                    objective="Link TELEGRAM identity.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users/u1/identities"),
+                        body={"provider": "TELEGRAM", "subject": "{{telegram_subject}}"},
+                    ),
+                    oracle=AuthoringOracle(status_code=201),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertFalse(any(diagnostic.code == "authoring_request_constraint_unsatisfied" for diagnostic in result.diagnostics))
+
+    def test_compile_blocks_numeric_placeholder_for_string_like_db_expectation_without_quotes(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="identity-plan",
+            project="code/demo",
+            title="Identity API",
+            goal="Cover identity API.",
+            scope=AuthoringScope(surface="identity-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "numeric_suffix = generated:numeric_suffix",
+                    "telegram_subject = template:700{{numeric_suffix}}",
+                ]
+            ),
+            entities={
+                "user_identity": AuthoringEntitySpec(
+                    id_field="identity_id",
+                    operations={
+                        "verify_telegram": AuthoringEntityOperation(
+                            sql="SELECT subject FROM user_identities WHERE id = :identity_id",
+                            params={"identity_id": "{{identity_id}}"},
+                            expected_outcomes=["one row exists", "`subject` = `{{telegram_subject}}`"],
+                            column_types={"subject": "string"},
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="link-telegram",
+                    kind="api",
+                    objective="Link TELEGRAM identity.",
+                    state_change="create",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users/u1/identities"),
+                        body={"provider": "TELEGRAM", "subject": "{{telegram_subject}}"},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> identity_id"],
+                        persisted_state=AuthoringPersistedStateRef(entity="user_identity", operation="verify_telegram"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(diagnostic.code == "authoring_db_string_placeholder_requires_quotes" for diagnostic in result.diagnostics)
+        )
+
+    def test_compile_allows_numeric_placeholder_for_string_like_db_expectation_when_quoted(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="identity-plan",
+            project="code/demo",
+            title="Identity API",
+            goal="Cover identity API.",
+            scope=AuthoringScope(surface="identity-controller"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "numeric_suffix = generated:numeric_suffix",
+                    "telegram_subject = template:700{{numeric_suffix}}",
+                ]
+            ),
+            entities={
+                "user_identity": AuthoringEntitySpec(
+                    id_field="identity_id",
+                    operations={
+                        "verify_telegram": AuthoringEntityOperation(
+                            sql="SELECT subject FROM user_identities WHERE id = :identity_id",
+                            params={"identity_id": "{{identity_id}}"},
+                            expected_outcomes=["one row exists", '`subject` = `"{{telegram_subject}}"`'],
+                            column_types={"subject": "string"},
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="link-telegram",
+                    kind="api",
+                    objective="Link TELEGRAM identity.",
+                    state_change="create",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users/u1/identities"),
+                        body={"provider": "TELEGRAM", "subject": "{{telegram_subject}}"},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> identity_id"],
+                        persisted_state=AuthoringPersistedStateRef(entity="user_identity", operation="verify_telegram"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertFalse(
+            any(diagnostic.code == "authoring_db_string_placeholder_requires_quotes" for diagnostic in result.diagnostics)
+        )
+
     def test_compile_warns_when_activate_success_setup_ends_archived(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -2291,6 +2499,23 @@ cases:
             "authoring_stage_inventory_state_mismatch",
             {diagnostic.code for diagnostic in result.diagnostics},
         )
+
+
+def _identity_entity_with_numeric_subject_constraint() -> AuthoringEntitySpec:
+    return AuthoringEntitySpec(
+        operations={
+            "link_telegram": AuthoringEntityOperation(
+                route=AuthoringRoute(method="POST", path="/users/u1/identities"),
+                request_constraints=[
+                    {
+                        "field": "subject",
+                        "format": "numeric_string",
+                        "when": {"provider": "TELEGRAM"},
+                    }
+                ],
+            )
+        }
+    )
 
 
 if __name__ == "__main__":

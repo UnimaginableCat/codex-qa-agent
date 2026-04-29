@@ -32,6 +32,8 @@ TRANSFORM_EXPRESSION_RE = re.compile(
 )
 SUPPORTED_TRANSFORMS = {"lower", "upper", "trim"}
 SUPPORTED_GENERATED_VALUES = {
+    "numeric_suffix",
+    "numeric_timestamp_suffix",
     "run_id",
     "run_suffix",
     "timestamp",
@@ -197,8 +199,9 @@ def validate_generated_variable(
         return
     if normalized_value == normalized_name and (
         normalized_name.endswith("_suffix")
+        or normalized_name.endswith("_numeric_suffix")
         or normalized_name.endswith("_run_id")
-        or normalized_name in {"run_id", "timestamp", "generated_timestamp"}
+        or normalized_name in {"run_id", "timestamp", "generated_timestamp", "numeric_suffix", "numeric_timestamp_suffix"}
         or (normalized_name.startswith("missing_") and normalized_name.endswith("_id"))
     ):
         return
