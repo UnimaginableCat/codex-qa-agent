@@ -980,7 +980,7 @@ def _resolved_actor(plan: NormalizedTestPlan, test_case: PlannedTestCase) -> str
 
 
 def _rendered_scenario_variables(plan: NormalizedTestPlan, test_case: PlannedTestCase) -> list[str]:
-    variables = _dedupe_preserve_order(
+    variables = _dedupe_scenario_variables_by_name(
         [
             *list(plan.scenario_variables),
             *list(test_case.scenario_variables),
@@ -1070,6 +1070,34 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+def _dedupe_scenario_variables_by_name(values: list[str]) -> list[str]:
+    result: list[str] = []
+    positions_by_name: dict[str, int] = {}
+    seen_unparseable: set[str] = set()
+    for value in values:
+        variable_name = _scenario_variable_name(value)
+        if variable_name is None:
+            if value in seen_unparseable:
+                continue
+            seen_unparseable.add(value)
+            result.append(value)
+            continue
+        existing_position = positions_by_name.get(variable_name)
+        if existing_position is None:
+            positions_by_name[variable_name] = len(result)
+            result.append(value)
+            continue
+        result[existing_position] = value
+    return result
+
+
+def _scenario_variable_name(value: str) -> str | None:
+    if "=" not in value:
+        return None
+    variable_name = value.split("=", 1)[0].strip()
+    return variable_name or None
 
 
 def _string_list_metadata(value: Any) -> list[str]:

@@ -609,11 +609,12 @@ class ScenarioRevalidationTests(unittest.TestCase):
                 )
             text_output = text_stdout.getvalue()
 
-        self.assertEqual(json_code, 1)
-        self.assertEqual(json_payload["status"], "ERROR")
+        self.assertEqual(json_code, 0)
+        self.assertEqual(json_payload["status"], "PASS")
         self.assertTrue(json_payload["validation_notes"])
         self.assertIn("Compile directory validation is structural only", json_payload["validation_notes"][0])
-        self.assertEqual(text_code, 1)
+        self.assertEqual(text_code, 0)
+        self.assertIn("Status: PASS", text_output)
         self.assertIn("Validation notes:", text_output)
         self.assertIn("Use --mode preflight", text_output)
 

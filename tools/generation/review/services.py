@@ -2246,7 +2246,10 @@ def _batch_revalidation_is_failure(result: ScenarioRevalidationResult, validatio
     if result.parse_status != ScenarioDraftParseStatus.VALID:
         return True
     if validation_mode == "compile":
-        return result.execution_readiness_category != ExecutionReadinessCategory.COMPILE_VALID_RUNNER_READY
+        return result.execution_readiness_category not in {
+            ExecutionReadinessCategory.COMPILE_VALID_RUNNER_READY,
+            ExecutionReadinessCategory.COMPILE_VALID_BUT_INCOMPLETE,
+        }
     if validation_mode == "preflight":
         return (
             result.environment_readiness_category

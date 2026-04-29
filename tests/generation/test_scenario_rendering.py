@@ -120,6 +120,43 @@ class ScenarioRenderingTests(unittest.TestCase):
             ["run_suffix", "internal_api_token", "primary_email", "actor"],
         )
 
+    def test_renderer_allows_case_variable_to_override_plan_variable_by_name(self) -> None:
+        plan = NormalizedTestPlan(
+            plan_id="plan-users",
+            source_id="users",
+            project="code/demo",
+            title="Users API",
+            scenario_variables=[
+                "run_suffix = generated:run_suffix",
+                "submitted_email = template:default.{{run_suffix}}@example.com",
+            ],
+            test_cases=[
+                PlannedTestCase(
+                    case_id="tc-variable-override-001",
+                    title="Create user",
+                    objective="Verify create user.",
+                    planned_route=PlannedRouteIntent(http_method="POST", endpoint_path="/users"),
+                    scenario_variables=[
+                        "submitted_email = template:CASE.{{run_suffix}}@Example.COM",
+                        "expected_email = derived:submitted_email|lower",
+                    ],
+                )
+            ],
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        draft = render_result.draft_set.drafts[0]
+        self.assertNotIn("submitted_email = template:default", draft.markdown)
+        self.assertEqual(draft.markdown.count("submitted_email = "), 1)
+        self.assertIn("- submitted_email = template:CASE.{{run_suffix}}@Example.COM", draft.markdown)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "draft.md"
+            path.write_text(draft.markdown, encoding="utf-8")
+            parse_result = MarkdownScenarioParser().parse_result(path)
+
+        self.assertFalse(parse_result.has_errors)
+
     def test_renderer_defers_case_without_authored_route(self) -> None:
         plan = _plan([PlannedTestCase(case_id="tc-001", title="Create user", objective="Verify create user.")])
 
