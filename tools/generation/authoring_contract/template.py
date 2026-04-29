@@ -89,6 +89,14 @@ class AuthoringPlanTemplateService:
                     "entity": "primary_entity",
                     "operation": "create_active",
                     "effect_state": "ACTIVE",
+                    "route": {
+                        "method": "POST",
+                        "path": "/replace/path",
+                    },
+                    "request_body": {
+                        "externalId": "{{external_id}}",
+                        "email": "{{submitted_email}}",
+                    },
                     "request_constraints": [
                         {
                             "field": "externalId",
@@ -96,13 +104,17 @@ class AuthoringPlanTemplateService:
                             "when": {"provider": "SMS"},
                         }
                     ],
-                    "captures": ["entity_id"],
+                    "captures": ["response.json.id -> entity_id"],
                 },
                 {
                     "entity": "primary_entity",
                     "operation": "suspend",
                     "requires_state": "ACTIVE",
                     "effect_state": "SUSPENDED",
+                    "route": {
+                        "method": "POST",
+                        "path": "/replace/path/{{entity_id}}/suspend",
+                    },
                 },
             ],
             "routes": [
@@ -113,6 +125,14 @@ class AuthoringPlanTemplateService:
                     "failure_statuses": [400, 401, 404],
                     "precondition_state": None,
                     "normalized_response_fields": ["email"],
+                },
+                {
+                    "method": "POST",
+                    "path": "/replace/path/{{entity_id}}/suspend",
+                    "success_status": 200,
+                    "failure_statuses": [400, 401, 404],
+                    "precondition_state": "ACTIVE",
+                    "target_state": "SUSPENDED",
                 }
             ],
             "db_verifications": [
@@ -120,6 +140,9 @@ class AuthoringPlanTemplateService:
                     "entity": "primary_entity",
                     "operation": "verify_exists",
                     "scoped_by": "entity_id",
+                    "sql": "SELECT id FROM replace_table WHERE id = :entity_id",
+                    "params": {"entity_id": "{{entity_id}}"},
+                    "expected_outcomes": ["one row exists"],
                     "column_types": {"external_id": "string"},
                 }
             ],

@@ -138,6 +138,7 @@ Use the scaffolded bundle in this order:
 2. `operation-inventory.yaml`
    - setup operations and their effect state
    - executable setup operation templates, including route or SQL, request data, expected status, and captures needed by later workflow steps
+   - explicit capture rules in the form `response.json.<field> -> <variable>`; never write bare capture targets such as `user_id`
    - controller routes
    - expected success/failure HTTP codes
    - lifecycle route `target_state`
@@ -185,6 +186,10 @@ After any edit to `operation-inventory.yaml` after `--sync-authoring-plan`, reru
 3. `--validate-authoring-plan`
 
 Do not manually patch synced route/setup/DB template sections in `authoring-plan.yaml` to compensate for an incomplete operation inventory. Fix the inventory source first, then sync again.
+
+If `--sync-authoring-plan` produces `route: null`, `sql: ''`, empty `expected_outcomes`, or a capture like `response.json.user_id -> user_id` that was inferred from a bare target, treat the previous inventory stage as incomplete. Return to `operation-inventory.yaml`; do not rewrite the generated authoring plan by hand.
+
+Do not delete coverage cases just to make validation pass. If a case cannot be expressed safely, keep the coverage item as an unresolved blocker/open question in the report, or repair the staged inventory/source evidence until the case is valid.
 
 For lifecycle routes, do not author same-state negative or idempotency cases until `operation-inventory.yaml` records:
 

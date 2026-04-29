@@ -197,6 +197,14 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
                     details={"entity": entity_name, "operation": operation_name},
                 )
             )
+        diagnostics.extend(
+            _entity_operation_executable_diagnostics(
+                item,
+                path=path,
+                operation_index=index,
+                route_specs=_declared_route_specs(payload),
+            )
+        )
     for index, item in enumerate(payload.get("routes", []), start=1):
         if not isinstance(item, dict):
             diagnostics.append(
@@ -419,7 +427,119 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
                     details={"db_verification_index": index, "entity": entity_name, "operation": operation_name},
                 )
             )
+        diagnostics.extend(
+            _db_verification_executable_diagnostics(
+                item,
+                path=path,
+                db_verification_index=index,
+            )
+        )
     return payload, diagnostics
+
+
+def _declared_route_specs(payload: dict[str, Any]) -> set[tuple[str, str]]:
+    route_specs: set[tuple[str, str]] = set()
+    for item in payload.get("routes", []):
+        if not isinstance(item, dict):
+            continue
+        method = str(item.get("method") or "").strip().upper()
+        route_path = str(item.get("path") or "").strip()
+        if method and route_path:
+            route_specs.add((method, route_path))
+    return route_specs
+
+
+def _entity_operation_executable_diagnostics(
+    item: dict[str, Any],
+    *,
+    path: Path,
+    operation_index: int,
+    route_specs: set[tuple[str, str]],
+) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    entity_name = str(item.get("entity") or "").strip()
+    operation_name = str(item.get("operation") or "").strip()
+    route_payload = item.get("route") if isinstance(item.get("route"), dict) else {}
+    method = str(route_payload.get("method") or item.get("method") or "").strip().upper()
+    route_path = str(route_payload.get("path") or item.get("path") or "").strip()
+    sql = str(item.get("sql") or "").strip()
+
+    if not ((method and route_path) or sql):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_operation_inventory_operation_template_missing",
+                message="Entity operation must include an executable route or SQL template before it can be used for workflow setup.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+                details={"operation_index": operation_index, "entity": entity_name, "operation": operation_name},
+            )
+        )
+    if method and route_path and route_specs and (method, route_path) not in route_specs:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_operation_inventory_operation_route_undeclared",
+                message="Entity operation route must be declared in operation-inventory routes so route/status contracts stay synchronized.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+                details={
+                    "operation_index": operation_index,
+                    "entity": entity_name,
+                    "operation": operation_name,
+                    "method": method,
+                    "path": route_path,
+                },
+            )
+        )
+    captures = item.get("captures")
+    if captures is not None and not _is_valid_capture_rule_list(captures):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_operation_inventory_capture_rule_invalid",
+                message="Entity operation captures must use explicit '<source> -> <variable>' rules; bare variable names are ambiguous.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+                details={"operation_index": operation_index, "entity": entity_name, "operation": operation_name},
+            )
+        )
+    return diagnostics
+
+
+def _db_verification_executable_diagnostics(
+    item: dict[str, Any],
+    *,
+    path: Path,
+    db_verification_index: int,
+) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    entity_name = str(item.get("entity") or "").strip()
+    operation_name = str(item.get("operation") or "").strip()
+    scoped_by = str(item.get("scoped_by") or "").strip()
+    sql = str(item.get("sql") or "").strip()
+    params = item.get("params")
+    expected_outcomes = item.get("expected_outcomes")
+    missing_fields: list[str] = []
+    if not sql:
+        missing_fields.append("sql")
+    if not isinstance(params, dict) or (scoped_by and scoped_by not in params):
+        missing_fields.append("params")
+    if not isinstance(expected_outcomes, list) or not all(str(item).strip() for item in expected_outcomes):
+        missing_fields.append("expected_outcomes")
+    if missing_fields:
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="adapter_operation_inventory_db_verification_template_incomplete",
+                message="DB verification must include executable sql, params keyed by scoped_by, and expected_outcomes before use in persisted-state checks.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(path),
+                details={
+                    "db_verification_index": db_verification_index,
+                    "entity": entity_name,
+                    "operation": operation_name,
+                    "missing_fields": missing_fields,
+                },
+            )
+        )
+    return diagnostics
 
 
 def _has_same_state_evidence(value: Any) -> bool:
@@ -464,6 +584,19 @@ def _is_valid_request_constraints(value: Any) -> bool:
         if not str(item.get("format") or "").strip():
             return False
         if item.get("when") is not None and not isinstance(item.get("when"), dict):
+            return False
+    return True
+
+
+def _is_valid_capture_rule_list(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    for item in value:
+        capture = str(item or "").strip()
+        if not capture or "->" not in capture:
+            return False
+        source, target = capture.split("->", 1)
+        if not source.strip() or not target.strip():
             return False
     return True
 

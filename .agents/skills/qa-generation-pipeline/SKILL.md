@@ -62,15 +62,20 @@ Required gates:
 4. Render gate:
    `<venv-python> -m tools.generation.cli --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json --workspace-root . --render-drafts --output-format text`
 5. Review gate:
-   `<venv-python> -m tools.generation.cli --review-drafts --run-id <generation-run-id> --workspace-root . --output-format text`
+   `<venv-python> -m tools.generation.cli --review-drafts --run-id <generation-run-id> --workspace-root . --output-format json`
 6. Promotion gate:
-   `<venv-python> -m tools.generation.cli --promote-all-drafts --run-id <generation-run-id> --workspace-root . --target-dir scenarios/generated --output-format text`
+   `<venv-python> -m tools.generation.cli --promote-all-drafts --run-id <generation-run-id> --workspace-root . --target-dir scenarios/generated --output-format json`
 7. Promoted scenario validation gate:
    `<venv-python> -m tools.generation.cli --validate-scenario-dir --path scenarios/generated/<source>-<run_id> --mode compile --output-format text`
 8. Execution gate:
    `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir scenarios/generated/<source>-<run_id>`
 
 For every gate, inspect an explicit status from stdout or a persisted artifact. If a command returns no stdout, do not infer `PASS`; rerun with JSON/text output, check the exit code, or read the relevant result artifact before continuing.
+
+For review and promotion gates, prefer JSON and verify numeric counts before continuing:
+
+- review: require `status=PASS`, `draft_count > 0`, `invalid_draft_count = 0`, and `deferred_item_count = 0`
+- promotion: require `status=PASS`, `promoted_count = requested_count`, and `error_count = 0`
 
 Use guided runner mode by default. Use auto mode only when the user explicitly asks for non-interactive execution.
 
@@ -113,6 +118,7 @@ Final status priority:
 Stop conditions:
 
 - Authoring validation fails: return to `agent-plan-authoring` and repair the staged bundle.
+- Authoring validation emits `authoring_workflow_setup_state_mismatch`: stop and repair authoring unless a same-state lifecycle contract in `operation-inventory.yaml` explicitly proves that the mismatch is the intended behavior.
 - Render has deferred execution-critical cases: repair source authoring before promotion.
 - Review says drafts are not promotable: repair source authoring or selected draft source.
 - Promotion writes zero scenarios: stop and report `FAIL` or `BLOCKED` depending on diagnostics.

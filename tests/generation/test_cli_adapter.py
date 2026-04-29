@@ -372,6 +372,103 @@ db_verifications: []
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
         self.assertIn("adapter_operation_inventory_unknown_entity", codes)
 
+    def test_validate_operation_inventory_blocks_ambiguous_capture_rule(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create_active
+    effect_state: ACTIVE
+    route:
+      method: POST
+      path: /users
+    captures:
+      - user_id
+routes:
+  - method: POST
+    path: /users
+    success_status: 201
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_capture_rule_invalid", codes)
+
+    def test_validate_operation_inventory_blocks_non_executable_templates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create_active
+    effect_state: ACTIVE
+routes:
+  - method: POST
+    path: /users
+    success_status: 201
+db_verifications:
+  - entity: user
+    operation: verify_exists
+    scoped_by: user_id
+    column_types:
+      id: uuid
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_operation_template_missing", codes)
+        self.assertIn("adapter_operation_inventory_db_verification_template_incomplete", codes)
+
     def test_validate_authoring_bundle_returns_pass_for_scaffolded_bundle(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -554,7 +651,7 @@ entity_operations:
       - field: email
         format: lowercase
     captures:
-      - user_id
+      - response.json.id -> user_id
 routes:
   - method: POST
     path: /users
@@ -593,7 +690,7 @@ db_verifications:
         self.assertEqual(create_operation["route"]["path"], "/users")
         self.assertEqual(create_operation["oracle"]["status_code"], 201)
         self.assertEqual(create_operation["request_constraints"], [{"field": "email", "format": "lowercase"}])
-        self.assertEqual(create_operation["captures"], ["response.json.user_id -> user_id"])
+        self.assertEqual(create_operation["captures"], ["response.json.id -> user_id"])
         verify_operation = synced_user["operations"]["verify_exists"]
         self.assertEqual(verify_operation["sql"], "SELECT id FROM users WHERE id = :user_id")
         self.assertEqual(verify_operation["expected_outcomes"], ["one row exists"])
