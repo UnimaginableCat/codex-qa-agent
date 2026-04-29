@@ -12,8 +12,8 @@ from tools.generation.cli_core import (
     GenerationCliInputError,
     _highest_priority_status,
 )
-from tools.generation.cli_inventory import _validate_entity_inventory_file, _validate_operation_inventory_file
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic, GenerationSourceInput, SourceInputFormat
+from tools.generation.inventory import _validate_entity_inventory_file, _validate_operation_inventory_file
 from tools.generation.orchestration.context import initialize_generation_run_context
 from tools.generation.persistence import managed_generation_artifacts_root_for_path
 from tools.generation.persistence.artifacts import (

@@ -37,8 +37,8 @@ from tools.generation.cli_diagnostics import (
     _validate_entity_inventory_adapter_diagnostics,
     _validate_operation_inventory_adapter_diagnostics,
 )
-from tools.generation.cli_inventory import _validate_entity_inventory_file, _validate_operation_inventory_file
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic, GenerationSourceInput, SourceInputFormat
+from tools.generation.inventory import _validate_entity_inventory_file, _validate_operation_inventory_file
 from tools.generation.orchestration.context import initialize_generation_run_context
 from tools.generation.persistence import FileGenerationArtifactStore, managed_generation_artifacts_root_for_path
 from tools.generation.persistence.artifacts import (

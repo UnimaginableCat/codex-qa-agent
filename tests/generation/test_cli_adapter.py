@@ -469,6 +469,56 @@ db_verifications:
         self.assertIn("adapter_operation_inventory_operation_template_missing", codes)
         self.assertIn("adapter_operation_inventory_db_verification_template_incomplete", codes)
 
+    def test_validate_operation_inventory_blocks_invalid_route_request_constraints(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations: []
+routes:
+  - method: POST
+    path: /users
+    success_status: 201
+    request_constraints:
+      - field: email
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        diagnostics = payload["diagnostics"]
+        codes = {diagnostic["code"] for diagnostic in diagnostics}
+        self.assertIn("adapter_operation_inventory_request_constraints_invalid", codes)
+        self.assertTrue(
+            any(
+                diagnostic["details"].get("route_index") == 1
+                for diagnostic in diagnostics
+                if diagnostic["code"] == "adapter_operation_inventory_request_constraints_invalid"
+            )
+        )
+
     def test_validate_authoring_bundle_returns_pass_for_scaffolded_bundle(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
