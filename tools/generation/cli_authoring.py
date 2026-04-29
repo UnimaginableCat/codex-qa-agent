@@ -43,6 +43,7 @@ from tools.generation.orchestration.context import initialize_generation_run_con
 from tools.generation.persistence import FileGenerationArtifactStore, managed_generation_artifacts_root_for_path
 from tools.generation.persistence.artifacts import (
     AUTHORING_PLAN_FILENAME,
+    CONTEXT_FILENAME,
     ENTITY_INVENTORY_FILENAME,
     OPERATION_INVENTORY_FILENAME,
 )
@@ -59,7 +60,8 @@ def run_init_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
         title=args.name or "",
         goal=args.goal or "",
     )
-    requested_output_path = Path(args.output)
+    requested_output_path = _requested_scaffold_output_path(args)
+    _ensure_run_id_scaffold_target_exists(args, requested_output_path)
     run_context = _resolve_scaffold_run_context(
         requested_output_path=requested_output_path,
         source_input=_scaffold_source_input(
@@ -212,7 +214,8 @@ def run_init_entity_inventory(args: argparse.Namespace) -> dict[str, Any]:
         project=args.project or "",
         surface=args.surface or "",
     )
-    requested_output_path = Path(args.output)
+    requested_output_path = _requested_scaffold_output_path(args)
+    _ensure_run_id_scaffold_target_exists(args, requested_output_path)
     run_context = _resolve_scaffold_run_context(
         requested_output_path=requested_output_path,
         source_input=_scaffold_source_input(
@@ -251,7 +254,8 @@ def run_init_operation_inventory(args: argparse.Namespace) -> dict[str, Any]:
         project=args.project or "",
         surface=args.surface or "",
     )
-    requested_output_path = Path(args.output)
+    requested_output_path = _requested_scaffold_output_path(args)
+    _ensure_run_id_scaffold_target_exists(args, requested_output_path)
     run_context = _resolve_scaffold_run_context(
         requested_output_path=requested_output_path,
         source_input=_scaffold_source_input(
@@ -427,6 +431,36 @@ def run_sync_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
             ],
             "authoring_plan": synced_plan.to_dict(),
         }
+    )
+
+
+def _requested_scaffold_output_path(args: argparse.Namespace) -> Path:
+    requested_output_path = Path(args.output)
+    run_id = str(args.run_id or "").strip()
+    if not run_id:
+        return requested_output_path
+    if requested_output_path.name == run_id:
+        return requested_output_path
+    return requested_output_path / run_id
+
+
+def _ensure_run_id_scaffold_target_exists(args: argparse.Namespace, requested_output_path: Path) -> None:
+    run_id = str(args.run_id or "").strip()
+    if not run_id:
+        return
+    context_path = requested_output_path / CONTEXT_FILENAME
+    if context_path.exists():
+        return
+    raise GenerationCliInputError(
+        [
+            GenerationDiagnostic(
+                code="adapter_scaffold_run_id_bundle_missing",
+                message="--run-id scaffold target must reference an existing managed generation bundle.",
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(requested_output_path),
+                details={"run_id": run_id},
+            )
+        ]
     )
 
 

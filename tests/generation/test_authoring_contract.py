@@ -27,6 +27,32 @@ from tools.generation.authoring_contract.models import (
 
 
 class AuthoringPlanCompilerTests(unittest.TestCase):
+    def test_validate_blocks_project_outside_code_dir(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="LeadFlow",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            cases=[
+                AuthoringCase(
+                    id="list-users",
+                    kind="api",
+                    objective="List users.",
+                    state_change="none",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/users")),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertIn("authoring_project_must_target_code_subdir", codes)
+
     def test_compile_propagates_defaults_environment_actor_and_setup_auth(self) -> None:
         plan = AuthoringPlan(
             version=1,

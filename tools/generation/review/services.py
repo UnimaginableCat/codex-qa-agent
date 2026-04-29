@@ -227,7 +227,11 @@ class ScenarioDraftPromotionService:
             diagnostics.append(
                 GenerationDiagnostic(
                     code="scenario_promotion_target_exists",
-                    message="Promotion target already exists; existing scenario files are never overwritten.",
+                    message=(
+                        "Promotion target already exists; existing scenario files are never overwritten. "
+                        "For an intentional rerender/re-promote cycle, rerun promotion with --purge-target-dir "
+                        "or choose a new --target-dir."
+                    ),
                     severity=DiagnosticSeverity.ERROR,
                     source_ref=str(target_path),
                 )

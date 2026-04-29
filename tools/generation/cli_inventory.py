@@ -63,6 +63,7 @@ def _validate_entity_inventory_file(path: Path) -> tuple[dict[str, Any] | None, 
             )
         )
         return payload, diagnostics
+    diagnostics.extend(_project_path_diagnostics(payload, path=path, inventory_kind="entity_inventory"))
     if not isinstance(payload.get("entities"), list):
         diagnostics.append(
             GenerationDiagnostic(
@@ -141,6 +142,7 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
             )
         )
         return payload, diagnostics
+    diagnostics.extend(_project_path_diagnostics(payload, path=path, inventory_kind="operation_inventory"))
     for field_name in ("entity_operations", "routes", "db_verifications"):
         if field_name in payload and not isinstance(payload.get(field_name), list):
             diagnostics.append(
@@ -426,6 +428,29 @@ def _has_same_state_evidence(value: Any) -> bool:
     if isinstance(value, list):
         return any(isinstance(item, str) and item.strip() for item in value)
     return False
+
+
+def _project_path_diagnostics(
+    payload: dict[str, Any],
+    *,
+    path: Path,
+    inventory_kind: str,
+) -> list[GenerationDiagnostic]:
+    project = str(payload.get("project") or "").strip()
+    if not project:
+        return []
+    normalized = project.replace("\\", "/").strip("/")
+    if normalized.startswith("code/") and len(normalized.split("/", 1)[1].strip()) > 0:
+        return []
+    return [
+        GenerationDiagnostic(
+            code=f"adapter_{inventory_kind}_project_must_target_code_subdir",
+            message=f"{inventory_kind.replace('_', ' ').title()} project must point at a workspace project under code/<project>.",
+            severity=DiagnosticSeverity.ERROR,
+            source_ref=str(path),
+            details={"project": project},
+        )
+    ]
 
 
 def _is_valid_request_constraints(value: Any) -> bool:

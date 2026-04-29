@@ -15,6 +15,21 @@ from tools.generation.cli_core import (
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
 
 
+def _project_arg_diagnostics(project: str) -> list[GenerationDiagnostic]:
+    normalized = project.strip().replace("\\", "/").strip("/")
+    if normalized.startswith("code/") and len(normalized.split("/", 1)[1].strip()) > 0:
+        return []
+    return [
+        GenerationDiagnostic(
+            code="adapter_project_must_target_code_subdir",
+            message="--project must point at a workspace project under code/<project>.",
+            severity=DiagnosticSeverity.ERROR,
+            source_ref=project,
+            details={"project": project},
+        )
+    ]
+
+
 def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     if not args.authoring_plan_file and not args.agent_plan_file and not args.prose and not args.source_file:
@@ -115,6 +130,8 @@ def _adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]
                 source_ref=args.source_id,
             )
         )
+    if args.project:
+        diagnostics.extend(_project_arg_diagnostics(args.project))
     if args.render_drafts and args.no_persist:
         diagnostics.append(
             GenerationDiagnostic(
@@ -160,6 +177,8 @@ def _init_agent_plan_adapter_diagnostics(args: argparse.Namespace) -> list[Gener
                 source_ref=args.output,
             )
         )
+    if args.project:
+        diagnostics.extend(_project_arg_diagnostics(args.project))
     return diagnostics
 
 
@@ -183,51 +202,59 @@ def _init_authoring_plan_adapter_diagnostics(args: argparse.Namespace) -> list[G
                 source_ref=args.output,
             )
         )
+    if args.project:
+        diagnostics.extend(_project_arg_diagnostics(args.project))
     return diagnostics
 
 
 
 def _init_entity_inventory_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
     if not args.output:
-        return [
+        diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_init_entity_inventory_requires_output",
                 message="--init-entity-inventory requires --output.",
                 severity=DiagnosticSeverity.ERROR,
             )
-        ]
-    if not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
-        return [
+        )
+    elif not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
+        diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_init_entity_inventory_requires_managed_root",
                 message="Entity inventory scaffold must target artifacts/agent/generation or one existing bundle inside it.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=args.output,
             )
-        ]
-    return []
+        )
+    if args.project:
+        diagnostics.extend(_project_arg_diagnostics(args.project))
+    return diagnostics
 
 
 
 def _init_operation_inventory_adapter_diagnostics(args: argparse.Namespace) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
     if not args.output:
-        return [
+        diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_init_operation_inventory_requires_output",
                 message="--init-operation-inventory requires --output.",
                 severity=DiagnosticSeverity.ERROR,
             )
-        ]
-    if not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
-        return [
+        )
+    elif not _path_under_root(Path(args.output), MANAGED_AGENT_PLAN_ROOT):
+        diagnostics.append(
             GenerationDiagnostic(
                 code="adapter_init_operation_inventory_requires_managed_root",
                 message="Operation inventory scaffold must target artifacts/agent/generation or one existing bundle inside it.",
                 severity=DiagnosticSeverity.ERROR,
                 source_ref=args.output,
             )
-        ]
-    return []
+        )
+    if args.project:
+        diagnostics.extend(_project_arg_diagnostics(args.project))
+    return diagnostics
 
 
 

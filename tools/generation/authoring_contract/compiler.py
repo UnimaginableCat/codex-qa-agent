@@ -57,6 +57,11 @@ from .models import (
 _SUPPORTED_CASE_KINDS = {"api", "workflow", "db-check"}
 
 
+def _is_code_project_path(value: str) -> bool:
+    normalized = value.strip().replace("\\", "/").strip("/")
+    return normalized.startswith("code/") and len(normalized.split("/", 1)[1].strip()) > 0
+
+
 class AuthoringPlanCompiler:
     """Compile compact authoring DSL into the current internal IR."""
 
@@ -194,6 +199,15 @@ class AuthoringPlanCompiler:
                     "authoring_missing_project",
                     "Authoring plan must include project.",
                     source_ref=source_ref,
+                )
+            )
+        elif not _is_code_project_path(authoring_plan.project):
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_project_must_target_code_subdir",
+                    "Authoring plan project must point at a workspace project under code/<project>.",
+                    source_ref=source_ref,
+                    details={"project": authoring_plan.project},
                 )
             )
         if not authoring_plan.title.strip():

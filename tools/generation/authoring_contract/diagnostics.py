@@ -8,6 +8,7 @@ from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnos
 AUTHORING_BLOCKING_CODES = {
     "authoring_missing_source_id",
     "authoring_missing_project",
+    "authoring_project_must_target_code_subdir",
     "authoring_missing_title",
     "authoring_missing_goal",
     "authoring_missing_scope",
