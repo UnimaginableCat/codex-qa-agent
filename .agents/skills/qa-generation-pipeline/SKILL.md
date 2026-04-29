@@ -70,6 +70,8 @@ Required gates:
 8. Execution gate:
    `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir scenarios/generated/<source>-<run_id>`
 
+For every gate, inspect an explicit status from stdout or a persisted artifact. If a command returns no stdout, do not infer `PASS`; rerun with JSON/text output, check the exit code, or read the relevant result artifact before continuing.
+
 Use guided runner mode by default. Use auto mode only when the user explicitly asks for non-interactive execution.
 
 # Artifact Handling
@@ -115,6 +117,7 @@ Stop conditions:
 - Review says drafts are not promotable: repair source authoring or selected draft source.
 - Promotion writes zero scenarios: stop and report `FAIL` or `BLOCKED` depending on diagnostics.
 - Promoted scenario validation fails: repair source authoring or promoted scenario only if explicitly asked.
+- Promoted scenario compile validation reports `compile_valid_but_incomplete` only because env-backed inputs are unresolved: run `--validate-scenario-dir --mode preflight` or explicitly state that runner preflight is the next readiness check before batch execution.
 - Runner pauses in guided mode: show `operator_state`, available actions, and `pause_state_path`; wait for the operator choice.
 - Runner terminal result: report terminal status without simulating manual decisions.
 

@@ -137,11 +137,12 @@ Use the scaffolded bundle in this order:
    - shared auth/header contract
 2. `operation-inventory.yaml`
    - setup operations and their effect state
+   - executable setup operation templates, including route or SQL, request data, expected status, and captures needed by later workflow steps
    - controller routes
    - expected success/failure HTTP codes
    - lifecycle route `target_state`
    - lifecycle route `same_state_behavior`, `same_state_status`, and `same_state_evidence` when the command can be invoked on an entity already in the target state
-   - DB verification templates
+   - DB verification templates with SQL, params, and expected outcomes for every operation later used by `oracle.persisted_state`
 3. `--sync-authoring-plan`
    - after both inventories validate, synchronize `scope`, `entities`, reusable route operations, and DB verification templates into `authoring-plan.yaml`
    - this command does not invent final cases; it removes the need to repeat inventory facts by hand
@@ -175,6 +176,15 @@ In managed bundles, validation is now inventory-backed rather than inventory-adj
 - case routes and HTTP status codes must match `operation-inventory.yaml`
 - workflow setup state must satisfy the staged precondition for the route
 - same-state lifecycle cases such as `archive archived`, `activate active`, or `suspend suspended` must be backed by explicit staged route semantics instead of inferred rejection assumptions
+- route templates in `operation-inventory.yaml` must use runner placeholders such as `{{user_id}}`; do not use framework placeholders like `{userId}` in staged executable routes
+
+After any edit to `operation-inventory.yaml` after `--sync-authoring-plan`, rerun:
+
+1. `--validate-operation-inventory`
+2. `--sync-authoring-plan`
+3. `--validate-authoring-plan`
+
+Do not manually patch synced route/setup/DB template sections in `authoring-plan.yaml` to compensate for an incomplete operation inventory. Fix the inventory source first, then sync again.
 
 For lifecycle routes, do not author same-state negative or idempotency cases until `operation-inventory.yaml` records:
 
@@ -182,6 +192,12 @@ For lifecycle routes, do not author same-state negative or idempotency cases unt
 - `same_state_behavior`: `reject` or `idempotent_success`
 - `same_state_status`
 - `same_state_evidence`: the code path or test proving the behavior, for example the domain method that no-ops when current state already equals target
+
+Determine same-state behavior from the full request path, not from the domain method alone:
+
+- Inspect controller/advice, handler/use-case/service precondition checks, and tests before relying on entity methods.
+- If a handler enforces `precondition_state` before calling a domain method, and the target state is outside that precondition, same-state behavior is `reject` even if the domain method would no-op when called directly.
+- Domain-level idempotency is valid evidence only when no earlier handler/controller guard rejects the same-state request.
 
 If `same_state_behavior: idempotent_success`, the authoring case must be a success/idempotency case, not a rejection case:
 
