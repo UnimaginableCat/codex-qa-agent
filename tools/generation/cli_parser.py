@@ -128,6 +128,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--allow-invalid", action="store_true", help="Allow promotion of parser-invalid drafts.")
     parser.add_argument(
+        "--allow-known-gaps",
+        action="store_true",
+        help=(
+            "Allow promotion when review found known non-parser gaps or high-priority edit targets. "
+            "Use only after explicit operator review."
+        ),
+    )
+    parser.add_argument(
         "--purge-target-dir",
         action="store_true",
         help="Delete the resolved promotion target directory before promotion. Use for rerender/re-promote cycles.",

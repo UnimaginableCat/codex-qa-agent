@@ -196,6 +196,8 @@ def _render_review_text(payload: dict[str, Any]) -> str:
         f"Deferred items: {payload.get('deferred_item_count', 0)}",
         f"Drafts with edit targets: {payload.get('drafts_with_edit_targets', 0)}",
         f"Total edit targets: {payload.get('total_edit_targets', 0)}",
+        f"Drafts with high-priority edit targets: {payload.get('drafts_with_high_priority_edit_targets', 0)}",
+        f"High-priority edit targets: {payload.get('high_priority_edit_target_count', 0)}",
         f"Average completeness: {payload.get('average_completeness_ratio', 0.0)}",
         f"Close to runnable: {payload.get('close_to_runnable_count', 0)}",
         "",
@@ -314,6 +316,7 @@ def _render_promotion_text(payload: dict[str, Any]) -> str:
                 f"Requested: {payload.get('requested_count', 0)}",
                 f"Promoted: {payload.get('promoted_count', 0)}",
                 f"Errors: {payload.get('error_count', 0)}",
+                f"Blocked: {payload.get('blocked_count', 0)}",
                 f"Target dir: {payload.get('target_dir') or ''}",
             ]
         )

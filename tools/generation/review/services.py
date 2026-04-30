@@ -202,6 +202,39 @@ class ScenarioDraftPromotionService:
             )
 
         try:
+            review_set = self.review_service.review(request.run_id, workspace_root=request.workspace_root)
+            review_item = _find_review_item(review_set, request.draft_id)
+        except Exception as exc:  # noqa: BLE001
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="scenario_promotion_review_unavailable",
+                    message=f"Could not load draft review data before promotion: {exc}",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=request.draft_id,
+                )
+            )
+            return self._finalize(
+                run_context,
+                request,
+                StepStatus.ERROR,
+                diagnostics,
+                source_path=source_path,
+            )
+        review_gate_diagnostics = _promotion_review_gate_diagnostics(
+            review_item,
+            allow_known_gaps=request.allow_known_gaps,
+        )
+        diagnostics.extend(review_gate_diagnostics)
+        if review_gate_diagnostics and not request.allow_known_gaps:
+            return self._finalize(
+                run_context,
+                request,
+                StepStatus.BLOCKED,
+                diagnostics,
+                source_path=source_path,
+            )
+
+        try:
             target_dir = _resolve_target_dir(request.workspace_root, request.target_dir)
         except ValueError as exc:
             diagnostics.append(
@@ -357,6 +390,7 @@ class ScenarioDraftBatchPromotionService:
                     workspace_root=request.workspace_root,
                     target_dir=request.target_dir,
                     allow_invalid=request.allow_invalid,
+                    allow_known_gaps=request.allow_known_gaps,
                     purge_target_dir=False,
                 )
             )
@@ -364,7 +398,8 @@ class ScenarioDraftBatchPromotionService:
         ]
         promoted_count = sum(1 for item in results if item.status == StepStatus.PASS)
         error_count = sum(1 for item in results if item.status == StepStatus.ERROR)
-        status = StepStatus.ERROR if error_count else StepStatus.PASS
+        blocked_count = sum(1 for item in results if item.status == StepStatus.BLOCKED)
+        status = _promotion_batch_status(results)
         diagnostics.extend(
             diagnostic
             for item in results
@@ -379,6 +414,7 @@ class ScenarioDraftBatchPromotionService:
             target_dir=target_dir,
             promoted_count=promoted_count,
             error_count=error_count,
+            blocked_count=blocked_count,
         )
 
     def _finalize(
@@ -392,6 +428,7 @@ class ScenarioDraftBatchPromotionService:
         target_dir: Path | None = None,
         promoted_count: int = 0,
         error_count: int = 0,
+        blocked_count: int = 0,
     ) -> ScenarioPromotionBatchResult:
         result = ScenarioPromotionBatchResult(
             run_id=request.run_id,
@@ -399,6 +436,7 @@ class ScenarioDraftBatchPromotionService:
             requested_count=len(request.draft_ids) if request.draft_ids else len(results),
             promoted_count=promoted_count,
             error_count=error_count,
+            blocked_count=blocked_count,
             target_dir=target_dir,
             results=results,
             diagnostics=diagnostics,
@@ -1077,6 +1115,84 @@ def _find_validation(
         if validation.draft_id == draft_id:
             return validation
     return None
+
+
+def _find_review_item(review_set: ScenarioDraftReviewSet, draft_id: str) -> ScenarioDraftReviewItem | None:
+    for item in review_set.items:
+        if item.draft_id == draft_id:
+            return item
+    return None
+
+
+def _promotion_review_gate_diagnostics(
+    review_item: ScenarioDraftReviewItem | None,
+    *,
+    allow_known_gaps: bool,
+) -> list[GenerationDiagnostic]:
+    if review_item is None:
+        return [
+            GenerationDiagnostic(
+                code="scenario_promotion_review_item_missing",
+                message="Selected draft could not be found in review output; promotion requires a review-backed gate.",
+                severity=DiagnosticSeverity.ERROR,
+            )
+        ]
+
+    high_priority_targets = [
+        target for target in review_item.edit_targets.targets if target.priority == "high"
+    ]
+    advisory_blocks = review_item.promotion_advisory in {
+        DraftPromotionAdvisory.SAFE_PREVIEW_ONLY,
+        DraftPromotionAdvisory.NOT_RECOMMENDED_FOR_PROMOTION,
+        DraftPromotionAdvisory.INVALID_DRAFT,
+    }
+    if not high_priority_targets and not advisory_blocks:
+        return []
+
+    diagnostic = GenerationDiagnostic(
+        code=(
+            "scenario_promotion_known_gaps_override"
+            if allow_known_gaps
+            else "scenario_promotion_review_gate_blocked"
+        ),
+        message=(
+            "Draft promotion has known review gaps and was allowed by explicit override."
+            if allow_known_gaps
+            else (
+                "Draft promotion is blocked by review findings. Resolve high-priority edit targets "
+                "or rerun with --allow-known-gaps after explicit operator review."
+            )
+        ),
+        severity=DiagnosticSeverity.WARNING if allow_known_gaps else DiagnosticSeverity.ERROR,
+        source_ref=review_item.draft_id,
+        details={
+            "promotion_advisory": review_item.promotion_advisory.value,
+            "edit_target_count": review_item.edit_target_count,
+            "high_priority_edit_target_count": len(high_priority_targets),
+            "high_priority_edit_targets": [
+                {
+                    "target_id": target.target_id,
+                    "target_type": target.target_type.value,
+                    "section_name": target.section_name,
+                    "reason": target.reason,
+                    "suggested_minimum_patch": target.suggested_minimum_patch,
+                }
+                for target in high_priority_targets
+            ],
+        },
+    )
+    return [diagnostic]
+
+
+def _promotion_batch_status(results: list[ScenarioPromotionResult]) -> StepStatus:
+    statuses = [item.status for item in results]
+    if StepStatus.ERROR in statuses:
+        return StepStatus.ERROR
+    if StepStatus.BLOCKED in statuses:
+        return StepStatus.BLOCKED
+    if StepStatus.FAIL in statuses:
+        return StepStatus.FAIL
+    return StepStatus.PASS
 
 
 def _group_unsupported_checks(render_result: ScenarioRenderResult) -> dict[str, list[object]]:

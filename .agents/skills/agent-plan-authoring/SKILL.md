@@ -106,6 +106,9 @@ start inside the authoring branch rather than being classified first.
 - For normalized fields such as `email`, separate submitted input variables from expected output variables. Prefer patterns like `submitted_email` plus `expected_email = derived:submitted_email|lower` instead of reusing one placeholder in both request and expectation.
 - Prefer `defaults.headers` plus env-backed variables for custom tokens such as `X-Leadflow-Internal-Token`; do not encode custom header semantics as fake auth types.
 - For controller or endpoint full-coverage plans, prefer API and workflow cases plus persisted-state DB verification inside those cases.
+- For list/filter cases that create data in setup, assert that the created entity appears in the response when runner-supported DSL can express it, for example `array contains item with id = {{user_id}}`; do not stop at `response JSON is an array` when entity membership is the behavior under test.
+- For negative validation cases, isolate one invalid field at a time. Keep other required fields valid so a `400` proves the intended validator rather than a different missing-field failure.
+- For auth negative cases, do not mix invalid credentials with missing resources. Prefer a collection/list endpoint or a previously created entity so `401` is attributable to auth, not resource lookup order.
 - Do not add standalone schema-readiness `db-check` cases by default when the expected downstream path includes render, review, and promote.
 - Use standalone `db-check` only when the user explicitly asks for schema or infrastructure verification, or when the workflow is expected to stop at authoring or compile instead of promoted runnable scenarios.
 - Do not rely on the compiler to invent SQL, routes, or capture targets.
@@ -197,6 +200,8 @@ For lifecycle routes, do not author same-state negative or idempotency cases unt
 - `same_state_behavior`: `reject` or `idempotent_success`
 - `same_state_status`
 - `same_state_evidence`: the code path or test proving the behavior, for example the domain method that no-ops when current state already equals target
+
+When a lifecycle route in `operation-inventory.yaml` has explicit same-state semantics, include the matching same-state coverage case unless it is intentionally out of scope. For example, if archive records `target_state: ARCHIVED` and `same_state_behavior: reject`, author an `archive archived` rejection case rather than covering only activate/suspend same-state calls.
 
 Determine same-state behavior from the full request path, not from the domain method alone:
 

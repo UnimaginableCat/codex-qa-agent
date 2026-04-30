@@ -93,10 +93,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             payload = _generate_draft_run(root)
-            draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
-            draft_text = draft_path.read_text(encoding="utf-8")
-            draft_text = draft_text.replace("HTTP 201", "response length >= 1", 1)
-            draft_path.write_text(draft_text, encoding="utf-8")
+            _make_first_draft_expectation_unsupported(payload)
 
             review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
 
@@ -105,7 +102,45 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertIn("compile_unsupported_expectation", item.gap_summary.gap_codes)
         self.assertEqual(item.readiness_category.value, "parser_valid_partial")
         self.assertEqual(item.promotion_advisory.value, "not_recommended_for_promotion")
+        self.assertTrue(any(target.priority == "high" for target in item.edit_targets.targets))
         self.assertTrue(any("response length >= 1" in message for message in item.gap_summary.gap_messages))
+
+    def test_promotion_blocks_draft_with_high_priority_review_target(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _make_first_draft_expectation_unsupported(payload)
+
+            result = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(run_id=payload["run_id"], draft_id="draft-tc-001", workspace_root=root)
+            )
+
+        self.assertEqual(result.status.value, "BLOCKED")
+        self.assertIsNone(result.target_path)
+        self.assertTrue(
+            any(diagnostic.code == "scenario_promotion_review_gate_blocked" for diagnostic in result.diagnostics)
+        )
+
+    def test_promotion_allows_known_gaps_with_explicit_override(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _make_first_draft_expectation_unsupported(payload)
+
+            result = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(
+                    run_id=payload["run_id"],
+                    draft_id="draft-tc-001",
+                    workspace_root=root,
+                    allow_known_gaps=True,
+                )
+            )
+
+            self.assertEqual(result.status.value, "PASS")
+            self.assertTrue(result.target_path.exists())
+            self.assertTrue(
+                any(diagnostic.code == "scenario_promotion_known_gaps_override" for diagnostic in result.diagnostics)
+            )
 
     def test_promotion_promotes_one_draft(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -142,6 +177,22 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             self.assertEqual(result.status.value, "PASS")
             self.assertEqual(result.promoted_count, 2)
             self.assertEqual(result.error_count, 0)
+            self.assertEqual(result.blocked_count, 0)
+
+    def test_batch_promotion_reports_blocked_review_gate(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _make_first_draft_expectation_unsupported(payload)
+
+            result = ScenarioDraftBatchPromotionService().promote(
+                ScenarioPromotionBatchRequest(run_id=payload["run_id"], workspace_root=root)
+            )
+
+        self.assertEqual(result.status.value, "BLOCKED")
+        self.assertEqual(result.promoted_count, 0)
+        self.assertEqual(result.error_count, 0)
+        self.assertEqual(result.blocked_count, 1)
 
     def test_batch_promotion_can_purge_target_dir_before_rerun(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -448,6 +499,13 @@ def _mark_draft_invalid(render_result_path: Path) -> None:
     payload["validation_results"][0]["parse_valid"] = False
     payload["validation_results"][0]["diagnostics"] = [{"code": "test.invalid", "message": "invalid for test"}]
     render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _make_first_draft_expectation_unsupported(payload: dict[str, object]) -> None:
+    draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
+    draft_text = draft_path.read_text(encoding="utf-8")
+    draft_text = draft_text.replace("HTTP 201", "response length >= 1", 1)
+    draft_path.write_text(draft_text, encoding="utf-8")
 
 
 def _drop_route_binding_keep_case_support(render_result_path: Path) -> None:

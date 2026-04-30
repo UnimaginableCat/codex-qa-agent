@@ -63,6 +63,17 @@ def run_review(args: argparse.Namespace) -> dict[str, Any]:
             "deferred_item_count": len(review_set.deferred_items),
             "drafts_with_edit_targets": sum(1 for item in review_set.items if item.edit_target_count > 0),
             "total_edit_targets": sum(item.edit_target_count for item in review_set.items),
+            "drafts_with_high_priority_edit_targets": sum(
+                1
+                for item in review_set.items
+                if any(target.priority == "high" for target in item.edit_targets.targets)
+            ),
+            "high_priority_edit_target_count": sum(
+                1
+                for item in review_set.items
+                for target in item.edit_targets.targets
+                if target.priority == "high"
+            ),
             "average_completeness_ratio": _average_completeness_ratio(review_set),
             "close_to_runnable_count": _close_to_runnable_count(review_set),
             "review_set": review_set.to_dict(),
@@ -83,6 +94,7 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
                 workspace_root=Path(args.workspace_root),
                 target_dir=Path(args.target_dir),
                 allow_invalid=args.allow_invalid,
+                allow_known_gaps=args.allow_known_gaps,
                 purge_target_dir=args.purge_target_dir,
             )
         )
@@ -93,6 +105,7 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
                 "requested_count": result.requested_count,
                 "promoted_count": result.promoted_count,
                 "error_count": result.error_count,
+                "blocked_count": result.blocked_count,
                 "target_dir": result.target_dir,
                 "promotion_result_path": result.promotion_result_path,
                 "results": [item.to_dict() for item in result.results],
@@ -106,6 +119,7 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
             workspace_root=Path(args.workspace_root),
             target_dir=Path(args.target_dir),
             allow_invalid=args.allow_invalid,
+            allow_known_gaps=args.allow_known_gaps,
             purge_target_dir=args.purge_target_dir,
         )
     )
