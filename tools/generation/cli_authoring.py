@@ -309,7 +309,7 @@ def run_validate_entity_inventory(args: argparse.Namespace) -> dict[str, Any]:
         raise GenerationCliInputError(diagnostics)
     file_path = Path(args.entity_inventory_file)
     payload, validation_diagnostics = _validate_entity_inventory_file(file_path)
-    status = StepStatus.PASS if not validation_diagnostics else StepStatus.BLOCKED
+    status = _inventory_validation_status(validation_diagnostics)
     return to_json_safe(
         {
             "status": status.value,
@@ -332,7 +332,7 @@ def run_validate_operation_inventory(args: argparse.Namespace) -> dict[str, Any]
         raise GenerationCliInputError(diagnostics)
     file_path = Path(args.operation_inventory_file)
     payload, validation_diagnostics = _validate_operation_inventory_file(file_path)
-    status = StepStatus.PASS if not validation_diagnostics else StepStatus.BLOCKED
+    status = _inventory_validation_status(validation_diagnostics)
     return to_json_safe(
         {
             "status": status.value,
@@ -360,7 +360,14 @@ def run_sync_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
 
     entity_payload, entity_diagnostics = _validate_entity_inventory_file(entity_inventory_path)
     operation_payload, operation_diagnostics = _validate_operation_inventory_file(operation_inventory_path)
-    if entity_diagnostics or operation_diagnostics or entity_payload is None or operation_payload is None:
+    entity_status = _inventory_validation_status(entity_diagnostics)
+    operation_status = _inventory_validation_status(operation_diagnostics)
+    if (
+        entity_status == StepStatus.BLOCKED
+        or operation_status == StepStatus.BLOCKED
+        or entity_payload is None
+        or operation_payload is None
+    ):
         return to_json_safe(
             {
                 "status": StepStatus.BLOCKED.value,
@@ -372,12 +379,12 @@ def run_sync_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
                 ],
                 "stage_results": {
                     "entity_inventory": {
-                        "status": (StepStatus.PASS if not entity_diagnostics else StepStatus.BLOCKED).value,
+                        "status": entity_status.value,
                         "file_path": str(entity_inventory_path),
                         "diagnostics": [diagnostic.to_dict() for diagnostic in entity_diagnostics],
                     },
                     "operation_inventory": {
-                        "status": (StepStatus.PASS if not operation_diagnostics else StepStatus.BLOCKED).value,
+                        "status": operation_status.value,
                         "file_path": str(operation_inventory_path),
                         "diagnostics": [diagnostic.to_dict() for diagnostic in operation_diagnostics],
                     },
@@ -432,6 +439,12 @@ def run_sync_authoring_plan(args: argparse.Namespace) -> dict[str, Any]:
             "authoring_plan": synced_plan.to_dict(),
         }
     )
+
+
+def _inventory_validation_status(diagnostics: list[GenerationDiagnostic]) -> StepStatus:
+    if any(diagnostic.severity == DiagnosticSeverity.ERROR for diagnostic in diagnostics):
+        return StepStatus.BLOCKED
+    return StepStatus.PASS
 
 
 def _requested_scaffold_output_path(args: argparse.Namespace) -> Path:

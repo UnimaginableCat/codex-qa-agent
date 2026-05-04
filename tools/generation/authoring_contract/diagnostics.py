@@ -47,6 +47,8 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_stage_inventory_same_state_behavior_missing",
     "authoring_stage_inventory_same_state_mismatch",
     "authoring_stage_inventory_idempotency_persistence_missing",
+    "authoring_env_backed_role_identity_disallowed",
+    "authoring_visibility_claim_missing_required_assertion",
 }
 
 

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from tools.generation.domain.models import GenerationDiagnostic
+from tools.generation.domain.models import DiagnosticSeverity
 from tools.generation.inventory.common import (
     _diagnostic,
     _load_yaml_inventory_file,
@@ -15,6 +17,13 @@ from tools.generation.inventory.common import (
 
 
 _ENTITY_INVENTORY_REQUIRED_FIELDS = ("version", "source_id", "project", "surface", "entities")
+_DEFAULT_SUSPICIOUS_ID_FIELD_PATTERNS = (
+    r"(?:^|_)(?:company_)?member_guid$",
+    r"(?:^|_)user_guid$",
+)
+_DEFAULT_COMPOSITE_ENTITY_NAME_PATTERNS = (
+    r"(?:^|_)(?:permission|permissions|override|overrides|assignment|assignments|grant|grants|access)(?:_|$)",
+)
 
 
 def _validate_entity_inventory_file(path: Path) -> tuple[dict[str, Any] | None, list[GenerationDiagnostic]]:
@@ -46,7 +55,13 @@ def _validate_entity_inventory_file(path: Path) -> tuple[dict[str, Any] | None, 
         )
         return payload, diagnostics
 
-    diagnostics.extend(_entity_inventory_item_diagnostics(entities, path=path))
+    diagnostics.extend(
+        _entity_inventory_item_diagnostics(
+            entities,
+            path=path,
+            identity_policy=_entity_identity_policy(payload),
+        )
+    )
     return payload, diagnostics
 
 
@@ -61,7 +76,12 @@ def _known_entity_names(entity_inventory_payload: dict[str, Any] | None) -> set[
     }
 
 
-def _entity_inventory_item_diagnostics(items: list[Any], *, path: Path) -> list[GenerationDiagnostic]:
+def _entity_inventory_item_diagnostics(
+    items: list[Any],
+    *,
+    path: Path,
+    identity_policy: dict[str, Any],
+) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     seen_names: set[str] = set()
     for index, item in enumerate(items, start=1):
@@ -99,7 +119,8 @@ def _entity_inventory_item_diagnostics(items: list[Any], *, path: Path) -> list[
             )
         seen_names.add(entity_name)
 
-        if not str(item.get("id_field") or "").strip():
+        id_field = str(item.get("id_field") or "").strip()
+        if not id_field:
             diagnostics.append(
                 _diagnostic(
                     code="adapter_entity_inventory_id_field_missing",
@@ -108,4 +129,114 @@ def _entity_inventory_item_diagnostics(items: list[Any], *, path: Path) -> list[
                     details={"entity": entity_name},
                 )
             )
+        elif _looks_like_foreign_identity_id_field(
+            entity_name=entity_name,
+            id_field=id_field,
+            key_fields=_string_list(item.get("key_fields")),
+            policy=identity_policy,
+        ):
+            strict = identity_policy["enforcement"] == "error"
+            diagnostics.append(
+                _diagnostic(
+                    code=(
+                        "adapter_entity_inventory_suspicious_identity_id_field_disallowed"
+                        if strict
+                        else "adapter_entity_inventory_suspicious_identity_id_field"
+                    ),
+                    message=(
+                        "Entity id_field matches the configured suspicious identity-field policy. "
+                        "Keep the canonical entity id_field and declare natural/composite identity in key_fields."
+                    ),
+                    path=path,
+                    severity=DiagnosticSeverity.ERROR if strict else DiagnosticSeverity.WARNING,
+                    details={
+                        "entity": entity_name,
+                        "id_field": id_field,
+                        "policy": identity_policy["source"],
+                        "suggestion": (
+                            "Use an entity-owned id_field, then include relationship/actor variables in key_fields "
+                            "when they form the natural key. If this id_field is intentional, document it in "
+                            "metadata.identity_field_policy.allow_id_fields."
+                        ),
+                    },
+                )
+            )
     return diagnostics
+
+
+def _entity_identity_policy(payload: dict[str, Any]) -> dict[str, Any]:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    raw_policy = metadata.get("identity_field_policy") if isinstance(metadata.get("identity_field_policy"), dict) else {}
+    disable_default_id_patterns = bool(raw_policy.get("disable_default_suspicious_id_field_patterns"))
+    disable_default_entity_patterns = bool(raw_policy.get("disable_default_composite_entity_patterns"))
+    return {
+        "source": "metadata.identity_field_policy",
+        "enforcement": _identity_policy_enforcement(raw_policy.get("enforcement")),
+        "allow_id_fields": _string_set(raw_policy.get("allow_id_fields")),
+        "suspicious_id_field_patterns": (
+            []
+            if disable_default_id_patterns
+            else list(_DEFAULT_SUSPICIOUS_ID_FIELD_PATTERNS)
+        )
+        + _string_list(raw_policy.get("suspicious_id_field_patterns")),
+        "composite_entity_patterns": (
+            []
+            if disable_default_entity_patterns
+            else list(_DEFAULT_COMPOSITE_ENTITY_NAME_PATTERNS)
+        )
+        + _string_list(raw_policy.get("composite_entity_patterns")),
+    }
+
+
+def _identity_policy_enforcement(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"error", "block", "blocked", "strict", "disallow"}:
+        return "error"
+    return "warn"
+
+
+def _looks_like_foreign_identity_id_field(
+    *,
+    entity_name: str,
+    id_field: str,
+    key_fields: list[str],
+    policy: dict[str, Any],
+) -> bool:
+    if _id_field_allowed(entity_name=entity_name, id_field=id_field, policy=policy):
+        return False
+    if not _matches_any_pattern(id_field, policy["suspicious_id_field_patterns"]):
+        return False
+    return len([field for field in key_fields if field.strip()]) > 1 or _matches_any_pattern(
+        entity_name,
+        policy["composite_entity_patterns"],
+    )
+
+
+def _id_field_allowed(*, entity_name: str, id_field: str, policy: dict[str, Any]) -> bool:
+    values = {id_field.strip().lower(), f"{entity_name.strip().lower()}.{id_field.strip().lower()}"}
+    allowed = {value.strip().lower() for value in policy["allow_id_fields"]}
+    return bool(values & allowed)
+
+
+def _matches_any_pattern(value: str, patterns: list[str]) -> bool:
+    for pattern in patterns:
+        try:
+            if re.search(pattern, value.strip(), re.IGNORECASE):
+                return True
+        except re.error:
+            continue
+    return False
+
+
+def _string_set(value: Any) -> set[str]:
+    return set(_string_list(value))
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list | tuple | set):
+        return [str(item) for item in value if str(item).strip()]
+    return []

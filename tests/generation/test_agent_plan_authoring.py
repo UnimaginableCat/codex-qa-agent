@@ -486,6 +486,44 @@ class AgentPlanAuthoringServiceTests(unittest.TestCase):
             )
         )
 
+    def test_validate_file_allows_read_only_post_without_db_verification(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api-export.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "source_id": "price-list",
+                        "project": "code/demo",
+                        "title": "Export price list",
+                        "planned_test_cases": [
+                            {
+                                "title": "Export PDF",
+                                "objective": "Verify export endpoint returns a binary body.",
+                                "kind": "api",
+                                "route": {
+                                    "http_method": "POST",
+                                    "endpoint_path": "/api/price_list/1/export/",
+                                },
+                                "expected_outcomes": ["HTTP 200", "response body exists"],
+                                "metadata": {"state_change": "read_only"},
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = AgentPlanAuthoringService().validate_file(path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "agent_plan_case_mutating_api_db_verification_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

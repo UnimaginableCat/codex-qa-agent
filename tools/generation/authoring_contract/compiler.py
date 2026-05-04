@@ -20,6 +20,7 @@ from .case_diagnostics import (
     _env_backed_identity_guid_diagnostics,
     _normalized_email_expectation_diagnostics,
     _request_constraint_diagnostics,
+    _visibility_claim_diagnostics,
     _workflow_same_state_contract_warning,
     _workflow_setup_state_mismatch_diagnostics,
 )
@@ -389,6 +390,7 @@ class AuthoringPlanCompiler:
                     )
                 )
         diagnostics.extend(_boundary_case_diagnostics(case, case_ref, index=index))
+        diagnostics.extend(_visibility_claim_diagnostics(authoring_plan, case, case_ref, index=index))
 
         if _requires_persistence(case.state_change) and (
             case.oracle is None or case.oracle.persisted_state is None

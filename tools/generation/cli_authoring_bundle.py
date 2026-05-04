@@ -93,10 +93,10 @@ def _evaluate_authoring_bundle(
     authoring_plan_path = bundle_dir / AUTHORING_PLAN_FILENAME
 
     entity_payload, entity_diagnostics = _validate_entity_inventory_file(entity_inventory_path)
-    entity_status = StepStatus.PASS if not entity_diagnostics else StepStatus.BLOCKED
+    entity_status = _inventory_validation_status(entity_diagnostics)
 
     operation_payload, operation_diagnostics = _validate_operation_inventory_file(operation_inventory_path)
-    operation_status = StepStatus.PASS if not operation_diagnostics else StepStatus.BLOCKED
+    operation_status = _inventory_validation_status(operation_diagnostics)
 
     authoring_result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
     authoring_status = authoring_result.status
@@ -130,4 +130,10 @@ def _evaluate_authoring_bundle(
     overall_status = _highest_priority_status([entity_status, operation_status, authoring_status])
     diagnostics = [*entity_diagnostics, *operation_diagnostics, *authoring_result.diagnostics]
     return overall_status, stage_results, diagnostics
+
+
+def _inventory_validation_status(diagnostics: list[GenerationDiagnostic]) -> StepStatus:
+    if any(diagnostic.severity == DiagnosticSeverity.ERROR for diagnostic in diagnostics):
+        return StepStatus.BLOCKED
+    return StepStatus.PASS
 

@@ -50,6 +50,15 @@ _DEFAULT_ENV_IDENTITY_PATTERNS = (
     r"(?:^|_)(?:company_)?member_guid$",
     r"(?:^|_)user_guid$",
 )
+_VISIBILITY_CLAIM_PATTERN = re.compile(
+    r"\b(?:mask|masked|masking|leak|leaks|visibility|visible|can_view_price|can_view_cost|cost_price|selling price)\b",
+    re.IGNORECASE,
+)
+_VISIBILITY_ASSERTION_PATTERN = re.compile(
+    r"(?:response\s+)?`?(?:price|cost_price|can_view_price|can_view_cost)`?\s*(?:=|!=|is null|is not null)|"
+    r"response contains field `(?:price|cost_price|can_view_price|can_view_cost)`",
+    re.IGNORECASE,
+)
 
 
 def _env_backed_identity_guid_diagnostics(
@@ -58,6 +67,7 @@ def _env_backed_identity_guid_diagnostics(
 ) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     policy = _identity_resolution_policy(authoring_plan)
+    diagnostics.extend(_identity_resolution_policy_diagnostics(policy, source_ref))
     seen: set[tuple[str, str | None, str]] = set()
     for field_path, entries in _scenario_variable_entries_with_paths(authoring_plan):
         for entry_index, entry in enumerate(entries):
@@ -72,14 +82,19 @@ def _env_backed_identity_guid_diagnostics(
             if key in seen:
                 continue
             seen.add(key)
+            disallowed = policy["env_backed_role_identity"] == "disallow"
             diagnostics.append(
                 authoring_diagnostic(
-                    "authoring_env_backed_role_identity_guid",
+                    (
+                        "authoring_env_backed_role_identity_disallowed"
+                        if disallowed
+                        else "authoring_env_backed_role_identity_guid"
+                    ),
                     (
                         "Role/user identity GUIDs should usually be discovered by setup API/DB steps and captured "
                         "into variables instead of required as manual env inputs."
                     ),
-                    severity=DiagnosticSeverity.WARNING,
+                    severity=DiagnosticSeverity.ERROR if disallowed else DiagnosticSeverity.WARNING,
                     source_ref=source_ref,
                     details={
                         "field": f"{field_path}[{entry_index}]",
@@ -94,6 +109,34 @@ def _env_backed_identity_guid_diagnostics(
                 )
             )
     return diagnostics
+
+
+def _identity_resolution_policy_diagnostics(
+    policy: dict[str, Any],
+    source_ref: str,
+) -> list[GenerationDiagnostic]:
+    if not policy["allow_env_identity_variables"]:
+        return []
+    if policy["justification"]:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_identity_resolution_allow_without_justification",
+            (
+                "metadata.identity_resolution.allow_env_identity_variables relaxes identity discovery policy, "
+                "but no justification explains why env-backed role/user GUIDs are unavoidable."
+            ),
+            severity=DiagnosticSeverity.WARNING,
+            source_ref=source_ref,
+            details={
+                "allow_env_identity_variables": sorted(policy["allow_env_identity_variables"]),
+                "suggestion": (
+                    "Prefer setup discovery through API/DB. If env identity fixtures are truly required, add "
+                    "metadata.identity_resolution.justification with the concrete reason and fixture ownership."
+                ),
+            },
+        )
+    ]
 
 
 def _scenario_variable_entries_with_paths(authoring_plan: AuthoringPlan) -> list[tuple[str, list[str]]]:
@@ -122,13 +165,88 @@ def _scenario_variable_definition_from_entry(
 def _identity_resolution_policy(authoring_plan: AuthoringPlan) -> dict[str, Any]:
     raw_policy = authoring_plan.metadata.get("identity_resolution")
     policy = dict(raw_policy) if isinstance(raw_policy, dict) else {}
+    contracts = authoring_plan.metadata.get("contracts")
+    identity_contract = {}
+    if isinstance(contracts, dict) and isinstance(contracts.get("identity"), dict):
+        identity_contract = dict(contracts.get("identity") or {})
     return {
         "discourage_env_identity": _string_set(policy.get("discourage_env_identity")),
         "allow_env_identity_variables": _string_set(policy.get("allow_env_identity_variables")),
         "stable_env_fixtures": _string_set(policy.get("stable_env_fixtures")),
         "env_identity_name_patterns": _string_list(policy.get("env_identity_name_patterns")),
         "disable_default_env_identity_patterns": bool(policy.get("disable_default_env_identity_patterns")),
+        "justification": str(policy.get("justification") or "").strip(),
+        "env_backed_role_identity": _contract_mode(
+            identity_contract.get("env_backed_role_identity"),
+            default="warn",
+        ),
     }
+
+
+def _visibility_claim_diagnostics(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    *,
+    index: int,
+) -> list[GenerationDiagnostic]:
+    case_text = " ".join(
+        str(part or "").strip()
+        for part in (case.id, case.title, case.objective, " ".join(case.tags))
+        if str(part or "").strip()
+    )
+    if not case_text or _VISIBILITY_CLAIM_PATTERN.search(case_text) is None:
+        return []
+    checks = [] if case.oracle is None else [str(item) for item in case.oracle.business_checks]
+    if any(_VISIBILITY_ASSERTION_PATTERN.search(check) for check in checks):
+        return []
+    if case.oracle is not None and case.oracle.persisted_state is not None:
+        return []
+    strict = _visibility_assertions_required(authoring_plan, case)
+    return [
+        authoring_diagnostic(
+            (
+                "authoring_visibility_claim_missing_required_assertion"
+                if strict
+                else "authoring_visibility_claim_without_field_assertion"
+            ),
+            (
+                "Case objective/tags claim price/cost visibility, masking, or leak prevention, but the oracle "
+                "does not assert the relevant price/cost field behavior."
+            ),
+            severity=DiagnosticSeverity.ERROR if strict else DiagnosticSeverity.WARNING,
+            source_ref=case_ref,
+            details={
+                "case_index": index,
+                "business_checks": checks,
+                "suggestion": (
+                    "Add a supported field assertion such as response `cost_price` = `null`, use a DB/content "
+                    "verification that proves the claim, or narrow the objective to a binary/download smoke check."
+                ),
+            },
+        )
+    ]
+
+
+def _visibility_assertions_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+    plan_contracts = authoring_plan.metadata.get("contracts") if isinstance(authoring_plan.metadata.get("contracts"), dict) else {}
+    plan_coverage_contract = (
+        plan_contracts.get("coverage") if isinstance(plan_contracts.get("coverage"), dict) else {}
+    )
+    if plan_coverage_contract.get("visibility_claims_require_field_assertions") is not None:
+        return bool(plan_coverage_contract.get("visibility_claims_require_field_assertions"))
+    contracts = case.metadata.get("contracts") if isinstance(case.metadata.get("contracts"), dict) else {}
+    coverage_contract = contracts.get("coverage") if isinstance(contracts.get("coverage"), dict) else {}
+    return bool(coverage_contract.get("visibility_claims_require_field_assertions"))
+
+
+def _contract_mode(value: Any, *, default: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"disallow", "deny", "error", "block", "blocked", "strict"}:
+        return "disallow"
+    if normalized in {"allow", "ignore", "off", "false"}:
+        return "allow"
+    return default
 
 
 def _env_identity_match(

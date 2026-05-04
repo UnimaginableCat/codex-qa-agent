@@ -96,7 +96,8 @@ credentials, derive internal identifiers through executable setup:
 
 Use `metadata.identity_resolution` when a project needs different rules. The default lint warns on
 env-backed `company_member_guid` and `user_guid` style variables, but projects can allow a known
-external GUID or define their own discouraged identity patterns:
+external GUID with an explicit justification, define their own discouraged identity patterns, or
+make env-backed identity blocking through `metadata.contracts.identity.env_backed_role_identity: disallow`:
 
 ```yaml
 metadata:
@@ -106,6 +107,7 @@ metadata:
     - price_list_id
     allow_env_identity_variables:
     - external_customer_guid
+    justification: External customer GUID is a stable public fixture owned by the test environment.
     discourage_env_identity:
     - company_member_guid
     env_identity_name_patterns:
@@ -149,6 +151,8 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
    - lifecycle route target state
    - same-state lifecycle behavior, status, and evidence when reissuing the same command matters
    - DB verification templates
+   - keep `id_field` as the entity-owned canonical identity; for permission override/natural-key rows, put actor/member/price-list variables in `key_fields`
+   - use `metadata.identity_field_policy` only when the default identity-field lint does not fit the project; prefer `allow_id_fields` for documented exceptions and `suspicious_id_field_patterns` for project-specific actor/relationship identifiers; set `enforcement: error` only for an explicit strict contract
    - then validate this file before editing authoring plan
 3. run `--sync-authoring-plan`
    - hydrate `authoring-plan.yaml` from both inventories
@@ -156,6 +160,7 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
 4. write `authoring-plan.yaml`
    - cases should reference the first two inventories instead of inventing lifecycle and status assumptions ad hoc
    - when a request body needs a target member/user GUID, make the case a workflow and capture that GUID in a setup API/DB step instead of adding another env-backed `*_MEMBER_GUID`
+   - if an objective says masking, visibility, or leak prevention, assert the relevant JSON field or add an executable content check; otherwise narrow the objective to a smoke check
    - same-state lifecycle cases such as `archive archived`, `activate active`, and `suspend suspended` should not be authored until the route inventory explicitly says whether they reject or return an idempotent success, with a code/test evidence reference
    - idempotent same-state success cases must verify the second call's 2xx response and persisted target state after the repeated call
    - then validate this file before the bundle gate

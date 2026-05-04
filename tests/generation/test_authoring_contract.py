@@ -191,16 +191,91 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         result = AuthoringPlanCompiler().validate(plan)
 
         self.assertEqual(result.status, StepStatus.PASS)
-        warnings = [
+        diagnostics = [
             diagnostic
             for diagnostic in result.diagnostics
             if diagnostic.code == "authoring_env_backed_role_identity_guid"
         ]
-        self.assertEqual(len(warnings), 1)
-        self.assertEqual(warnings[0].details["variable"], "company_member_guid")
-        self.assertEqual(warnings[0].details["env_name"], "PRICE_LIST_PARTNER_MEMBER_GUID")
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].details["variable"], "company_member_guid")
+        self.assertEqual(diagnostics[0].details["env_name"], "PRICE_LIST_PARTNER_MEMBER_GUID")
+        self.assertEqual(diagnostics[0].severity.value, "WARNING")
+
+    def test_contract_can_disallow_env_backed_role_identity_guid_variables(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "company_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                ],
+            ),
+            cases=[
+                AuthoringCase(
+                    id="read-permissions",
+                    kind="api",
+                    objective="Read permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/permissions")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+            metadata={"contracts": {"identity": {"env_backed_role_identity": "disallow"}}},
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_env_backed_role_identity_disallowed"
+                for diagnostic in result.diagnostics
+            )
+        )
 
     def test_identity_resolution_policy_can_allow_env_backed_guid_variables(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "company_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                ],
+            ),
+            cases=[
+                AuthoringCase(
+                    id="read-permissions",
+                    kind="api",
+                    objective="Read permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/permissions")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+            metadata={
+                "identity_resolution": {
+                    "allow_env_identity_variables": ["company_member_guid"],
+                    "justification": "Partner member GUID is owned by a stable seeded fixture for this project.",
+                }
+            },
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(diagnostic.code == "authoring_env_backed_role_identity_guid" for diagnostic in result.diagnostics)
+        )
+
+    def test_identity_resolution_allow_requires_justification(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="price-list-plan",
@@ -233,11 +308,14 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         result = AuthoringPlanCompiler().validate(plan)
 
         self.assertEqual(result.status, StepStatus.PASS)
-        self.assertFalse(
-            any(diagnostic.code == "authoring_env_backed_role_identity_guid" for diagnostic in result.diagnostics)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_identity_resolution_allow_without_justification"
+                for diagnostic in result.diagnostics
+            )
         )
 
-    def test_identity_resolution_policy_supports_custom_discouraged_patterns(self) -> None:
+    def test_identity_resolution_policy_warns_on_custom_discouraged_patterns(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="price-list-plan",
@@ -271,13 +349,14 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         result = AuthoringPlanCompiler().validate(plan)
 
         self.assertEqual(result.status, StepStatus.PASS)
-        warnings = [
+        diagnostics = [
             diagnostic
             for diagnostic in result.diagnostics
             if diagnostic.code == "authoring_env_backed_role_identity_guid"
         ]
-        self.assertEqual(len(warnings), 1)
-        self.assertEqual(warnings[0].details["policy_source"], "metadata.identity_resolution.env_identity_name_patterns")
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].details["policy_source"], "metadata.identity_resolution.env_identity_name_patterns")
+        self.assertEqual(diagnostics[0].severity.value, "WARNING")
 
     def test_identity_resolution_policy_can_disable_default_guid_patterns(self) -> None:
         plan = AuthoringPlan(
@@ -310,6 +389,100 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertFalse(
             any(diagnostic.code == "authoring_env_backed_role_identity_guid" for diagnostic in result.diagnostics)
+        )
+
+    def test_visibility_claim_without_field_level_assertion_is_warning(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(status_code=200, business_checks=["response JSON exists"]),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_claim_without_field_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_contract_can_require_visibility_claim_field_level_assertion(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(status_code=200, business_checks=["response JSON exists"]),
+                ),
+            ],
+            metadata={"contracts": {"coverage": {"visibility_claims_require_field_assertions": True}}},
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_claim_missing_required_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_visibility_claim_allows_price_field_assertion(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="customer-detail-masks-cost-price",
+                    kind="api",
+                    objective="Customer detail masks cost_price.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/1/positions/1")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `cost_price` = `null`"],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_visibility_claim_without_field_assertion"
+                for diagnostic in result.diagnostics
+            )
         )
 
     def test_compile_merges_default_headers_into_setup_and_case_requests(self) -> None:
@@ -1019,7 +1192,7 @@ cases:
             defaults=AuthoringDefaults(
                 scenario_variables=[
                     "price_list_id = env:PRICE_LIST_ID",
-                    "partner_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                    "partner_member_guid = literal:partner-member-guid",
                 ]
             ),
             cases=[
