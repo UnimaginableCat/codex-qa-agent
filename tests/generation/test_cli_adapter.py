@@ -469,6 +469,42 @@ db_verifications:
         self.assertIn("adapter_operation_inventory_operation_template_missing", codes)
         self.assertIn("adapter_operation_inventory_db_verification_template_incomplete", codes)
 
+    def test_validate_operation_inventory_allows_composite_scoped_by_params(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list-permissions
+entity_operations: []
+routes: []
+db_verifications:
+  - entity: price_list_permission
+    operation: verify_partner_edit_denied
+    scoped_by: [price_list_id, partner_member_guid]
+    sql: SELECT can_edit FROM price_list_permission WHERE price_list_id = :price_list_id AND partner_member_guid = :partner_member_guid
+    params:
+      price_list_id: "{{price_list_id}}"
+      partner_member_guid: "{{partner_member_guid}}"
+    expected_outcomes:
+      - one row exists
+      - "`can_edit` = `false`"
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+
     def test_validate_operation_inventory_blocks_invalid_route_request_constraints(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

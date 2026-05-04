@@ -109,6 +109,8 @@ Recommended order for broad controller coverage:
 
 Use strict sequential authoring for broad coverage. Fill and validate one stage before editing the
 next one; do not substantially rewrite all three staged files in the same authoring pass.
+DB verification `scoped_by` can be a single field or a YAML array for composite natural keys, and
+each scoped field must be present in the verification `params`.
 
 Stage-oriented commands are available when the bundle already exists or only one stage file needs
 to be scaffolded or validated:

@@ -147,6 +147,7 @@ Use the scaffolded bundle in this order:
    - lifecycle route `target_state`
    - lifecycle route `same_state_behavior`, `same_state_status`, and `same_state_evidence` when the command can be invoked on an entity already in the target state
    - DB verification templates with SQL, params, and expected outcomes for every operation later used by `oracle.persisted_state`
+   - DB verification `scoped_by` may be a single field or an explicit YAML array for composite natural keys; every scoped field must be present in `params`
 3. `--sync-authoring-plan`
    - after both inventories validate, synchronize `scope`, `entities`, reusable route operations, and DB verification templates into `authoring-plan.yaml`
    - this command does not invent final cases; it removes the need to repeat inventory facts by hand
