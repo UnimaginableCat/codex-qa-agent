@@ -236,6 +236,7 @@ def _cross_check_authoring_plan_against_stage_inventories(
             )
             continue
         inventory_id_field = str(inventory_entity_spec.get("id_field") or "").strip()
+        inventory_key_fields = _normalized_string_list(inventory_entity_spec.get("key_fields"))
         authored_id_field = entity_spec.id_field.strip()
         if inventory_id_field and authored_id_field and inventory_id_field != authored_id_field:
             diagnostics.append(
@@ -274,18 +275,23 @@ def _cross_check_authoring_plan_against_stage_inventories(
                         )
                     )
                 else:
-                    scoped_by = str(db_verification_spec.get("scoped_by") or "").strip()
-                    if scoped_by and inventory_id_field and scoped_by != inventory_id_field:
+                    scoped_by = _normalized_scoped_by_fields(db_verification_spec.get("scoped_by"))
+                    if scoped_by and not _scope_matches_entity_identity(
+                        scoped_by=scoped_by,
+                        id_field=inventory_id_field,
+                        key_fields=inventory_key_fields,
+                    ):
                         diagnostics.append(
                             authoring_diagnostic(
                                 "authoring_stage_inventory_operation_mismatch",
-                                "DB verification scope must match the entity id_field declared in staged inventories.",
+                                "DB verification scope must use fields declared as the entity id_field or key_fields in staged inventories.",
                                 source_ref=source_ref,
                                 details={
                                     "entity": entity_name,
                                     "operation": operation_name,
                                     "scoped_by": scoped_by,
                                     "inventory_id_field": inventory_id_field,
+                                    "inventory_key_fields": inventory_key_fields,
                                 },
                             )
                         )
@@ -372,7 +378,12 @@ def _cross_check_authoring_plan_against_stage_inventories(
                 )
         if case.kind.strip().lower() != "workflow" or not case.setup:
             continue
-        actual_state = _infer_setup_state_from_inventory(case.setup, entity_operation_specs)
+        route_entity = _infer_route_entity(authored_route_path, entity_specs)
+        actual_state = _infer_setup_state_from_inventory(
+            case.setup,
+            entity_operation_specs,
+            route_entity=route_entity,
+        )
         diagnostics.extend(
             _same_state_inventory_contract_diagnostics(
                 case=case,
@@ -400,9 +411,13 @@ def _cross_check_authoring_plan_against_stage_inventories(
                 details={
                     "expected_state": _single_or_sorted_state(expected_states),
                     "actual_state": actual_state,
+                    "route_entity": route_entity,
                     "route_path": authored_route_path,
                     "route_shape": route_key[1],
-                    "setup_operations": [step.operation for step in case.setup],
+                    "setup_operations": [
+                        {"entity": step.use_entity, "operation": step.operation}
+                        for step in case.setup
+                    ],
                 },
             )
         )
@@ -463,14 +478,63 @@ def _db_verification_inventory_specs(operation_inventory: dict[str, Any]) -> dic
 def _infer_setup_state_from_inventory(
     setup_steps: list[AuthoringSetupStep],
     operation_specs: dict[tuple[str, str], dict[str, Any]],
+    *,
+    route_entity: str | None = None,
 ) -> str | None:
     state: str | None = None
     for step in setup_steps:
+        entity_name = step.use_entity.strip()
+        if route_entity is not None and entity_name != route_entity:
+            continue
         operation_spec = operation_specs.get((step.use_entity.strip(), step.operation.strip()))
         if operation_spec is None:
             continue
         state = _normalized_inventory_state(operation_spec.get("effect_state")) or state
     return state
+
+
+def _normalized_scoped_by_fields(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [field_name for item in value if (field_name := str(item or "").strip())]
+    field_name = str(value or "").strip()
+    return [field_name] if field_name else []
+
+
+def _normalized_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item_text for item in value if (item_text := str(item or "").strip())]
+
+
+def _scope_matches_entity_identity(
+    *,
+    scoped_by: list[str],
+    id_field: str,
+    key_fields: list[str],
+) -> bool:
+    scoped_set = set(scoped_by)
+    identity_fields = set(key_fields)
+    if id_field:
+        identity_fields.add(id_field)
+    return bool(identity_fields) and scoped_set.issubset(identity_fields)
+
+
+def _infer_route_entity(path: str, entity_specs: dict[str, dict[str, Any]]) -> str | None:
+    matches: list[str] = []
+    for entity_name, entity_spec in entity_specs.items():
+        id_field = str(entity_spec.get("id_field") or "").strip()
+        if id_field and _path_contains_placeholder(path, id_field):
+            matches.append(entity_name)
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _path_contains_placeholder(path: str, placeholder_name: str) -> bool:
+    for match in _ROUTE_PLACEHOLDER_PATTERN.finditer(path):
+        if match.group(0).strip("{} ").strip() == placeholder_name:
+            return True
+    return False
 
 
 def _route_inventory_key(method: Any, path: Any) -> tuple[str, str]:
