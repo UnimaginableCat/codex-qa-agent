@@ -980,6 +980,8 @@ def _resolved_actor(plan: NormalizedTestPlan, test_case: PlannedTestCase) -> str
 
 
 def _rendered_scenario_variables(plan: NormalizedTestPlan, test_case: PlannedTestCase) -> list[str]:
+    actor = _resolved_actor(plan, test_case)
+    actor_variables = [f"actor = literal:{actor}"] if actor else []
     variables = _dedupe_scenario_variables_by_name(
         [
             *list(plan.scenario_variables),
@@ -991,12 +993,10 @@ def _rendered_scenario_variables(plan: NormalizedTestPlan, test_case: PlannedTes
                 if isinstance(plan.metadata.get("defaults"), dict)
                 else None
             ),
+            *actor_variables,
         ]
     )
-    actor = _resolved_actor(plan, test_case)
-    if not actor:
-        return variables
-    return _dedupe_preserve_order([*variables, f"actor = literal:{actor}"])
+    return variables
 
 
 def _has_auth_header_signal(headers: dict[str, Any]) -> bool:

@@ -76,6 +76,42 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertEqual(len(scenario.variables), 1)
         self.assertEqual(scenario.variables[0].name, "actor")
 
+    def test_renderer_case_actor_overrides_plan_actor_variable_by_name(self) -> None:
+        plan = NormalizedTestPlan(
+            plan_id="plan-price-list",
+            source_id="price-list",
+            project="code/demo",
+            title="Price list permissions",
+            scenario_variables=["actor = literal:founder", "price_list_id = env:PRICE_LIST_ID"],
+            metadata={"default_actor": "founder"},
+            test_cases=[
+                PlannedTestCase(
+                    case_id="tc-partner-001",
+                    title="Partner permissions",
+                    objective="Read permissions as partner.",
+                    expected_results=["HTTP 200"],
+                    planned_route=PlannedRouteIntent(http_method="GET", endpoint_path="/price-lists/{{price_list_id}}"),
+                    auth_strategy=["basic"],
+                    metadata={"default_actor": "partner"},
+                )
+            ],
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("- actor = literal:partner", draft.markdown)
+        self.assertNotIn("- actor = literal:founder", draft.markdown)
+        self.assertIn("Auth strategy: basic", draft.markdown)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "draft.md"
+            path.write_text(draft.markdown, encoding="utf-8")
+            scenario = MarkdownScenarioParser().parse(path)
+
+        actor_variables = [variable for variable in scenario.variables if variable.name == "actor"]
+        self.assertEqual(len(actor_variables), 1)
+        self.assertEqual(actor_variables[0].raw_value, "partner")
+
     def test_renderer_merges_first_class_scenario_variables_with_actor(self) -> None:
         plan = NormalizedTestPlan(
             plan_id="plan-users",

@@ -57,8 +57,16 @@ headers across authored API and workflow requests. It is especially useful for e
 such as `X-Leadflow-Internal-Token: "{{internal_api_token}}"`. Case-level or entity-operation
 headers override the same keys from `defaults.headers`.
 
+For projects that use basic auth, set `defaults.auth: basic` and use actor-scoped env profiles
+instead of authored `Authorization` headers. Role-specific cases can set `metadata.default_actor`
+to values such as `founder` or `partner`; rendered scenarios then use `actor = literal:<role>` and
+runtime selects `API_AUTH_TYPE__<ROLE>`, `API_USERNAME__<ROLE>`, and `API_PASSWORD__<ROLE>`.
+
 `entities.<entity>.id_field` is now executable authoring contract too. It names the canonical entity
 identity variable used across setup chains and persisted-state templates, for example `user_id`.
+For natural-key entities, declare `key_fields` in `entity-inventory.yaml`; synced authoring plans
+can then scope persisted-state checks by all declared key fields instead of inventing a fake
+single-field `id_field`.
 
 Prose remains a fallback/bootstrap path:
 

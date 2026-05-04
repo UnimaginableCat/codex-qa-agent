@@ -65,11 +65,27 @@ Compiler behavior:
 - resolves persisted-state verification via entity DB templates
 - carries `defaults.environment` into rendered scenario `## Environment`
 - carries `defaults.actor` into rendered scenario `## Variables` as `actor = literal:<value>`
+- lets a case override that actor with `metadata.default_actor`, which is useful for role-specific basic-auth env profiles
 - merges `defaults.headers` into authored API/workflow request headers, with case-level and entity-operation headers taking precedence on key conflicts
 - carries first-class `defaults.scenario_variables[]` and `cases[].scenario_variables[]` into rendered scenario `## Variables`
 - uses that rendered `actor` variable to select actor-scoped API/DB env keys like `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`, with fallback to base keys
 - uses `defaults.auth` as fallback auth strategy when case/setup API auth is not authored explicitly
 - runs existing `validate_agent_plan_input(...)` after compilation
+
+For projects that use basic auth, prefer:
+
+```yaml
+defaults:
+  auth: basic
+cases:
+- id: founder-can-read
+  metadata:
+    default_actor: founder
+```
+
+The rendered scenario uses `actor = literal:founder`, so runtime selects env keys like
+`API_AUTH_TYPE__FOUNDER=basic`, `API_USERNAME__FOUNDER`, and `API_PASSWORD__FOUNDER`.
+Do not add `Authorization: Bearer {{...}}` headers for basic-auth projects.
 
 Recommended staged workflow:
 
