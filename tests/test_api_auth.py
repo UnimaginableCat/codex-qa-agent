@@ -289,6 +289,110 @@ class ApiAuthTests(unittest.TestCase):
             with self.assertRaisesRegex(ValidationError, "API_AUTH_TYPE__PARTNER"):
                 ApiEnvLoader().load(env_path, actor="partner")
 
+    def test_basic_role_actor_requires_actor_scoped_username_and_password(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / "demo.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=https://api.example.local",
+                        "API_AUTH_TYPE=basic",
+                        "API_USERNAME=founder",
+                        "API_PASSWORD=secret",
+                        "API_AUTH_TYPE__PARTNER=basic",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValidationError, "API_USERNAME__PARTNER"):
+                ApiEnvLoader().load(env_path, actor="partner")
+
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=https://api.example.local",
+                        "API_AUTH_TYPE=basic",
+                        "API_USERNAME=founder",
+                        "API_PASSWORD=secret",
+                        "API_AUTH_TYPE__PARTNER=basic",
+                        "API_USERNAME__PARTNER=partner",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValidationError, "API_PASSWORD__PARTNER"):
+                ApiEnvLoader().load(env_path, actor="partner")
+
+    def test_basic_role_actor_uses_actor_scoped_credentials_when_present(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / "demo.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=https://api.example.local",
+                        "API_AUTH_TYPE=basic",
+                        "API_USERNAME=founder",
+                        "API_PASSWORD=secret",
+                        "API_AUTH_TYPE__PARTNER=basic",
+                        "API_USERNAME__PARTNER=partner",
+                        "API_PASSWORD__PARTNER=partner-secret",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            env = ApiEnvLoader().load(env_path, actor="partner")
+
+        self.assertEqual(env.auth_type.value, "basic")
+        self.assertEqual(env.api_username, "partner")
+        self.assertEqual(env.api_password, "partner-secret")
+
+    def test_bearer_role_actor_requires_actor_scoped_token(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / "demo.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=https://api.example.local",
+                        "API_AUTH_TYPE=bearer",
+                        "API_BEARER_TOKEN=founder-token",
+                        "API_AUTH_TYPE__PARTNER=bearer",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValidationError, "API_BEARER_TOKEN__PARTNER"):
+                ApiEnvLoader().load(env_path, actor="partner")
+
+    def test_none_role_actor_does_not_require_credentials(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / "demo.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=https://api.example.local",
+                        "API_AUTH_TYPE=basic",
+                        "API_USERNAME=founder",
+                        "API_PASSWORD=secret",
+                        "API_AUTH_TYPE__ANONYMOUS=none",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            env = ApiEnvLoader().load(env_path, actor="anonymous")
+
+        self.assertEqual(env.auth_type.value, "none")
+        self.assertEqual(env.actor, "anonymous")
+
     def test_generic_api_client_actor_can_fallback_to_base_auth_profile(self) -> None:
         with TemporaryDirectory() as tmp:
             env_path = Path(tmp) / "demo.env"
