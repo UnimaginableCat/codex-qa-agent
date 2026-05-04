@@ -6,14 +6,14 @@ from pathlib import Path
 import re
 from typing import Any
 
-from tools.generation.domain.models import GenerationDiagnostic
+from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
 from tools.generation.persistence.artifacts import (
     ENTITY_INVENTORY_FILENAME,
     OPERATION_INVENTORY_FILENAME,
     managed_generation_artifacts_root_for_path,
 )
 
-from .case_diagnostics import (
+from .case_diagnostics.lifecycle import (
     _expected_precondition_state,
     _is_same_state_inventory_case,
     _normalized_inventory_state,
@@ -398,19 +398,27 @@ def _cross_check_authoring_plan_against_stage_inventories(
         if _is_declared_failure_status(expected_status, failure_statuses):
             continue
         expected_states = _normalized_inventory_states(route_spec.get("precondition_state"))
+        precondition_declared = bool(expected_states)
         if not expected_states:
             expected_state = _expected_precondition_state(case)
             expected_states = {expected_state} if expected_state is not None else set()
         if not expected_states or actual_state is None or actual_state in expected_states:
             continue
+        diagnostic_code = (
+            "authoring_stage_inventory_state_mismatch"
+            if precondition_declared
+            else "authoring_stage_inventory_state_mismatch_inferred"
+        )
         diagnostics.append(
             authoring_diagnostic(
-                "authoring_stage_inventory_state_mismatch",
+                diagnostic_code,
                 "Workflow setup state derived from operation-inventory.yaml does not satisfy the case precondition.",
+                severity=DiagnosticSeverity.ERROR if precondition_declared else DiagnosticSeverity.WARNING,
                 source_ref=case_ref,
                 details={
                     "expected_state": _single_or_sorted_state(expected_states),
                     "actual_state": actual_state,
+                    "precondition_declared": precondition_declared,
                     "route_entity": route_entity,
                     "route_path": authored_route_path,
                     "route_shape": route_key[1],

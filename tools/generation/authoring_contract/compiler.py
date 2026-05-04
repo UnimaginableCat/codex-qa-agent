@@ -13,17 +13,17 @@ from tools.generation.domain.models import (
     PlannedWorkflowStep,
 )
 
-from .diagnostics import authoring_diagnostic, build_authoring_message, derive_authoring_status
-from .case_diagnostics import (
-    _boundary_case_diagnostics,
-    _db_string_placeholder_quoting_diagnostics,
-    _env_backed_identity_guid_diagnostics,
-    _normalized_email_expectation_diagnostics,
-    _request_constraint_diagnostics,
-    _visibility_claim_diagnostics,
+from .case_diagnostics.boundary import _boundary_case_diagnostics
+from .case_diagnostics.identity import _env_backed_identity_guid_diagnostics
+from .case_diagnostics.lifecycle import (
     _workflow_same_state_contract_warning,
     _workflow_setup_state_mismatch_diagnostics,
 )
+from .case_diagnostics.db_expectations import _db_string_placeholder_quoting_diagnostics
+from .case_diagnostics.email import _normalized_email_expectation_diagnostics
+from .case_diagnostics.request_constraints import _request_constraint_diagnostics
+from .case_diagnostics.visibility import _visibility_claim_diagnostics
+from .diagnostics import authoring_diagnostic, build_authoring_message, derive_authoring_status
 from .helpers import (
     _VARIABLE_NAME_PATTERN,
     _api_expected_outcomes,
@@ -389,7 +389,7 @@ class AuthoringPlanCompiler:
                         details={"case_index": index, "kind": kind},
                     )
                 )
-        diagnostics.extend(_boundary_case_diagnostics(case, case_ref, index=index))
+        diagnostics.extend(_boundary_case_diagnostics(authoring_plan, case, case_ref, index=index))
         diagnostics.extend(_visibility_claim_diagnostics(authoring_plan, case, case_ref, index=index))
 
         if _requires_persistence(case.state_change) and (

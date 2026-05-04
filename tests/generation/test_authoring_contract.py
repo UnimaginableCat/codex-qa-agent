@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.common.statuses import StepStatus
 from tools.generation.authoring_contract import AuthoringPlanCompiler
+from tools.generation.domain.models import DiagnosticSeverity
 from tools.generation.authoring_contract.models import (
     AuthoringCase,
     AuthoringDefaults,
@@ -1380,7 +1381,7 @@ cases:
         self.assertEqual(compiled_case.db_verification.params["run_suffix"], "{{run_suffix}}")
         self.assertEqual(compiled_case.db_verification.params["email_suffix"], "{{email_suffix}}")
 
-    def test_compile_blocks_string_too_long_case_when_body_does_not_exceed_stated_boundary(self) -> None:
+    def test_compile_warns_string_too_long_case_when_body_does_not_exceed_stated_boundary(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="users-plan",
@@ -1405,13 +1406,49 @@ cases:
 
         result = AuthoringPlanCompiler().compile(plan)
 
-        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertEqual(result.status, StepStatus.PASS)
         mismatch_diagnostics = [
             diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_case_boundary_mismatch"
         ]
         self.assertEqual(len(mismatch_diagnostics), 1)
+        self.assertEqual(mismatch_diagnostics[0].severity, DiagnosticSeverity.WARNING)
         self.assertEqual(mismatch_diagnostics[0].details["threshold"], 255)
         self.assertEqual(mismatch_diagnostics[0].details["actual_max_length"], 255)
+
+    def test_compile_blocks_boundary_mismatch_when_strict_contract_is_enabled(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="users-plan",
+            project="code/demo",
+            title="Users API",
+            goal="Cover users API.",
+            scope=AuthoringScope(surface="users-controller"),
+            metadata={"contracts": {"boundary": {"require_literal_boundary_match": True}}},
+            cases=[
+                AuthoringCase(
+                    id="update-user-name-too-long",
+                    kind="api",
+                    objective="Reject tenant names longer than 255 characters.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="PATCH", path="/users/1"),
+                        body={"name": "A" * 255},
+                    ),
+                    oracle=AuthoringOracle(status_code=400),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        mismatch = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_case_boundary_contract_mismatch"
+        )
+        self.assertEqual(mismatch.severity, DiagnosticSeverity.ERROR)
+        self.assertEqual(mismatch.details["threshold"], 255)
 
     def test_compile_allows_string_too_long_case_when_body_exceeds_stated_boundary(self) -> None:
         plan = AuthoringPlan(
@@ -1441,7 +1478,7 @@ cases:
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertFalse(any(diagnostic.code == "authoring_case_boundary_mismatch" for diagnostic in result.diagnostics))
 
-    def test_compile_blocks_numeric_greater_than_case_when_param_does_not_exceed_threshold(self) -> None:
+    def test_compile_warns_numeric_greater_than_case_when_param_does_not_exceed_threshold(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="users-plan",
@@ -1466,8 +1503,9 @@ cases:
 
         result = AuthoringPlanCompiler().compile(plan)
 
-        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertEqual(result.status, StepStatus.PASS)
         mismatch = next(diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_case_boundary_mismatch")
+        self.assertEqual(mismatch.severity, DiagnosticSeverity.WARNING)
         self.assertEqual(mismatch.details["rule"], "greater_than")
         self.assertEqual(mismatch.details["field"], "limit")
         self.assertEqual(mismatch.details["threshold"], 100)
@@ -1501,7 +1539,7 @@ cases:
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertFalse(any(diagnostic.code == "authoring_case_boundary_mismatch" for diagnostic in result.diagnostics))
 
-    def test_compile_blocks_negative_offset_case_when_param_is_not_negative(self) -> None:
+    def test_compile_warns_negative_offset_case_when_param_is_not_negative(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="users-plan",
@@ -1526,8 +1564,9 @@ cases:
 
         result = AuthoringPlanCompiler().compile(plan)
 
-        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertEqual(result.status, StepStatus.PASS)
         mismatch = next(diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_case_boundary_mismatch")
+        self.assertEqual(mismatch.severity, DiagnosticSeverity.WARNING)
         self.assertEqual(mismatch.details["rule"], "negative")
         self.assertEqual(mismatch.details["field"], "offset")
         self.assertEqual(mismatch.details["actual_values"], [0])
@@ -1560,7 +1599,7 @@ cases:
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertFalse(any(diagnostic.code == "authoring_case_boundary_mismatch" for diagnostic in result.diagnostics))
 
-    def test_compile_blocks_zero_limit_case_when_param_is_not_zero(self) -> None:
+    def test_compile_warns_zero_limit_case_when_param_is_not_zero(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="users-plan",
@@ -1585,8 +1624,9 @@ cases:
 
         result = AuthoringPlanCompiler().compile(plan)
 
-        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertEqual(result.status, StepStatus.PASS)
         mismatch = next(diagnostic for diagnostic in result.diagnostics if diagnostic.code == "authoring_case_boundary_mismatch")
+        self.assertEqual(mismatch.severity, DiagnosticSeverity.WARNING)
         self.assertEqual(mismatch.details["rule"], "zero")
         self.assertEqual(mismatch.details["field"], "limit")
         self.assertEqual(mismatch.details["actual_values"], [1])
@@ -2509,7 +2549,7 @@ cases:
             {diagnostic.code for diagnostic in result.diagnostics},
         )
 
-    def test_compile_file_blocks_when_same_state_lifecycle_contract_is_missing_from_inventory(self) -> None:
+    def test_compile_file_warns_when_same_state_lifecycle_contract_is_missing_from_inventory(self) -> None:
         with TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0004"
             bundle_dir.mkdir(parents=True)
@@ -2534,6 +2574,8 @@ entity_operations:
   - entity: user
     operation: create
     effect_state: ACTIVE
+    captures:
+      - response.json.id -> user_id
   - entity: user
     operation: archive
     effect_state: ARCHIVED
@@ -2563,6 +2605,105 @@ entities:
         route:
           method: POST
           path: /users
+        captures:
+          - response.json.id -> user_id
+      archive:
+        route:
+          method: POST
+          path: /users/{{user_id}}/archive
+cases:
+  - id: archive-archived-user
+    kind: workflow
+    title: Reject archiving archived user
+    objective: Reject archiving archived user.
+    state_change: none
+    setup:
+      - use_entity: user
+        operation: create
+      - use_entity: user
+        operation: archive
+    execute:
+      route:
+        method: POST
+        path: /users/{{user_id}}/archive
+    oracle:
+      status_code: 400
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_stage_inventory_same_state_behavior_unconfirmed"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].severity, DiagnosticSeverity.WARNING)
+        self.assertIn("same_state_behavior", diagnostics[0].details["missing_fields"])
+        self.assertIn("same_state_status", diagnostics[0].details["missing_fields"])
+
+    def test_compile_file_blocks_missing_same_state_lifecycle_contract_when_required(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0012"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+    states: [ACTIVE, SUSPENDED, ARCHIVED]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+surface: users-controller
+entity_operations:
+  - entity: user
+    operation: create
+    effect_state: ACTIVE
+    captures:
+      - response.json.id -> user_id
+  - entity: user
+    operation: archive
+    effect_state: ARCHIVED
+routes:
+  - method: POST
+    path: /users/{{user_id}}/archive
+    success_status: 200
+    failure_statuses: [400, 404]
+    same_state_contract_required: true
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-plan
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      create:
+        route:
+          method: POST
+          path: /users
+        captures:
+          - response.json.id -> user_id
       archive:
         route:
           method: POST
@@ -2594,9 +2735,10 @@ cases:
         diagnostics = [
             diagnostic
             for diagnostic in result.diagnostics
-            if diagnostic.code == "authoring_stage_inventory_same_state_behavior_missing"
+            if diagnostic.code == "authoring_stage_inventory_same_state_behavior_required"
         ]
         self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].severity, DiagnosticSeverity.ERROR)
         self.assertIn("same_state_behavior", diagnostics[0].details["missing_fields"])
         self.assertIn("same_state_status", diagnostics[0].details["missing_fields"])
 
@@ -2625,6 +2767,8 @@ entity_operations:
   - entity: user
     operation: create
     effect_state: ACTIVE
+    captures:
+      - response.json.id -> user_id
   - entity: user
     operation: archive
     effect_state: ARCHIVED
@@ -2657,6 +2801,8 @@ entities:
         route:
           method: POST
           path: /users
+        captures:
+          - response.json.id -> user_id
       archive:
         route:
           method: POST

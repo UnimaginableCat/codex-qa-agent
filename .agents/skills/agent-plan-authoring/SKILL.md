@@ -112,7 +112,7 @@ start inside the authoring branch rather than being classified first.
 - Prefer `defaults.headers` plus env-backed variables for custom tokens such as `X-Leadflow-Internal-Token`; do not encode custom header semantics as fake auth types.
 - For controller or endpoint full-coverage plans, prefer API and workflow cases plus persisted-state DB verification inside those cases. For successful `POST` routes that are intentionally read-only, such as export/download/search commands, set `state_change: read_only` and do not add fake DB checks that only prove the fixture exists.
 - For visibility or masking cases, assert the actual field behavior when the response is JSON, for example `response \`cost_price\` = \`null\``. If the runner cannot inspect the relevant binary/content surface, keep that as an open question or narrow the objective to a binary response smoke check.
-- Treat heuristic diagnostics as review signals unless a plan or inventory explicitly enables a strict contract, for example `metadata.contracts.identity.env_backed_role_identity: disallow`, `metadata.contracts.coverage.visibility_claims_require_field_assertions: true`, or `metadata.identity_field_policy.enforcement: error`.
+- Treat heuristic diagnostics as review signals unless a plan or inventory explicitly enables a strict contract, for example `metadata.contracts.identity.env_backed_role_identity: disallow`, `metadata.contracts.coverage.visibility_claims_require_field_assertions: true`, `metadata.contracts.boundary.require_literal_boundary_match: true`, `operation-inventory.yaml` route `same_state_contract_required: true`, or `metadata.identity_field_policy.enforcement: error`.
 - For list/filter cases that create data in setup, assert that the created entity appears in the response when runner-supported DSL can express it, for example `array contains item with id = {{user_id}}`; do not stop at `response JSON is an array` when entity membership is the behavior under test.
 - For negative validation cases, isolate one invalid field at a time. Keep other required fields valid so a `400` proves the intended validator rather than a different missing-field failure.
 - For auth negative cases, do not mix invalid credentials with missing resources. Prefer a collection/list endpoint or a previously created entity so `401` is attributable to auth, not resource lookup order.
@@ -188,9 +188,9 @@ In managed bundles, validation is now inventory-backed rather than inventory-adj
 - `authoring-plan.yaml` entities must match `entity-inventory.yaml`
 - setup and persisted-state operations must match `operation-inventory.yaml`
 - case routes and HTTP status codes must match `operation-inventory.yaml`
-- workflow setup state must satisfy the staged precondition for the route
+- workflow setup state must satisfy the staged precondition for the route; inferred precondition mismatches are warnings, while explicit `precondition_state` mismatches remain blocking contract failures
 - when a request body needs a target member/user GUID, make the case a workflow and capture that GUID in a setup API/DB step instead of adding another env-backed `*_MEMBER_GUID`
-- same-state lifecycle cases such as `archive archived`, `activate active`, or `suspend suspended` must be backed by explicit staged route semantics instead of inferred rejection assumptions
+- same-state lifecycle cases such as `archive archived`, `activate active`, or `suspend suspended` should be backed by explicit staged route semantics instead of inferred rejection assumptions; missing semantics warn by default and block only when the route declares `same_state_contract_required: true`
 - route templates in `operation-inventory.yaml` must use runner placeholders such as `{{user_id}}`; do not use framework placeholders like `{userId}` in staged executable routes
 
 After any edit to `operation-inventory.yaml` after `--sync-authoring-plan`, rerun:

@@ -149,7 +149,7 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
    - effect states
    - route to success/failure HTTP status expectations
    - lifecycle route target state
-   - same-state lifecycle behavior, status, and evidence when reissuing the same command matters
+   - same-state lifecycle behavior, status, and evidence when reissuing the same command matters; set route `same_state_contract_required: true` only when missing same-state semantics should block authoring
    - DB verification templates
    - keep `id_field` as the entity-owned canonical identity; for permission override/natural-key rows, put actor/member/price-list variables in `key_fields`
    - use `metadata.identity_field_policy` only when the default identity-field lint does not fit the project; prefer `allow_id_fields` for documented exceptions and `suspicious_id_field_patterns` for project-specific actor/relationship identifiers; set `enforcement: error` only for an explicit strict contract
@@ -160,8 +160,9 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
 4. write `authoring-plan.yaml`
    - cases should reference the first two inventories instead of inventing lifecycle and status assumptions ad hoc
    - when a request body needs a target member/user GUID, make the case a workflow and capture that GUID in a setup API/DB step instead of adding another env-backed `*_MEMBER_GUID`
-   - if an objective says masking, visibility, or leak prevention, assert the relevant JSON field or add an executable content check; otherwise narrow the objective to a smoke check
-   - same-state lifecycle cases such as `archive archived`, `activate active`, and `suspend suspended` should not be authored until the route inventory explicitly says whether they reject or return an idempotent success, with a code/test evidence reference
+   - if an objective says masking, visibility, or leak prevention, assert the relevant JSON field or add an executable content check; otherwise narrow the objective to a smoke check. This is a warning by default; use `metadata.contracts.coverage.visibility_claims_require_field_assertions: true` only for a strict gate
+   - boundary prose such as "longer than 255", "greater than 100", "negative offset", or "zero limit" is linted against authored literals as a warning by default; use `metadata.contracts.boundary.require_literal_boundary_match: true` only when this prose-to-literal check should block
+   - same-state lifecycle cases such as `archive archived`, `activate active`, and `suspend suspended` should not be authored until the route inventory explicitly says whether they reject or return an idempotent success, with a code/test evidence reference. Missing semantics warn by default; route `same_state_contract_required: true` makes the inventory contract mandatory
    - idempotent same-state success cases must verify the second call's 2xx response and persisted target state after the repeated call
    - then validate this file before the bundle gate
 

@@ -79,6 +79,14 @@ For binary/download endpoints such as PDF or Excel export, assert `HTTP 200` plu
 JSON object or array. A binary smoke assertion does not prove masking or leak prevention; keep that
 claim out of the objective unless an executable content inspection is authored.
 
+Boundary and lifecycle prose checks are also policy-driven. Objective text such as "longer than
+255", "greater than 100", "negative offset", or "zero limit" is linted against authored literals as
+a warning by default; set `metadata.contracts.boundary.require_literal_boundary_match: true` only
+when that prose-to-request match is a strict authoring contract. Same-state lifecycle inference is a
+warning when route semantics are missing; set route `same_state_contract_required: true` in
+`operation-inventory.yaml` when missing `target_state`, `same_state_behavior`, or
+`same_state_status` should block.
+
 `entities.<entity>.id_field` is now executable authoring contract too. It names the canonical entity
 identity variable used across setup chains and persisted-state templates, for example `user_id`.
 For natural-key entities, declare `key_fields` in `entity-inventory.yaml`; synced authoring plans
