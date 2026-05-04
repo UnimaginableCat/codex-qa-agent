@@ -152,6 +152,166 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(compiled_case.metadata["default_actor"], "partner")
         self.assertNotIn("Authorization", compiled_case.request_headers)
 
+    def test_validate_warns_on_env_backed_role_identity_guid_variables(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="basic",
+                actor="founder",
+                scenario_variables=[
+                    "price_list_id = env:PRICE_LIST_ID",
+                    "company_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                ],
+            ),
+            cases=[
+                AuthoringCase(
+                    id="grant-partner-edit",
+                    kind="api",
+                    objective="Grant partner edit permission.",
+                    state_change="none",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/api/price_list/{{price_list_id}}/permissions/update/"),
+                        body={
+                            "partners": [
+                                {"company_member_guid": "{{company_member_guid}}", "can_edit": True},
+                            ]
+                        },
+                    ),
+                    oracle=AuthoringOracle(status_code=403),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        warnings = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_env_backed_role_identity_guid"
+        ]
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].details["variable"], "company_member_guid")
+        self.assertEqual(warnings[0].details["env_name"], "PRICE_LIST_PARTNER_MEMBER_GUID")
+
+    def test_identity_resolution_policy_can_allow_env_backed_guid_variables(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "company_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                ],
+            ),
+            cases=[
+                AuthoringCase(
+                    id="read-permissions",
+                    kind="api",
+                    objective="Read permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/permissions")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+            metadata={
+                "identity_resolution": {
+                    "allow_env_identity_variables": ["company_member_guid"],
+                }
+            },
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(diagnostic.code == "authoring_env_backed_role_identity_guid" for diagnostic in result.diagnostics)
+        )
+
+    def test_identity_resolution_policy_supports_custom_discouraged_patterns(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "target_guid = env:PRICE_LIST_TARGET_GUID",
+                ],
+            ),
+            cases=[
+                AuthoringCase(
+                    id="read-permissions",
+                    kind="api",
+                    objective="Read permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/permissions")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+            metadata={
+                "identity_resolution": {
+                    "disable_default_env_identity_patterns": True,
+                    "env_identity_name_patterns": [r"target_guid$"],
+                }
+            },
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        warnings = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_env_backed_role_identity_guid"
+        ]
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].details["policy_source"], "metadata.identity_resolution.env_identity_name_patterns")
+
+    def test_identity_resolution_policy_can_disable_default_guid_patterns(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "company_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                ],
+            ),
+            cases=[
+                AuthoringCase(
+                    id="read-permissions",
+                    kind="api",
+                    objective="Read permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/permissions")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+            metadata={"identity_resolution": {"disable_default_env_identity_patterns": True}},
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(diagnostic.code == "authoring_env_backed_role_identity_guid" for diagnostic in result.diagnostics)
+        )
+
     def test_compile_merges_default_headers_into_setup_and_case_requests(self) -> None:
         plan = AuthoringPlan(
             version=1,

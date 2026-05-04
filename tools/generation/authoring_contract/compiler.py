@@ -17,6 +17,7 @@ from .diagnostics import authoring_diagnostic, build_authoring_message, derive_a
 from .case_diagnostics import (
     _boundary_case_diagnostics,
     _db_string_placeholder_quoting_diagnostics,
+    _env_backed_identity_guid_diagnostics,
     _normalized_email_expectation_diagnostics,
     _request_constraint_diagnostics,
     _workflow_same_state_contract_warning,
@@ -242,6 +243,7 @@ class AuthoringPlanCompiler:
                     source_ref=source_ref,
                 )
             )
+        diagnostics.extend(_env_backed_identity_guid_diagnostics(authoring_plan, source_ref))
         for entity_name, entity_spec in authoring_plan.entities.items():
             normalized_id_field = entity_spec.id_field.strip()
             if normalized_id_field and not _VARIABLE_NAME_PATTERN.fullmatch(normalized_id_field):

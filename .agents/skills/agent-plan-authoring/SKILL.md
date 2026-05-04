@@ -101,6 +101,8 @@ start inside the authoring branch rather than being classified first.
 - For basic auth, use `defaults.auth: basic` plus actor-scoped env profiles such as `API_AUTH_TYPE__FOUNDER=basic`, `API_USERNAME__FOUNDER`, and `API_PASSWORD__FOUNDER`. Do not author `Authorization: Bearer {{...}}` headers or `*_token` variables for projects that authenticate with basic auth.
 - When cases need different role credentials, set `metadata.default_actor` per case, for example `founder`, `manager`, or `partner`; this renders a case-specific `actor = literal:<role>` variable and selects matching actor-scoped env keys.
 - For PDF, Excel, export, or other binary endpoints, use `response body exists` rather than `response JSON exists`; binary responses are not JSON assertions.
+- Do not require operators to hand-populate role identity GUIDs such as `PRICE_LIST_PARTNER_MEMBER_GUID`, `PRICE_LIST_CUSTOMER_MEMBER_GUID`, or `*_USER_GUID` when the scenario already has actor credentials. Prefer a workflow setup step that discovers the GUID through a permissions API response or read-only DB lookup and captures it into `company_member_guid` or `user_guid`. Env should hold credentials and stable fixture roots such as `company_guid` or `price_list_id`, not every user's internal GUID.
+- If a project really needs env-backed identity GUIDs, document that in `metadata.identity_resolution` with `allow_env_identity_variables`, `stable_env_fixtures`, `discourage_env_identity`, `env_identity_name_patterns`, or `disable_default_env_identity_patterns`; do not rely on implicit naming assumptions.
 - Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
 - Keep variable definitions in first-class `scenario_variables` fields. Do not hide them under `metadata`.
 - In YAML, quote the whole `scenario_variables` entry and write source prefixes without a space after the colon:
@@ -184,6 +186,7 @@ In managed bundles, validation is now inventory-backed rather than inventory-adj
 - setup and persisted-state operations must match `operation-inventory.yaml`
 - case routes and HTTP status codes must match `operation-inventory.yaml`
 - workflow setup state must satisfy the staged precondition for the route
+- when a request body needs a target member/user GUID, make the case a workflow and capture that GUID in a setup API/DB step instead of adding another env-backed `*_MEMBER_GUID`
 - same-state lifecycle cases such as `archive archived`, `activate active`, or `suspend suspended` must be backed by explicit staged route semantics instead of inferred rejection assumptions
 - route templates in `operation-inventory.yaml` must use runner placeholders such as `{{user_id}}`; do not use framework placeholders like `{userId}` in staged executable routes
 
