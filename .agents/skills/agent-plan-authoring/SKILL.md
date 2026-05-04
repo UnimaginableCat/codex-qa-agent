@@ -98,6 +98,8 @@ start inside the authoring branch rather than being classified first.
 - Use `defaults.environment` when one env file should flow into rendered scenario `## Environment`.
 - Use `defaults.actor` when a stable execution actor should flow into rendered scenario variables as `actor = literal:<value>` and select actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
 - Use `defaults.headers` for shared request headers that should be applied across authored API and workflow requests.
+- For basic auth, use `defaults.auth: basic` plus actor-scoped env profiles such as `API_AUTH_TYPE__FOUNDER=basic`, `API_USERNAME__FOUNDER`, and `API_PASSWORD__FOUNDER`. Do not author `Authorization: Bearer {{...}}` headers or `*_token` variables for projects that authenticate with basic auth.
+- When cases need different role credentials, set `metadata.default_actor` per case, for example `founder`, `manager`, or `partner`; this renders a case-specific `actor = literal:<role>` variable and selects matching actor-scoped env keys.
 - Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
 - Keep variable definitions in first-class `scenario_variables` fields. Do not hide them under `metadata`.
 - In YAML, quote the whole `scenario_variables` entry and write source prefixes without a space after the colon:
@@ -148,6 +150,7 @@ Use the scaffolded bundle in this order:
    - lifecycle route `same_state_behavior`, `same_state_status`, and `same_state_evidence` when the command can be invoked on an entity already in the target state
    - DB verification templates with SQL, params, and expected outcomes for every operation later used by `oracle.persisted_state`
    - DB verification `scoped_by` may be a single field or an explicit YAML array for composite natural keys; every scoped field must be present in `params`
+   - For natural-key entities, keep the real `id_field` and declare composite identity in entity `key_fields`; do not replace `id_field` with a convenient fixture variable just to satisfy persisted-state validation
 3. `--sync-authoring-plan`
    - after both inventories validate, synchronize `scope`, `entities`, reusable route operations, and DB verification templates into `authoring-plan.yaml`
    - this command does not invent final cases; it removes the need to repeat inventory facts by hand

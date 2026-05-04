@@ -253,6 +253,20 @@ class AuthoringPlanCompiler:
                         details={"entity": entity_name, "id_field": entity_spec.id_field},
                     )
                 )
+            invalid_key_fields = [
+                key_field
+                for key_field in entity_spec.key_fields
+                if not key_field.strip() or not _VARIABLE_NAME_PATTERN.fullmatch(key_field.strip())
+            ]
+            if invalid_key_fields:
+                diagnostics.append(
+                    authoring_diagnostic(
+                        "authoring_invalid_entity_key_field",
+                        "Entity key_fields must be machine-readable variable names such as user_id.",
+                        source_ref=entity_name,
+                        details={"entity": entity_name, "key_fields": invalid_key_fields},
+                    )
+                )
         seen_case_ids: dict[str, int] = {}
         for index, case in enumerate(authoring_plan.cases, start=1):
             normalized_case_id = case.id.strip()
@@ -478,11 +492,11 @@ class AuthoringPlanCompiler:
             authoring_plan=authoring_plan,
         )
         metadata = {
+            **_authoring_defaults_metadata(authoring_plan),
             **dict(case.metadata),
             "authoring_case_id": case.id,
             "authoring_kind": case.kind,
             "state_change": case.state_change,
-            **_authoring_defaults_metadata(authoring_plan),
         }
 
         if kind == "workflow":
@@ -724,16 +738,21 @@ class AuthoringPlanCompiler:
         placeholders = set(_extract_placeholders(operation.sql))
         placeholders.update(_extract_placeholders_from_value(operation.params))
         entity_id_field = entity_spec.id_field.strip()
-        if entity_id_field and entity_id_field not in placeholders:
+        entity_key_fields = [field_name.strip() for field_name in entity_spec.key_fields if field_name.strip()]
+        has_id_scope = bool(entity_id_field and entity_id_field in placeholders)
+        has_key_scope = bool(entity_key_fields and set(entity_key_fields).issubset(placeholders))
+        if entity_id_field and not has_id_scope and not has_key_scope:
             diagnostics.append(
                 authoring_diagnostic(
                     "authoring_persisted_state_id_field_missing",
-                    "Persisted-state template must reference the entity id_field so verification is scoped to the authored entity instance.",
+                    "Persisted-state template must reference the entity id_field or all declared key_fields so verification is scoped to the authored entity instance.",
                     source_ref=case_ref,
                     details={
                         "entity": entity_name,
                         "operation": operation_name,
                         "id_field": entity_id_field,
+                        "key_fields": entity_key_fields,
+                        "placeholders": sorted(placeholders),
                     },
                 )
             )

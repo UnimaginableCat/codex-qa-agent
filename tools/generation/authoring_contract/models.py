@@ -240,6 +240,7 @@ class AuthoringEntityOperation:
 @dataclass(slots=True)
 class AuthoringEntitySpec:
     id_field: str = ""
+    key_fields: list[str] = field(default_factory=list)
     operations: dict[str, AuthoringEntityOperation] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -259,8 +260,10 @@ class AuthoringEntitySpec:
             for name, value in operations_payload.items()
             if isinstance(value, dict)
         }
+        key_fields_payload = payload.get("key_fields")
         return cls(
             id_field=str(payload.get("id_field", "")),
+            key_fields=[str(item) for item in key_fields_payload] if isinstance(key_fields_payload, list) else [],
             operations=operations,
         )
 

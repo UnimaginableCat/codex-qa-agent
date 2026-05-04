@@ -120,6 +120,38 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(workflow_case.workflow_steps[0].auth_strategy, ["bearer"])
         self.assertEqual(workflow_case.workflow_steps[0].metadata["default_actor"], "api-client")
 
+    def test_compile_allows_case_actor_to_override_default_actor_for_basic_auth(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            cases=[
+                AuthoringCase(
+                    id="partner-permissions",
+                    kind="api",
+                    objective="Read permissions as partner.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/{{price_list_id}}")),
+                    oracle=AuthoringOracle(status_code=200),
+                    metadata={"default_actor": "partner"},
+                    scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        compiled_case = result.compiled_plan.planned_test_cases[0]
+        self.assertEqual(compiled_case.auth_strategy, ["basic"])
+        self.assertEqual(compiled_case.metadata["default_actor"], "partner")
+        self.assertNotIn("Authorization", compiled_case.request_headers)
+
     def test_compile_merges_default_headers_into_setup_and_case_requests(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -795,6 +827,121 @@ cases:
         self.assertEqual(result.status, StepStatus.BLOCKED)
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertIn("authoring_persisted_state_id_field_missing", codes)
+
+    def test_compile_allows_persisted_state_template_scoped_by_composite_key_fields(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permission overrides.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    id_field="price_list_permission_id",
+                    key_fields=["price_list_id", "partner_member_guid"],
+                    operations={
+                        "verify_partner_can_edit": AuthoringEntityOperation(
+                            sql=(
+                                "SELECT can_edit FROM price_list_permission "
+                                "WHERE price_list_id = :price_list_id "
+                                "AND partner_member_guid = :partner_member_guid"
+                            ),
+                            params={
+                                "price_list_id": "{{price_list_id}}",
+                                "partner_member_guid": "{{partner_member_guid}}",
+                            },
+                            expected_outcomes=["one row exists", "`can_edit` = `true`"],
+                        )
+                    },
+                )
+            },
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "price_list_id = env:PRICE_LIST_ID",
+                    "partner_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                ]
+            ),
+            cases=[
+                AuthoringCase(
+                    id="grant-partner-edit",
+                    kind="api",
+                    objective="Grant partner edit access.",
+                    state_change="update",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/permissions")
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="price_list_permission",
+                            operation="verify_partner_can_edit",
+                        ),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertNotIn("authoring_persisted_state_id_field_missing", codes)
+        assert result.compiled_plan is not None
+        self.assertIsNotNone(result.compiled_plan.planned_test_cases[0].db_verification)
+
+    def test_compile_blocks_persisted_state_template_missing_part_of_composite_key_fields(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permission overrides.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    id_field="price_list_permission_id",
+                    key_fields=["price_list_id", "partner_member_guid"],
+                    operations={
+                        "verify_partner_can_edit": AuthoringEntityOperation(
+                            sql="SELECT can_edit FROM price_list_permission WHERE price_list_id = :price_list_id",
+                            params={"price_list_id": "{{price_list_id}}"},
+                            expected_outcomes=["one row exists", "`can_edit` = `true`"],
+                        )
+                    },
+                )
+            },
+            defaults=AuthoringDefaults(scenario_variables=["price_list_id = env:PRICE_LIST_ID"]),
+            cases=[
+                AuthoringCase(
+                    id="grant-partner-edit",
+                    kind="api",
+                    objective="Grant partner edit access.",
+                    state_change="update",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/permissions")
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="price_list_permission",
+                            operation="verify_partner_can_edit",
+                        ),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_persisted_state_id_field_missing"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].details["key_fields"], ["price_list_id", "partner_member_guid"])
 
     def test_compile_blocks_persisted_state_template_mixing_id_and_entity_id_field(self) -> None:
         plan = AuthoringPlan(

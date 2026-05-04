@@ -38,6 +38,7 @@ def _sync_authoring_plan_from_inventories(
         existing_entity = existing_entities.get(entity_name, AuthoringEntitySpec())
         synced_entities[entity_name] = AuthoringEntitySpec(
             id_field=str(entity_item.get("id_field") or existing_entity.id_field or "").strip(),
+            key_fields=_string_list_from_payload(entity_item.get("key_fields"), fallback=existing_entity.key_fields),
             operations={},
         )
 

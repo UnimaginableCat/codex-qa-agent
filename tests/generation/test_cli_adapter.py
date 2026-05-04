@@ -713,6 +713,8 @@ surface: users-controller
 entities:
   - name: user
     id_field: user_id
+    key_fields:
+      - email
     normalized_fields: [email]
 auth_contract:
   actor: admin-api-client
@@ -771,6 +773,7 @@ db_verifications:
         self.assertIn("follow-up validation is still blocked", sync_payload["message"])
         synced_user = sync_payload["authoring_plan"]["entities"]["user"]
         self.assertEqual(synced_user["id_field"], "user_id")
+        self.assertEqual(synced_user["key_fields"], ["email"])
         create_operation = synced_user["operations"]["create_active"]
         self.assertEqual(create_operation["route"]["method"], "POST")
         self.assertEqual(create_operation["route"]["path"], "/users")
