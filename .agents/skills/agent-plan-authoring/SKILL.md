@@ -34,6 +34,12 @@ This skill does not own:
 
 Author `authoring-plan.yaml`, not full `agent-plan.json`.
 
+In this workspace, an authored "test plan" is a machine-readable staged generation bundle. Do not
+complete an authoring request by creating or updating a prose Markdown file such as
+`docs/*TEST_PLAN*.md`, even if the target project already has documents in that style, unless the
+user explicitly asks for documentation-only output. The normal output path is
+`artifacts/agent/generation/<run_id>/authoring-plan.yaml` with the staged inventories.
+
 Required top-level fields:
 
 - `version`
@@ -71,6 +77,7 @@ Default completion point:
 - `authoring-plan.yaml` exists or was updated
 - `entity-inventory.yaml` and `operation-inventory.yaml` were reviewed or updated when the bundle was scaffolded
 - when scaffolded from CLI, it lives under `artifacts/agent/generation/<run_id>/authoring-plan.yaml`
+- no project-local `docs/*.md` file is used as the primary deliverable unless the user explicitly requested a prose-only documentation artifact
 - `--validate-authoring-bundle --path artifacts/agent/generation/<run_id>` was run for managed bundles
 - `--validate-authoring-plan` may still be used as a local authoring check, but it is not the final staged handoff gate for managed bundles
 - authoring-level diagnostics were resolved or explicitly reported
@@ -310,6 +317,7 @@ If validation fails on expectation syntax, rewrite the authoring DSL itself. Do 
 # Guardrails
 
 - Do not write full `agent-plan.json` as the primary artifact.
+- Do not write Markdown documentation as the primary artifact for "generate/sоставь test plan" requests. If existing project docs appear to use Markdown test plans, treat them as source evidence only; still scaffold or update the staged authoring bundle and run its validation gate.
 - Do not perform render, review, promote, or scenario validation from this skill unless the user explicitly asks to continue into downstream work.
 - Do not compensate for missing templates, SQL, or capture targets by writing prose placeholders that the compiler must guess.
 - Do not treat a standalone schema `db-check` as part of the default controller-coverage recipe when promoted markdown scenarios are the expected downstream output.

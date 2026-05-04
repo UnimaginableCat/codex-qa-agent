@@ -83,6 +83,7 @@ Choose one primary branch first:
 2. Authoring branch
    Use when the request is about coverage decomposition, feature breakdown, controller CRUD coverage, workflow coverage design, or writing the compact authoring DSL.
    Primary skill: `agent-plan-authoring`
+   Output must be a staged authoring bundle under `artifacts/agent/generation/<run_id>/`, not a free-form Markdown document in the target project's `docs/` directory, unless the user explicitly asks for human documentation only.
 
 3. Downstream generation branch
    Use when the desired output is a compiled `agent-plan.json`, `NormalizedTestPlan`, rendered drafts, review output, promoted scenarios, or generation diagnostics from existing authored input.
@@ -124,6 +125,7 @@ Do not start with broad code analysis for a runnable scenario unless the user ex
 - Prefer `runner-execution` over manual API/DB replay when a runnable scenario exists.
 - Prefer `qa-generation-pipeline` when the request explicitly asks to carry generated coverage through to scenario execution.
 - Prefer `agent-plan-authoring` when the request is about decomposition, coverage design, or creating/filling the staged bundle under `artifacts/agent/generation/<run_id>/` with `entity-inventory.yaml`, `operation-inventory.yaml`, and `authoring-plan.yaml`.
+- Treat phrases such as "составь тест планы", "generate a test plan", "full coverage plan", or "покрытие" as generation authoring requests in this workspace. Do not satisfy them by writing `docs/*.md` or another prose-only artifact unless the user explicitly says the output should be documentation and should not enter the generation pipeline.
 - Prefer `test-plan-generation` when the request starts from an existing generation bundle and asks for compile, generate, render, review, promote, or validate.
 - Before routing an existing staged authoring bundle into compile or generate, require `--validate-authoring-bundle` as the final authoring gate.
 - Do not route broad coverage-authoring requests directly into `test-plan-generation`.
