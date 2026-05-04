@@ -52,6 +52,8 @@ CAPTURE_RULE_EXAMPLES = [
     "db.first_row.id -> persisted_id",
 ]
 MUTATING_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+MUTATING_STATE_CHANGES = {"create", "update", "delete", "mutate"}
+NON_MUTATING_STATE_CHANGES = {"none", "read_only", "readonly"}
 AGENT_PLAN_BLOCKING_CODES = {
     "agent_plan_missing",
     "agent_plan_missing_source_id",
@@ -971,6 +973,9 @@ def _validate_case_db_verification(
 
 
 def _workflow_requires_persisted_state_verification(case_input: AgentPlannedTestCaseInput) -> bool:
+    metadata_requirement = _metadata_persistence_requirement(case_input.metadata)
+    if metadata_requirement is False:
+        return False
     if not case_input.workflow_steps:
         return False
     case_level_success = _expectations_indicate_success(case_input.expected_outcomes)
@@ -988,12 +993,30 @@ def _workflow_requires_persisted_state_verification(case_input: AgentPlannedTest
 
 
 def _case_requires_persisted_state_verification(case_input: AgentPlannedTestCaseInput) -> bool:
+    metadata_requirement = _metadata_persistence_requirement(case_input.metadata)
+    if metadata_requirement is not None:
+        return metadata_requirement and _case_has_successful_mutating_route(case_input)
+    return _case_has_successful_mutating_route(case_input)
+
+
+def _case_has_successful_mutating_route(case_input: AgentPlannedTestCaseInput) -> bool:
     if case_input.kind.strip().lower() != "api" or case_input.route is None:
         return False
     method = case_input.route.http_method.strip().upper()
     if method not in MUTATING_HTTP_METHODS:
         return False
     return _expectations_indicate_success(case_input.expected_outcomes)
+
+
+def _metadata_persistence_requirement(metadata: dict[str, Any]) -> bool | None:
+    state_change = str((metadata or {}).get("state_change") or "").strip().lower()
+    if not state_change:
+        return None
+    if state_change in MUTATING_STATE_CHANGES:
+        return True
+    if state_change in NON_MUTATING_STATE_CHANGES:
+        return False
+    return None
 
 
 def _workflow_has_authored_db_step(case_input: AgentPlannedTestCaseInput) -> bool:

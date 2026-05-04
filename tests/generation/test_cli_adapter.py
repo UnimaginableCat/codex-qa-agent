@@ -328,6 +328,131 @@ entities:
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
         self.assertIn("adapter_entity_inventory_project_must_target_code_subdir", codes)
 
+    def test_validate_entity_inventory_warns_on_permission_id_field_using_member_guid(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entity_inventory_path = root / "entity-inventory.yaml"
+            entity_inventory_path.write_text(
+                """version: 1
+source_id: price-list-permissions
+project: code/demo
+surface: price-list-permissions
+entities:
+  - name: price_list_permission
+    id_field: partner_company_member_guid
+    key_fields: [price_list_id, partner_company_member_guid]
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-entity-inventory", "--entity-inventory-file", str(entity_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_entity_inventory_suspicious_identity_id_field", codes)
+        self.assertTrue(
+            any(
+                diagnostic["severity"] == "WARNING"
+                for diagnostic in payload["diagnostics"]
+                if diagnostic["code"] == "adapter_entity_inventory_suspicious_identity_id_field"
+            )
+        )
+
+    def test_validate_entity_inventory_blocks_suspicious_id_field_when_policy_is_strict(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entity_inventory_path = root / "entity-inventory.yaml"
+            entity_inventory_path.write_text(
+                """version: 1
+source_id: price-list-permissions
+project: code/demo
+surface: price-list-permissions
+entities:
+  - name: price_list_permission
+    id_field: partner_company_member_guid
+    key_fields: [price_list_id, partner_company_member_guid]
+metadata:
+  identity_field_policy:
+    enforcement: error
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-entity-inventory", "--entity-inventory-file", str(entity_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_entity_inventory_suspicious_identity_id_field_disallowed", codes)
+
+    def test_validate_entity_inventory_allows_policy_documented_identity_id_field(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entity_inventory_path = root / "entity-inventory.yaml"
+            entity_inventory_path.write_text(
+                """version: 1
+source_id: price-list-permissions
+project: code/demo
+surface: price-list-permissions
+entities:
+  - name: price_list_permission
+    id_field: partner_company_member_guid
+    key_fields: [price_list_id, partner_company_member_guid]
+metadata:
+  identity_field_policy:
+    allow_id_fields:
+      - price_list_permission.partner_company_member_guid
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-entity-inventory", "--entity-inventory-file", str(entity_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+
+    def test_validate_entity_inventory_uses_custom_identity_field_policy_patterns(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entity_inventory_path = root / "entity-inventory.yaml"
+            entity_inventory_path.write_text(
+                """version: 1
+source_id: approval-access
+project: code/demo
+surface: approval-access
+entities:
+  - name: approval_rule
+    id_field: actor_guid
+    key_fields: [resource_id, actor_guid]
+metadata:
+  identity_field_policy:
+    disable_default_suspicious_id_field_patterns: true
+    suspicious_id_field_patterns:
+      - "(?:^|_)actor_guid$"
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(["--validate-entity-inventory", "--entity-inventory-file", str(entity_inventory_path)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_entity_inventory_suspicious_identity_id_field", codes)
+
     def test_validate_operation_inventory_blocks_unknown_entity_reference(self) -> None:
         with TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0004"

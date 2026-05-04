@@ -13,12 +13,13 @@ def _diagnostic(
     code: str,
     message: str,
     path: Path,
+    severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
     details: dict[str, Any] | None = None,
 ) -> GenerationDiagnostic:
     return GenerationDiagnostic(
         code=code,
         message=message,
-        severity=DiagnosticSeverity.ERROR,
+        severity=severity,
         source_ref=str(path),
         details=details,
     )
