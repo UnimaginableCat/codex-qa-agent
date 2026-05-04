@@ -62,6 +62,10 @@ instead of authored `Authorization` headers. Role-specific cases can set `metada
 to values such as `founder` or `partner`; rendered scenarios then use `actor = literal:<role>` and
 runtime selects `API_AUTH_TYPE__<ROLE>`, `API_USERNAME__<ROLE>`, and `API_PASSWORD__<ROLE>`.
 
+For binary/download endpoints such as PDF or Excel export, assert `HTTP 200` plus
+`response body exists`. Do not assert `response JSON exists` unless the endpoint actually returns a
+JSON object or array.
+
 `entities.<entity>.id_field` is now executable authoring contract too. It names the canonical entity
 identity variable used across setup chains and persisted-state templates, for example `user_id`.
 For natural-key entities, declare `key_fields` in `entity-inventory.yaml`; synced authoring plans

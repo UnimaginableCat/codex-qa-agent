@@ -270,6 +270,47 @@ class ApiAuthTests(unittest.TestCase):
         self.assertEqual(env.auth_type.value, "bearer")
         self.assertEqual(env.api_bearer_token, "actor-token")
 
+    def test_role_actor_requires_actor_scoped_auth_type_to_prevent_base_fallback(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / "demo.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=https://api.example.local",
+                        "API_AUTH_TYPE=basic",
+                        "API_USERNAME=founder",
+                        "API_PASSWORD=secret",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValidationError, "API_AUTH_TYPE__PARTNER"):
+                ApiEnvLoader().load(env_path, actor="partner")
+
+    def test_generic_api_client_actor_can_fallback_to_base_auth_profile(self) -> None:
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / "demo.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=https://api.example.local",
+                        "API_AUTH_TYPE=basic",
+                        "API_USERNAME=api-client",
+                        "API_PASSWORD=secret",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            env = ApiEnvLoader().load(env_path, actor="api-client")
+
+        self.assertEqual(env.actor, "api-client")
+        self.assertEqual(env.auth_type.value, "basic")
+        self.assertEqual(env.api_username, "api-client")
+
     def test_api_request_runner_uses_step_actor_for_env_resolution(self) -> None:
         env_loader = _RecordingEnvLoader(
             EnvConfig.from_mapping({"API_BASE_URL": "https://api.example.local"}, actor="admin")

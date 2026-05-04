@@ -204,6 +204,9 @@ class ResponseData:
     http_status: int
     headers: dict[str, str]
     body: Any
+    content_length_bytes: int | None = None
+    body_content_type: str | None = None
+    body_is_binary: bool = False
 
 
 @dataclass(slots=True)
