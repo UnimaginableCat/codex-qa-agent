@@ -259,6 +259,9 @@ class ApiRequestService:
                 http_status=response.status_code,
                 headers=dict(response.headers),
                 body=self._parse_response_body(response),
+                content_length_bytes=self._response_content_length(response),
+                body_content_type=response.headers.get("Content-Type") or None,
+                body_is_binary=self._response_body_is_binary(response),
             )
             retry_reason = f"http_{response.status_code}"
             can_retry = (
@@ -524,10 +527,38 @@ class ApiRequestService:
 
     @staticmethod
     def _parse_response_body(response: requests.Response) -> Any:
+        content_type = response.headers.get("Content-Type", "").lower()
+        if ApiRequestService._response_body_is_binary(response):
+            raw_content = ApiRequestService._response_content_bytes(response)
+            return (
+                "<non-text response body omitted: "
+                f"content-type={response.headers.get('Content-Type', '') or 'unknown'}, "
+                f"bytes={len(raw_content)}>"
+            )
         try:
             return response.json()
         except ValueError:
             return response.text
+
+    @staticmethod
+    def _response_body_is_binary(response: requests.Response) -> bool:
+        content_type = response.headers.get("Content-Type", "").lower()
+        return bool(content_type and "json" not in content_type and not content_type.startswith("text/"))
+
+    @staticmethod
+    def _response_content_bytes(response: requests.Response) -> bytes:
+        raw_content = getattr(response, "content", getattr(response, "_content", b""))
+        if isinstance(raw_content, bytes):
+            return raw_content
+        if isinstance(raw_content, bytearray):
+            return bytes(raw_content)
+        if isinstance(raw_content, str):
+            return raw_content.encode("utf-8")
+        return b""
+
+    @staticmethod
+    def _response_content_length(response: requests.Response) -> int:
+        return len(ApiRequestService._response_content_bytes(response))
 
 
 def build_request_debug(prepared_request: PreparedRequest) -> dict[str, Any]:

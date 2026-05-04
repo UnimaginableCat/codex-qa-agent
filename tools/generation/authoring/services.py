@@ -32,6 +32,7 @@ API_EXPECTATION_EXAMPLES = [
     "HTTP 200",
     "HTTP 200 or HTTP 201",
     "response JSON exists",
+    "response body exists",
     "response JSON is an array",
     "response contains field `id`",
     "response `status` = `AUTHENTICATED`",
@@ -1367,7 +1368,7 @@ def _expectation_contract_hint(kind: str) -> str:
         return "Use deterministic DB expectation syntax like 'one row exists', 'no rows exist', or '`status` = `ACTIVE`'."
     return (
         "Use deterministic API expectation syntax like 'HTTP 404', 'response JSON exists', "
-        "or 'response `status` = `AUTHENTICATED`'."
+        "'response body exists', or 'response `status` = `AUTHENTICATED`'."
     )
 
 

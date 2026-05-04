@@ -18,6 +18,7 @@ class ApiEnvLoader:
     def load(self, env_path: Path, actor: str | None = None) -> EnvConfig:
         values = self._dotenv_loader.load(env_path)
         actor_suffix = self._actor_suffix(actor)
+        self._validate_actor_auth_scope(values, actor, actor_suffix)
         selected_base_url_key = self._select_key(values, "API_BASE_URL", actor_suffix)
         scoped_values = self._overlay_actor_values(values, actor_suffix)
         raw_base_url = self._read_raw_env_value(env_path, selected_base_url_key)
@@ -61,6 +62,42 @@ class ApiEnvLoader:
         return base_key
 
     @staticmethod
+    def _validate_actor_auth_scope(
+        values: dict[str, str | None],
+        actor: str | None,
+        actor_suffix: str | None,
+    ) -> None:
+        if not actor_suffix or _is_generic_actor(actor):
+            return
+        auth_key = f"API_AUTH_TYPE__{actor_suffix}"
+        auth_type = _normalize_env_value(values.get(auth_key))
+        if not auth_type:
+            raise ValidationError(
+                f"Actor '{actor}' requires actor-scoped API auth configuration: set {auth_key} "
+                "to none, bearer, or basic to avoid falling back to base credentials."
+            )
+
+        normalized_auth_type = auth_type.lower()
+        if normalized_auth_type == "none":
+            return
+        if normalized_auth_type == "bearer":
+            _require_actor_scoped_value(values, actor, actor_suffix, ("API_BEARER_TOKEN",))
+            return
+        if normalized_auth_type == "basic":
+            _require_actor_scoped_value(
+                values,
+                actor,
+                actor_suffix,
+                ("API_USERNAME", "API_BASIC_USERNAME", "BASIC_AUTH_USERNAME"),
+            )
+            _require_actor_scoped_value(
+                values,
+                actor,
+                actor_suffix,
+                ("API_PASSWORD", "API_BASIC_PASSWORD", "BASIC_AUTH_PASSWORD"),
+            )
+
+    @staticmethod
     def _actor_suffix(actor: str | None) -> str | None:
         if actor is None:
             return None
@@ -81,6 +118,37 @@ class ApiEnvLoader:
             if stripped_line.startswith(prefix):
                 return stripped_line[len(prefix):]
         return None
+
+
+def _is_generic_actor(actor: str | None) -> bool:
+    normalized = "".join(char.lower() if char.isalnum() else "-" for char in str(actor or "").strip())
+    normalized = "-".join(part for part in normalized.split("-") if part)
+    return normalized in {"", "api-client", "client", "default"}
+
+
+def _require_actor_scoped_value(
+    values: dict[str, str | None],
+    actor: str | None,
+    actor_suffix: str,
+    base_keys: tuple[str, ...],
+) -> None:
+    scoped_keys = tuple(f"{base_key}__{actor_suffix}" for base_key in base_keys)
+    if any(_normalize_env_value(values.get(scoped_key)) is not None for scoped_key in scoped_keys):
+        return
+    raise ValidationError(
+        f"Actor '{actor}' requires actor-scoped API credential configuration: set one of "
+        f"{', '.join(scoped_keys)} to avoid falling back to base credentials."
+    )
+
+
+def _normalize_env_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+        normalized = normalized[1:-1].strip()
+    return normalized or None
 
 
 class RequestStepLoader:

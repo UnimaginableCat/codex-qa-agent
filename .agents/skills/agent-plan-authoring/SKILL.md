@@ -100,6 +100,7 @@ start inside the authoring branch rather than being classified first.
 - Use `defaults.headers` for shared request headers that should be applied across authored API and workflow requests.
 - For basic auth, use `defaults.auth: basic` plus actor-scoped env profiles such as `API_AUTH_TYPE__FOUNDER=basic`, `API_USERNAME__FOUNDER`, and `API_PASSWORD__FOUNDER`. Do not author `Authorization: Bearer {{...}}` headers or `*_token` variables for projects that authenticate with basic auth.
 - When cases need different role credentials, set `metadata.default_actor` per case, for example `founder`, `manager`, or `partner`; this renders a case-specific `actor = literal:<role>` variable and selects matching actor-scoped env keys.
+- For PDF, Excel, export, or other binary endpoints, use `response body exists` rather than `response JSON exists`; binary responses are not JSON assertions.
 - Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
 - Keep variable definitions in first-class `scenario_variables` fields. Do not hide them under `metadata`.
 - In YAML, quote the whole `scenario_variables` entry and write source prefixes without a space after the colon:
@@ -227,6 +228,7 @@ Before writing a broad full-coverage plan, make the first `1-2` cases compile-sa
 - API expectations must use supported patterns such as:
   - `HTTP 200`
   - `response JSON exists`
+  - `response body exists`
   - `response JSON is an array`
   - `response contains field \`id\``
   - `response \`status\` = \`ACTIVE\``
