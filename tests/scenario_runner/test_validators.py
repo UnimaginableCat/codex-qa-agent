@@ -53,6 +53,27 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
 
+    def test_api_response_body_exists_supports_binary_or_text_bodies(self) -> None:
+        results = self.validator.validate(
+            self._api_step(["response body exists"]),
+            {"response": {"http_status": 200, "body": "<non-text response body omitted: content-type=application/pdf>"}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.PASS)
+
+    def test_api_response_body_exists_fails_for_empty_body(self) -> None:
+        results = self.validator.validate(
+            self._api_step(["response body exists"]),
+            {"response": {"http_status": 204, "body": ""}},
+        )
+
+        self.assertEqual(results[0].status, StepStatus.FAIL)
+
+    def test_api_response_body_exists_is_supported_by_contract_inspection(self) -> None:
+        diagnostics = self.validator.inspect_contract(self._api_step(["response body exists"]))
+
+        self.assertTrue(diagnostics[0].supported)
+
     def test_api_response_length_expectations_support_nested_bracket_paths(self) -> None:
         payload = self._category_create_payload()
 

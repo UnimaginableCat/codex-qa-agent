@@ -144,6 +144,11 @@ class ScenarioStepValidator:
             detail = f"Actual response body type: {type(response_body).__name__}"
             return self._result(expectation, passed, detail)
 
+        if normalized_expectation == "response body exists":
+            passed = response_body is not None and response_body != ""
+            detail = f"Actual response body type: {type(response_body).__name__}"
+            return self._result(expectation, passed, detail)
+
         if normalized_expectation == "response json is an array":
             passed = isinstance(response_body, list)
             detail = f"Actual response body type: {type(response_body).__name__}"
@@ -330,6 +335,7 @@ class ScenarioStepValidator:
             (
                 _HTTP_EXPECTATION_RE.fullmatch(expectation),
                 normalized_expectation == "response json exists",
+                normalized_expectation == "response body exists",
                 normalized_expectation == "response json is an array",
                 _RESPONSE_CONTAINS_FIELD_RE.fullmatch(expectation),
                 _RESPONSE_LENGTH_RE.fullmatch(expectation),

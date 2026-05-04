@@ -524,6 +524,14 @@ class ApiRequestService:
 
     @staticmethod
     def _parse_response_body(response: requests.Response) -> Any:
+        content_type = response.headers.get("Content-Type", "").lower()
+        if content_type and "json" not in content_type and not content_type.startswith("text/"):
+            raw_content = getattr(response, "content", getattr(response, "_content", b""))
+            return (
+                "<non-text response body omitted: "
+                f"content-type={response.headers.get('Content-Type', '') or 'unknown'}, "
+                f"bytes={len(raw_content)}>"
+            )
         try:
             return response.json()
         except ValueError:

@@ -135,6 +135,21 @@ class ApiConnectivityClassificationTests(unittest.TestCase):
         self.assertEqual(result.details["classification"], "service_unavailable")
         self.assertEqual(result.details["response"].http_status, 503)
 
+    def test_binary_response_body_is_omitted_but_result_stays_structured(self) -> None:
+        result = ApiRequestService(
+            session=_ResponseSession(200, content=b"%PDF-1.7\nbinary", content_type="application/pdf"),
+            resolver=_passing_resolver,
+            system_resolver_diagnostics=False,
+        ).execute(
+            self._step(),
+            self._prepared_request(),
+        )
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertEqual(result.details["response"].http_status, 200)
+        self.assertIn("non-text response body omitted", result.details["response"].body)
+        self.assertIn("content-type=application/pdf", result.details["response"].body)
+
     def test_internal_non_request_exception_is_error(self) -> None:
         result = self._run_with_exception(RuntimeError("session wrapper broke"))
 
@@ -169,14 +184,22 @@ class _ExceptionSession:
 
 
 class _ResponseSession:
-    def __init__(self, status_code: int) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        content: bytes = b'{"error": "unavailable"}',
+        content_type: str = "application/json",
+    ) -> None:
         self._status_code = status_code
+        self._content = content
+        self._content_type = content_type
 
     def request(self, method: str, url: str, **kwargs):
         response = requests.Response()
         response.status_code = self._status_code
-        response._content = b'{"error": "unavailable"}'
-        response.headers["Content-Type"] = "application/json"
+        response._content = self._content
+        response.headers["Content-Type"] = self._content_type
         return response
 
 

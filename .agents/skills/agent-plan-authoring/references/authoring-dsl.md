@@ -157,11 +157,15 @@ Supported API checks include:
 - `HTTP 200`
 - `HTTP 200 or HTTP 201`
 - `response JSON exists`
+- `response body exists`
 - `response JSON is an array`
 - `response contains field \`id\``
 - `response \`status\` = \`ACTIVE\``
 - `response \`createdAt\` is not null`
 - `response \`items\` length >= 1`
+
+Use `response body exists` for binary/download endpoints such as PDF or Excel export. Do not use
+`response JSON exists` unless the endpoint actually returns a JSON object or array.
 
 Normalized-field guidance:
 
