@@ -77,7 +77,7 @@ For review and promotion gates, prefer JSON and verify numeric counts before con
 - review: require `status=PASS`, `draft_count > 0`, `invalid_draft_count = 0`, `deferred_item_count = 0`, and `high_priority_edit_target_count = 0`
 - review: report `drafts_with_edit_targets`, `total_edit_targets`, `drafts_with_high_priority_edit_targets`, and `high_priority_edit_target_count` explicitly; do not summarize review as clean solely because `status=PASS`
 - promotion: require `status=PASS`, `promoted_count = requested_count`, `error_count = 0`, and `blocked_count = 0`
-- promotion: if review finds high-priority edit targets or a non-promotable advisory, repair source authoring/drafts before promotion; use `--allow-known-gaps` only when the operator explicitly accepts those review findings
+- promotion: if review finds edit targets or a non-promotable advisory, repair source authoring/drafts before promotion; use `--allow-known-gaps --known-gaps-reviewed` only when the operator explicitly accepts the concrete review findings
 
 Use guided runner mode by default. Use auto mode only when the user explicitly asks for non-interactive execution.
 
@@ -99,7 +99,7 @@ Read generation artifacts when present:
 
 Treat promoted scenarios under `scenarios/generated/<source>-<run_id>/` as runner inputs, not as generation artifacts.
 
-Do not edit generated reports, summaries, manifests, raw runner artifacts, or promotion outputs unless the user explicitly asks for artifact repair. If a draft or promoted scenario has an execution-blocking defect, prefer repairing the source authoring bundle and rerunning downstream stages.
+Do not edit generated reports, summaries, manifests, raw runner artifacts, or promotion outputs unless the user explicitly asks for artifact repair. If a draft or promoted scenario has an execution-blocking defect, repair the source authoring bundle and rerun downstream stages; do not hot-patch `scenarios/generated/` as the primary fix.
 
 # Failure Policy
 
@@ -123,6 +123,7 @@ Stop conditions:
 - Authoring validation emits `authoring_workflow_setup_state_mismatch`: stop and repair authoring unless a same-state lifecycle contract in `operation-inventory.yaml` explicitly proves that the mismatch is the intended behavior.
 - Render has deferred execution-critical cases: repair source authoring before promotion.
 - Review says drafts are not promotable: repair source authoring or selected draft source.
+- Review reports stateful preconditions such as "before this case runs": repair authoring so the setup is self-contained, uses a dedicated fixture, or remains deferred.
 - Promotion writes zero scenarios: stop and report `FAIL` or `BLOCKED` depending on diagnostics.
 - Promoted scenario validation fails: repair source authoring or promoted scenario only if explicitly asked.
 - Promoted scenario compile validation reports `compile_valid_but_incomplete` only because env-backed inputs are unresolved: run `--validate-scenario-dir --mode preflight` or explicitly state that runner preflight is the next readiness check before batch execution.

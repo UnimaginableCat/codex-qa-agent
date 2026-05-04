@@ -136,6 +136,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--known-gaps-reviewed",
+        action="store_true",
+        help=(
+            "Confirm the operator has reviewed the concrete review gaps before using --allow-known-gaps. "
+            "Promotion remains blocked if --allow-known-gaps is provided without this confirmation."
+        ),
+    )
+    parser.add_argument(
         "--purge-target-dir",
         action="store_true",
         help="Delete the resolved promotion target directory before promotion. Use for rerender/re-promote cycles.",

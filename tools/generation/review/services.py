@@ -223,9 +223,13 @@ class ScenarioDraftPromotionService:
         review_gate_diagnostics = _promotion_review_gate_diagnostics(
             review_item,
             allow_known_gaps=request.allow_known_gaps,
+            known_gaps_reviewed=request.known_gaps_reviewed,
         )
         diagnostics.extend(review_gate_diagnostics)
-        if review_gate_diagnostics and not request.allow_known_gaps:
+        if review_gate_diagnostics and (
+            not request.allow_known_gaps
+            or any(diagnostic.severity == DiagnosticSeverity.ERROR for diagnostic in review_gate_diagnostics)
+        ):
             return self._finalize(
                 run_context,
                 request,
@@ -391,6 +395,7 @@ class ScenarioDraftBatchPromotionService:
                     target_dir=request.target_dir,
                     allow_invalid=request.allow_invalid,
                     allow_known_gaps=request.allow_known_gaps,
+                    known_gaps_reviewed=request.known_gaps_reviewed,
                     purge_target_dir=False,
                 )
             )
@@ -1128,6 +1133,7 @@ def _promotion_review_gate_diagnostics(
     review_item: ScenarioDraftReviewItem | None,
     *,
     allow_known_gaps: bool,
+    known_gaps_reviewed: bool,
 ) -> list[GenerationDiagnostic]:
     if review_item is None:
         return [
@@ -1148,6 +1154,23 @@ def _promotion_review_gate_diagnostics(
     }
     if not high_priority_targets and not advisory_blocks:
         return []
+    if allow_known_gaps and not known_gaps_reviewed:
+        return [
+            GenerationDiagnostic(
+                code="scenario_promotion_known_gaps_confirmation_missing",
+                message=(
+                    "Draft promotion has review gaps. --allow-known-gaps requires "
+                    "--known-gaps-reviewed after the operator has inspected the concrete findings."
+                ),
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=review_item.draft_id,
+                details={
+                    "promotion_advisory": review_item.promotion_advisory.value,
+                    "edit_target_count": review_item.edit_target_count,
+                    "high_priority_edit_target_count": len(high_priority_targets),
+                },
+            )
+        ]
 
     diagnostic = GenerationDiagnostic(
         code=(
@@ -1419,6 +1442,7 @@ def _has_execution_blocking_gaps(gap_summary: DraftGapSummary) -> bool:
         "auth_strategy_unresolved",
         "environment_unresolved",
         "data_setup_unresolved",
+        "stateful_intercase_precondition",
         "assertion_detail_unresolved",
         "compile_unsupported_expectation",
         "executable_detail_unresolved",
@@ -1436,18 +1460,44 @@ def _expectation_contract_gap_summary_from_file(file_path: Path) -> DraftGapSumm
 def _expectation_contract_gap_summary_from_scenario(scenario: ScenarioDefinition) -> DraftGapSummary:
     validator = ScenarioStepValidator()
     unsupported_messages: list[str] = []
+    stateful_precondition_messages: list[str] = []
 
     for step in scenario.steps:
         for diagnostic in validator.inspect_contract(step):
             if not diagnostic.supported:
                 unsupported_messages.append(diagnostic.detail)
+    for precondition in scenario.preconditions:
+        normalized = str(precondition).strip()
+        if _looks_like_intercase_precondition(normalized):
+            stateful_precondition_messages.append(
+                f"Precondition appears to depend on another scenario or external ordering: {normalized}"
+            )
 
-    if not unsupported_messages:
+    gap_codes: list[str] = []
+    gap_messages: list[str] = []
+    if unsupported_messages:
+        gap_codes.append("compile_unsupported_expectation")
+        gap_messages.extend(unsupported_messages)
+    if stateful_precondition_messages:
+        gap_codes.append("stateful_intercase_precondition")
+        gap_messages.extend(stateful_precondition_messages)
+    if not gap_codes:
         return DraftGapSummary(gap_codes=[], gap_messages=[])
     return DraftGapSummary(
-        gap_codes=["compile_unsupported_expectation"],
-        gap_messages=_dedupe_preserve_order(unsupported_messages),
+        gap_codes=gap_codes,
+        gap_messages=_dedupe_preserve_order(gap_messages),
     )
+
+
+def _looks_like_intercase_precondition(value: str) -> bool:
+    normalized = value.lower()
+    patterns = (
+        r"\bbefore this case runs\b",
+        r"\bmust (?:already )?(?:exist|be present|be set|be granted)\b",
+        r"\brequires? .*\bto be present\b",
+        r"\bhas .*=.* before\b",
+    )
+    return any(re.search(pattern, normalized) for pattern in patterns)
 
 
 def _route_status(route_binding: dict[str, object]) -> str:
@@ -1840,6 +1890,22 @@ def _build_edit_targets(
                 related_requirements=["captures"],
                 priority="high",
                 suggested_minimum_patch="Fix capture syntax or reorder steps so referenced captured variables exist before use.",
+            )
+        )
+
+    if "stateful_intercase_precondition" in gap_codes:
+        targets.append(
+            _edit_target(
+                draft_id=draft.draft_id,
+                target_type=DraftEditTargetType.CLARIFY_NOTES_ONLY,
+                section_name="Preconditions",
+                reason="Scenario appears to depend on state created by another scenario or a prior ordered run.",
+                related_requirements=["data_setup"],
+                priority="high",
+                suggested_minimum_patch=(
+                    "Make the scenario self-contained, move the setup into the scenario, or mark it deferred "
+                    "instead of promoting it as independently runnable."
+                ),
             )
         )
 

@@ -440,6 +440,7 @@ class ScenarioPromotionRequest:
     target_dir: Path = Path("scenarios/generated")
     allow_invalid: bool = False
     allow_known_gaps: bool = False
+    known_gaps_reviewed: bool = False
     purge_target_dir: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -453,6 +454,7 @@ class ScenarioPromotionBatchRequest:
     target_dir: Path = Path("scenarios/generated")
     allow_invalid: bool = False
     allow_known_gaps: bool = False
+    known_gaps_reviewed: bool = False
     purge_target_dir: bool = False
     draft_ids: list[str] = field(default_factory=list)
 

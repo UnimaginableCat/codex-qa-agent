@@ -328,7 +328,7 @@ entities:
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
         self.assertIn("adapter_entity_inventory_project_must_target_code_subdir", codes)
 
-    def test_validate_entity_inventory_warns_on_permission_id_field_using_member_guid(self) -> None:
+    def test_validate_entity_inventory_blocks_permission_id_field_using_member_guid(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             entity_inventory_path = root / "entity-inventory.yaml"
@@ -350,15 +350,15 @@ entities:
                 exit_code = cli.main(["--validate-entity-inventory", "--entity-inventory-file", str(entity_inventory_path)])
             payload = json.loads(stdout.getvalue())
 
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["status"], "PASS")
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
-        self.assertIn("adapter_entity_inventory_suspicious_identity_id_field", codes)
+        self.assertIn("adapter_entity_inventory_suspicious_identity_id_field_disallowed", codes)
         self.assertTrue(
             any(
-                diagnostic["severity"] == "WARNING"
+                diagnostic["severity"] == "ERROR"
                 for diagnostic in payload["diagnostics"]
-                if diagnostic["code"] == "adapter_entity_inventory_suspicious_identity_id_field"
+                if diagnostic["code"] == "adapter_entity_inventory_suspicious_identity_id_field_disallowed"
             )
         )
 
@@ -409,6 +409,8 @@ metadata:
   identity_field_policy:
     allow_id_fields:
       - price_list_permission.partner_company_member_guid
+    allow_suspicious_id_field_override: true
+    justification: The project has a documented natural-key permission row without a separate stable permission id fixture.
 """,
                 encoding="utf-8",
             )
@@ -420,6 +422,8 @@ metadata:
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_entity_inventory_suspicious_identity_id_field_allowed", codes)
 
     def test_validate_entity_inventory_uses_custom_identity_field_policy_patterns(self) -> None:
         with TemporaryDirectory() as tmp:
