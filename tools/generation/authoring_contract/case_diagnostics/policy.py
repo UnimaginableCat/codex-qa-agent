@@ -22,6 +22,21 @@ def heuristic_or_strict_severity(strict: bool) -> DiagnosticSeverity:
     return DiagnosticSeverity.ERROR if strict else DiagnosticSeverity.WARNING
 
 
+def policy_bool(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, int | float):
+        return value != 0
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on", "enable", "enabled", "strict", "require", "required"}:
+        return True
+    if normalized in {"", "0", "false", "no", "n", "off", "disable", "disabled", "allow", "ignore"}:
+        return False
+    return default
+
+
 def plan_contract_section(authoring_plan: AuthoringPlan, section: str) -> dict[str, Any]:
     contracts = authoring_plan.metadata.get("contracts")
     if not isinstance(contracts, dict):

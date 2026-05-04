@@ -9,7 +9,7 @@ from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnos
 from tools.scenario_runner.domain.models import ScenarioVariableDefinition, ScenarioVariableSource
 from tools.scenario_runner.parsing.variables.validation import build_variable_definition
 
-from .policy import contract_mode, plan_contract_section
+from .policy import contract_mode, plan_contract_section, policy_bool
 from ..diagnostics import authoring_diagnostic
 from ..helpers import _VARIABLE_NAME_PATTERN
 from ..models import AuthoringPlan
@@ -128,7 +128,7 @@ def _identity_resolution_policy(authoring_plan: AuthoringPlan) -> dict[str, Any]
         "allow_env_identity_variables": _string_set(policy.get("allow_env_identity_variables")),
         "stable_env_fixtures": _string_set(policy.get("stable_env_fixtures")),
         "env_identity_name_patterns": _string_list(policy.get("env_identity_name_patterns")),
-        "disable_default_env_identity_patterns": bool(policy.get("disable_default_env_identity_patterns")),
+        "disable_default_env_identity_patterns": policy_bool(policy.get("disable_default_env_identity_patterns")),
         "justification": str(policy.get("justification") or "").strip(),
         "env_backed_role_identity": contract_mode(
             identity_contract.get("env_backed_role_identity"),

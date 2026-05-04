@@ -6,7 +6,7 @@ from typing import Any
 
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
 
-from .policy import case_contract_section, heuristic_or_strict_severity
+from .policy import case_contract_section, heuristic_or_strict_severity, policy_bool
 from ..diagnostics import authoring_diagnostic
 from ..models import AuthoringCase, AuthoringSetupStep, _maybe_int
 
@@ -218,9 +218,9 @@ def _same_state_inventory_contract_diagnostics(
 
 def _same_state_inventory_contract_required(case: AuthoringCase, route_spec: dict[str, Any]) -> bool:
     if route_spec.get("same_state_contract_required") is not None:
-        return bool(route_spec.get("same_state_contract_required"))
+        return policy_bool(route_spec.get("same_state_contract_required"))
     lifecycle_contract = case_contract_section(case, "lifecycle")
-    return bool(lifecycle_contract.get("same_state_requires_inventory_contract"))
+    return policy_bool(lifecycle_contract.get("same_state_requires_inventory_contract"))
 
 
 def _is_same_state_inventory_case(

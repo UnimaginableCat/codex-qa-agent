@@ -6,7 +6,7 @@ import re
 
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
 
-from .policy import case_contract_section, plan_contract_section
+from .policy import case_contract_section, plan_contract_section, policy_bool
 from ..diagnostics import authoring_diagnostic
 from ..models import AuthoringCase, AuthoringPlan
 
@@ -69,6 +69,6 @@ def _visibility_claim_diagnostics(
 def _visibility_assertions_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
     plan_coverage_contract = plan_contract_section(authoring_plan, "coverage")
     if plan_coverage_contract.get("visibility_claims_require_field_assertions") is not None:
-        return bool(plan_coverage_contract.get("visibility_claims_require_field_assertions"))
+        return policy_bool(plan_coverage_contract.get("visibility_claims_require_field_assertions"))
     coverage_contract = case_contract_section(case, "coverage")
-    return bool(coverage_contract.get("visibility_claims_require_field_assertions"))
+    return policy_bool(coverage_contract.get("visibility_claims_require_field_assertions"))

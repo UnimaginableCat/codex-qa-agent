@@ -7,7 +7,7 @@ from typing import Any
 
 from tools.generation.domain.models import GenerationDiagnostic
 
-from .policy import case_contract_section, heuristic_or_strict_severity, plan_contract_section
+from .policy import case_contract_section, heuristic_or_strict_severity, plan_contract_section, policy_bool
 from ..diagnostics import authoring_diagnostic
 from ..helpers import _extract_placeholders, _normalize_case_field_name, _numeric_path_parts
 from ..models import AuthoringCase, AuthoringPlan
@@ -233,9 +233,9 @@ def _numeric_case_boundary_mismatch_diagnostics(
 def _boundary_literals_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
     plan_boundary_contract = plan_contract_section(authoring_plan, "boundary")
     if plan_boundary_contract.get("require_literal_boundary_match") is not None:
-        return bool(plan_boundary_contract.get("require_literal_boundary_match"))
+        return policy_bool(plan_boundary_contract.get("require_literal_boundary_match"))
     boundary_contract = case_contract_section(case, "boundary")
-    return bool(boundary_contract.get("require_literal_boundary_match"))
+    return policy_bool(boundary_contract.get("require_literal_boundary_match"))
 
 
 def _boundary_mismatch_code(strict: bool) -> str:
