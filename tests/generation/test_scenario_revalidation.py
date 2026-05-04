@@ -181,6 +181,24 @@ class ScenarioRevalidationTests(unittest.TestCase):
             any(target.target_type.value == "add_expected_assertion" for target in result.edit_targets.targets)
         )
 
+    def test_compile_mode_blocks_unsupported_step_actor_field(self) -> None:
+        with TemporaryDirectory() as tmp:
+            scenario_path = _write_scenario(Path(tmp), _unsupported_step_actor_scenario())
+
+            result = ScenarioRevalidationService().validate(
+                ScenarioRevalidationRequest(file_path=scenario_path, validation_mode="compile")
+            )
+
+        self.assertEqual(result.parse_status.value, "valid")
+        self.assertEqual(result.compile_validation.compile_status.value, "failed")
+        self.assertEqual(result.execution_readiness_category.value, "compile_blocked")
+        self.assertTrue(
+            any(
+                issue.details.get("code") == "unsupported_step_field_ignored"
+                for issue in result.compile_validation.issues
+            )
+        )
+
     def test_compile_mode_surfaces_external_variable_requirement(self) -> None:
         with TemporaryDirectory() as tmp:
             scenario_path = _write_scenario(Path(tmp), _external_variable_scenario())
@@ -704,6 +722,39 @@ env/demo.env
 ### Step 1
 Type: api
 Name: create user
+Method: POST
+Path: /users
+Body:
+```json
+{
+  "email": "operator-confirmed@example.com"
+}
+```
+Expected:
+- HTTP 201
+
+## Final expectations
+
+- HTTP 201
+""".lstrip()
+
+
+def _unsupported_step_actor_scenario() -> str:
+    return """
+# Scenario: Create User
+
+## Project
+code/demo
+
+## Environment
+env/demo.env
+
+## Steps
+
+### Step 1
+Type: api
+Name: create user
+Actor: admin
 Method: POST
 Path: /users
 Body:

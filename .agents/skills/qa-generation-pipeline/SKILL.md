@@ -74,7 +74,7 @@ For every gate, inspect an explicit status from stdout or a persisted artifact. 
 
 For review and promotion gates, prefer JSON and verify numeric counts before continuing:
 
-- review: require `status=PASS`, `draft_count > 0`, `invalid_draft_count = 0`, `deferred_item_count = 0`, and `high_priority_edit_target_count = 0`
+- review: require `status=PASS`, `draft_count > 0`, `invalid_draft_count = 0`, `deferred_item_count = 0`, and `total_edit_targets = 0`
 - review: report `drafts_with_edit_targets`, `total_edit_targets`, `drafts_with_high_priority_edit_targets`, and `high_priority_edit_target_count` explicitly; do not summarize review as clean solely because `status=PASS`
 - promotion: require `status=PASS`, `promoted_count = requested_count`, `error_count = 0`, and `blocked_count = 0`
 - promotion: if review finds edit targets or a non-promotable advisory, repair source authoring/drafts before promotion; use `--allow-known-gaps --known-gaps-reviewed` only when the operator explicitly accepts the concrete review findings
@@ -124,6 +124,8 @@ Stop conditions:
 - Render has deferred execution-critical cases: repair source authoring before promotion.
 - Review says drafts are not promotable: repair source authoring or selected draft source.
 - Review reports stateful preconditions such as "before this case runs": repair authoring so the setup is self-contained, uses a dedicated fixture, or remains deferred.
+- Review or compile reports unsupported step fields such as step-level `Actor:`: repair source authoring or rendering support; do not patch runner semantics during scenario execution.
+- Promotion detects placeholder or mismatched `context.json` metadata: rerun/fix the managed generation step; do not edit `context.json` or `manifest.json` by hand.
 - Promotion writes zero scenarios: stop and report `FAIL` or `BLOCKED` depending on diagnostics.
 - Promoted scenario validation fails: repair source authoring or promoted scenario only if explicitly asked.
 - Promoted scenario compile validation reports `compile_valid_but_incomplete` only because env-backed inputs are unresolved: run `--validate-scenario-dir --mode preflight` or explicitly state that runner preflight is the next readiness check before batch execution.

@@ -113,6 +113,8 @@ for later phases.
 - If later phases are requested, treat render/review/compile warnings as authoring defects to fix back in the bundle-local `authoring-plan.yaml` or compiled `agent-plan.json`, not as acceptable follow-up manual cleanup.
 - Do not treat drafts with unresolved `data_setup`, `assertion_detail`, `environment`, `auth_strategy`, or `executable_detail` gaps as close to runnable or promotable. Return to the source authoring artifact instead.
 - Do not use `--allow-known-gaps` merely because high-priority edit targets are zero. Promotion with any review gaps requires explicit operator acceptance of the concrete findings and the CLI confirmation flag `--known-gaps-reviewed`; otherwise stop and repair the source artifacts.
+- Treat `total_edit_targets > 0` from review as not clean. Do not promote by default even when every edit target is low priority.
+- If promotion reports placeholder or mismatched run metadata in `context.json`, rerun or repair the managed generation command path. Do not manually edit `context.json`, `manifest.json`, or promotion results to change target names.
 - Treat preconditions that say another scenario or grant must run first as execution-blocking. Generated scenarios must be independent unless the runner has an explicit dependency contract.
 - If a rendered standalone case still depends on seeded IDs, missing machine-readable variables, or undeclared setup fixtures, rewrite it as a self-contained workflow case or keep it deferred on purpose.
 

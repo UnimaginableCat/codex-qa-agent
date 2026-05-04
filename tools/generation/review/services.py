@@ -97,7 +97,7 @@ class ScenarioDraftReviewService:
             _build_deferred_review_item(item, unsupported_by_case_id.get(item.case_id, []))
             for item in render_result.draft_set.deferred_items
         ]
-        diagnostics: list[GenerationDiagnostic] = []
+        diagnostics: list[GenerationDiagnostic] = _run_context_consistency_diagnostics(run_context)
         if not items:
             diagnostics.append(
                 GenerationDiagnostic(
@@ -144,6 +144,9 @@ class ScenarioDraftPromotionService:
                 ],
             )
             return result
+        context_diagnostics = _run_context_consistency_diagnostics(run_context)
+        if context_diagnostics:
+            return self._finalize(run_context, request, StepStatus.BLOCKED, context_diagnostics)
 
         draft = _find_draft(render_result, request.draft_id)
         validation = _find_validation(render_result, request.draft_id)
@@ -341,6 +344,19 @@ class ScenarioDraftBatchPromotionService:
                         source_ref=request.run_id,
                     )
                 ],
+            )
+        context_diagnostics = _run_context_consistency_diagnostics(run_context)
+        if context_diagnostics:
+            return self._finalize(
+                run_context,
+                request,
+                StepStatus.BLOCKED,
+                diagnostics=context_diagnostics,
+                results=[],
+                target_dir=None,
+                promoted_count=0,
+                error_count=0,
+                blocked_count=0,
             )
 
         draft_ids = request.draft_ids or [draft.draft_id for draft in render_result.draft_set.drafts]
@@ -668,13 +684,14 @@ class ScenarioCompileValidationService:
         compiled = self.compiler.compile(scenario)
         compile_result = compiled.compile_result
         issues = [_compile_issue_from_execution_issue(issue, index) for index, issue in enumerate(compile_result.issues)]
+        issues.extend(_compile_issues_from_step_parse_warnings(scenario, start_index=len(issues)))
         warnings = [
             _compile_warning_from_external_input(requirement, index)
             for index, requirement in enumerate(compile_result.required_external_inputs)
         ]
         compile_status = (
             ScenarioCompileStatus.SUCCESS
-            if compile_result.passed
+            if compile_result.passed and not issues
             else ScenarioCompileStatus.FAILED
         )
         readiness = _compile_readiness(
@@ -813,6 +830,36 @@ def _compile_warning_from_external_input(requirement: object, index: int) -> Com
         source="scenario_compiler",
         details=payload,
     )
+
+
+def _compile_issues_from_step_parse_warnings(
+    scenario: ScenarioDefinition,
+    *,
+    start_index: int,
+) -> list[CompileIssue]:
+    issues: list[CompileIssue] = []
+    for step in scenario.steps:
+        parse_warnings = step.metadata.get("parse_warnings", [])
+        if not isinstance(parse_warnings, list):
+            continue
+        for warning in parse_warnings:
+            message = str(warning)
+            if "field" not in message or "unknown and was ignored" not in message:
+                continue
+            issues.append(
+                CompileIssue(
+                    issue_id=f"parse-warning:{start_index + len(issues)}",
+                    issue_type=CompileIssueType.PARSE_ERROR,
+                    message=(
+                        "Scenario step contains an unsupported field that the parser ignored. "
+                        "Remove the field or add official parser/compiler/runtime support before execution."
+                    ),
+                    severity="error",
+                    source="parser",
+                    details={"code": "unsupported_step_field_ignored", "step_id": step.step_id, "warning": message},
+                )
+            )
+    return issues
 
 
 def _compile_issue_type(code: str) -> CompileIssueType:
@@ -1009,6 +1056,69 @@ def _load_render_result(run_context: GenerationRunContext) -> ScenarioRenderResu
     return ScenarioRenderResult.from_dict(dict(payload))
 
 
+def _run_context_consistency_diagnostics(run_context: GenerationRunContext) -> list[GenerationDiagnostic]:
+    diagnostics: list[GenerationDiagnostic] = []
+    if _is_placeholder_generation_value(run_context.source_id) or _is_placeholder_generation_value(run_context.project):
+        diagnostics.append(
+            GenerationDiagnostic(
+                code="scenario_promotion_run_context_placeholder_metadata",
+                message=(
+                    "Generation run context still contains scaffold placeholder source_id/project metadata. "
+                    "Regenerate or repair the managed generation step instead of editing context.json/manifest.json by hand."
+                ),
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=str(run_context.artifact_dir / "context.json"),
+                details={"source_id": run_context.source_id, "project": run_context.project},
+            )
+        )
+
+    agent_plan_path = run_context.artifact_dir / "agent-plan.json"
+    if agent_plan_path.exists():
+        try:
+            agent_plan = read_json_file(agent_plan_path, "Agent plan")
+            agent_source_id = str(agent_plan.get("source_id") or "")
+            agent_project = str(agent_plan.get("project") or "")
+            mismatches = {}
+            if agent_source_id and agent_source_id != run_context.source_id:
+                mismatches["source_id"] = {
+                    "context": run_context.source_id,
+                    "agent_plan": agent_source_id,
+                }
+            if agent_project and agent_project != run_context.project:
+                mismatches["project"] = {
+                    "context": run_context.project,
+                    "agent_plan": agent_project,
+                }
+            if mismatches:
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="scenario_promotion_run_context_agent_plan_mismatch",
+                        message=(
+                            "Generation run context metadata does not match agent-plan.json. "
+                            "Promotion target naming would be based on stale metadata."
+                        ),
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=str(run_context.artifact_dir),
+                        details=mismatches,
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="scenario_promotion_agent_plan_metadata_unreadable",
+                    message=f"Could not verify agent-plan.json metadata before promotion: {exc}",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=str(agent_plan_path),
+                )
+            )
+    return diagnostics
+
+
+def _is_placeholder_generation_value(value: str) -> bool:
+    normalized = value.strip().lower()
+    return not normalized or normalized.startswith("replace-") or "replace_" in normalized
+
+
 def _build_review_item(
     run_context: GenerationRunContext,
     draft: ScenarioDraft,
@@ -1147,12 +1257,13 @@ def _promotion_review_gate_diagnostics(
     high_priority_targets = [
         target for target in review_item.edit_targets.targets if target.priority == "high"
     ]
+    all_targets = list(review_item.edit_targets.targets)
     advisory_blocks = review_item.promotion_advisory in {
         DraftPromotionAdvisory.SAFE_PREVIEW_ONLY,
         DraftPromotionAdvisory.NOT_RECOMMENDED_FOR_PROMOTION,
         DraftPromotionAdvisory.INVALID_DRAFT,
     }
-    if not high_priority_targets and not advisory_blocks:
+    if not all_targets and not advisory_blocks:
         return []
     if allow_known_gaps and not known_gaps_reviewed:
         return [
@@ -1168,6 +1279,7 @@ def _promotion_review_gate_diagnostics(
                     "promotion_advisory": review_item.promotion_advisory.value,
                     "edit_target_count": review_item.edit_target_count,
                     "high_priority_edit_target_count": len(high_priority_targets),
+                    "edit_targets": _review_edit_target_details(all_targets),
                 },
             )
         ]
@@ -1192,19 +1304,25 @@ def _promotion_review_gate_diagnostics(
             "promotion_advisory": review_item.promotion_advisory.value,
             "edit_target_count": review_item.edit_target_count,
             "high_priority_edit_target_count": len(high_priority_targets),
-            "high_priority_edit_targets": [
-                {
-                    "target_id": target.target_id,
-                    "target_type": target.target_type.value,
-                    "section_name": target.section_name,
-                    "reason": target.reason,
-                    "suggested_minimum_patch": target.suggested_minimum_patch,
-                }
-                for target in high_priority_targets
-            ],
+            "edit_targets": _review_edit_target_details(all_targets),
+            "high_priority_edit_targets": _review_edit_target_details(high_priority_targets),
         },
     )
     return [diagnostic]
+
+
+def _review_edit_target_details(targets: list[DraftEditTarget]) -> list[dict[str, str]]:
+    return [
+        {
+            "target_id": target.target_id,
+            "target_type": target.target_type.value,
+            "section_name": target.section_name,
+            "priority": target.priority,
+            "reason": target.reason,
+            "suggested_minimum_patch": target.suggested_minimum_patch,
+        }
+        for target in targets
+    ]
 
 
 def _promotion_batch_status(results: list[ScenarioPromotionResult]) -> StepStatus:

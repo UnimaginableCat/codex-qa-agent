@@ -272,6 +272,7 @@ class AuthoringEntitySpec:
 class AuthoringSetupStep:
     use_entity: str = ""
     operation: str = ""
+    actor: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -281,6 +282,7 @@ class AuthoringSetupStep:
         return cls(
             use_entity=str(payload.get("use_entity", "")),
             operation=str(payload.get("operation", "")),
+            actor=str(payload.get("actor", "")),
         )
 
 
