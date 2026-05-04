@@ -2526,6 +2526,139 @@ cases:
             {diagnostic.code for diagnostic in result.diagnostics},
         )
 
+    def test_compile_file_uses_route_entity_for_workflow_setup_state(self) -> None:
+        with TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "artifacts" / "agent" / "generation" / "gen-20260428T000000Z-test0011"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-plan
+project: code/demo
+surface: price-list-permissions
+entities:
+  - name: price_list
+    id_field: price_list_id
+    states: [visible, hidden]
+  - name: price_list_permission
+    id_field: price_list_permission_id
+    key_fields: [price_list_id, partner_member_guid]
+    states: [edit_allowed, edit_denied]
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-plan
+project: code/demo
+surface: price-list-permissions
+entity_operations:
+  - entity: price_list
+    operation: create_visible
+    effect_state: visible
+    captures:
+      - response.json.id -> price_list_id
+  - entity: price_list_permission
+    operation: revoke_partner_edit
+    effect_state: edit_denied
+routes:
+  - method: POST
+    path: /api/price_list/{{price_list_id}}/update/
+    success_status: 200
+    failure_statuses: [400, 401, 403, 404]
+    precondition_state: visible
+db_verifications:
+  - entity: price_list
+    operation: verify_visible
+    scoped_by: price_list_id
+    sql: SELECT id FROM price_list WHERE id = :price_list_id
+    params:
+      price_list_id: "{{price_list_id}}"
+    expected_outcomes:
+      - one row exists
+  - entity: price_list_permission
+    operation: verify_partner_edit_denied
+    scoped_by: [price_list_id, partner_member_guid]
+    sql: SELECT can_edit FROM price_list_permission WHERE price_list_id = :price_list_id AND partner_member_guid = :partner_member_guid
+    params:
+      price_list_id: "{{price_list_id}}"
+      partner_member_guid: "{{partner_member_guid}}"
+    expected_outcomes:
+      - one row exists
+      - "`can_edit` = `false`"
+""",
+                encoding="utf-8",
+            )
+            authoring_plan_path = bundle_dir / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: price-list-plan
+project: code/demo
+title: Price list permissions
+goal: Cover price list permissions.
+scope:
+  surface: price-list-permissions
+entities:
+  price_list:
+    id_field: price_list_id
+    operations:
+      create_visible:
+        route:
+          method: POST
+          path: /api/price_list/create/
+        captures:
+          - response.json.id -> price_list_id
+      verify_visible:
+        sql: SELECT id FROM price_list WHERE id = :price_list_id
+        params:
+          price_list_id: "{{price_list_id}}"
+        expected_outcomes:
+          - one row exists
+  price_list_permission:
+    id_field: price_list_permission_id
+    operations:
+      revoke_partner_edit:
+        route:
+          method: POST
+          path: /api/price_list/{{price_list_id}}/permissions/update/
+      verify_partner_edit_denied:
+        sql: SELECT can_edit FROM price_list_permission WHERE price_list_id = :price_list_id AND partner_member_guid = :partner_member_guid
+        params:
+          price_list_id: "{{price_list_id}}"
+          partner_member_guid: "{{partner_member_guid}}"
+        expected_outcomes:
+          - one row exists
+          - "`can_edit` = `false`"
+cases:
+  - id: update-visible-price-list-with-denied-edit-setup
+    kind: workflow
+    title: Update visible price list
+    objective: Route precondition should evaluate the price list state, not permission setup state.
+    state_change: mutate
+    setup:
+      - use_entity: price_list
+        operation: create_visible
+      - use_entity: price_list_permission
+        operation: revoke_partner_edit
+    execute:
+      route:
+        method: POST
+        path: /api/price_list/{{price_list_id}}/update/
+    oracle:
+      status_code: 200
+      persisted_state:
+        entity: price_list
+        operation: verify_visible
+""",
+                encoding="utf-8",
+            )
+
+            result = AuthoringPlanCompiler().validate_file(authoring_plan_path)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertNotIn("authoring_stage_inventory_state_mismatch", codes)
+        self.assertNotIn("authoring_stage_inventory_operation_mismatch", codes)
+
 
 def _identity_entity_with_numeric_subject_constraint() -> AuthoringEntitySpec:
     return AuthoringEntitySpec(

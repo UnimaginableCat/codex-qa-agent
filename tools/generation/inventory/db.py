@@ -82,14 +82,14 @@ def _db_verification_executable_diagnostics(
     diagnostics: list[GenerationDiagnostic] = []
     entity_name = str(item.get("entity") or "").strip()
     operation_name = str(item.get("operation") or "").strip()
-    scoped_by = str(item.get("scoped_by") or "").strip()
+    scoped_by = _normalized_scoped_by_fields(item.get("scoped_by"))
     sql = str(item.get("sql") or "").strip()
     params = item.get("params")
     expected_outcomes = item.get("expected_outcomes")
     missing_fields: list[str] = []
     if not sql:
         missing_fields.append("sql")
-    if not isinstance(params, dict) or (scoped_by and scoped_by not in params):
+    if not isinstance(params, dict) or any(field_name not in params for field_name in scoped_by):
         missing_fields.append("params")
     if not isinstance(expected_outcomes, list) or not all(str(item).strip() for item in expected_outcomes):
         missing_fields.append("expected_outcomes")
@@ -108,3 +108,10 @@ def _db_verification_executable_diagnostics(
             )
         )
     return diagnostics
+
+
+def _normalized_scoped_by_fields(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [field_name for item in value if (field_name := str(item or "").strip())]
+    field_name = str(value or "").strip()
+    return [field_name] if field_name else []
