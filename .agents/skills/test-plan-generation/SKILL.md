@@ -103,6 +103,7 @@ for later phases.
 - Treat rendered `actor = literal:<value>` as an execution profile selector for actor-scoped API/DB env keys, not as decorative notes-only metadata.
 - If compile, render, or review reveals authoring defects, send the workflow back to `artifacts/agent/generation/<run_id>/authoring-plan.yaml` rather than compensating by inventing new coverage here.
 - Use direct `agent_plan` editing only as a low-level escape hatch for debugging or explicit manual control.
+- Do not patch files under `scenarios/generated/` to fix generated scenario defects. Repair the source authoring bundle or compiled plan, rerender, review, and re-promote so the promoted scenario remains reproducible from generation artifacts.
 
 ## Quality Gates
 
@@ -111,6 +112,8 @@ for later phases.
 - For managed staged bundles, `validate-authoring-bundle` is the required pre-compile and pre-generate gate; do not skip straight from edited inventories/authoring-plan into compile or generation.
 - If later phases are requested, treat render/review/compile warnings as authoring defects to fix back in the bundle-local `authoring-plan.yaml` or compiled `agent-plan.json`, not as acceptable follow-up manual cleanup.
 - Do not treat drafts with unresolved `data_setup`, `assertion_detail`, `environment`, `auth_strategy`, or `executable_detail` gaps as close to runnable or promotable. Return to the source authoring artifact instead.
+- Do not use `--allow-known-gaps` merely because high-priority edit targets are zero. Promotion with any review gaps requires explicit operator acceptance of the concrete findings and the CLI confirmation flag `--known-gaps-reviewed`; otherwise stop and repair the source artifacts.
+- Treat preconditions that say another scenario or grant must run first as execution-blocking. Generated scenarios must be independent unless the runner has an explicit dependency contract.
 - If a rendered standalone case still depends on seeded IDs, missing machine-readable variables, or undeclared setup fixtures, rewrite it as a self-contained workflow case or keep it deferred on purpose.
 
 # Short Examples

@@ -105,6 +105,24 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertTrue(any(target.priority == "high" for target in item.edit_targets.targets))
         self.assertTrue(any("response length >= 1" in message for message in item.gap_summary.gap_messages))
 
+    def test_review_service_blocks_intercase_precondition(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _add_first_draft_intercase_precondition(payload)
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
+        self.assertIn("stateful_intercase_precondition", item.gap_summary.gap_codes)
+        self.assertEqual(item.promotion_advisory.value, "not_recommended_for_promotion")
+        self.assertTrue(
+            any(
+                target.section_name == "Preconditions" and target.priority == "high"
+                for target in item.edit_targets.targets
+            )
+        )
+
     def test_promotion_blocks_draft_with_high_priority_review_target(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -121,7 +139,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             any(diagnostic.code == "scenario_promotion_review_gate_blocked" for diagnostic in result.diagnostics)
         )
 
-    def test_promotion_allows_known_gaps_with_explicit_override(self) -> None:
+    def test_promotion_blocks_known_gaps_without_review_confirmation(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             payload = _generate_draft_run(root)
@@ -133,6 +151,31 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
                     draft_id="draft-tc-001",
                     workspace_root=root,
                     allow_known_gaps=True,
+                )
+            )
+
+            self.assertEqual(result.status.value, "BLOCKED")
+            self.assertIsNone(result.target_path)
+            self.assertTrue(
+                any(
+                    diagnostic.code == "scenario_promotion_known_gaps_confirmation_missing"
+                    for diagnostic in result.diagnostics
+                )
+            )
+
+    def test_promotion_allows_known_gaps_with_explicit_review_confirmation(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _make_first_draft_expectation_unsupported(payload)
+
+            result = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(
+                    run_id=payload["run_id"],
+                    draft_id="draft-tc-001",
+                    workspace_root=root,
+                    allow_known_gaps=True,
+                    known_gaps_reviewed=True,
                 )
             )
 
@@ -505,6 +548,17 @@ def _make_first_draft_expectation_unsupported(payload: dict[str, object]) -> Non
     draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
     draft_text = draft_path.read_text(encoding="utf-8")
     draft_text = draft_text.replace("HTTP 201", "response length >= 1", 1)
+    draft_path.write_text(draft_text, encoding="utf-8")
+
+
+def _add_first_draft_intercase_precondition(payload: dict[str, object]) -> None:
+    draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
+    draft_text = draft_path.read_text(encoding="utf-8")
+    draft_text = draft_text.replace(
+        "## Preconditions\n",
+        "## Preconditions\n- partner_member_guid has can_create=true before this case runs.\n",
+        1,
+    )
     draft_path.write_text(draft_text, encoding="utf-8")
 
 

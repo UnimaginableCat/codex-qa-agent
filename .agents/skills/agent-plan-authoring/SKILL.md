@@ -163,6 +163,7 @@ Use the scaffolded bundle in this order:
    - DB verification templates with SQL, params, and expected outcomes for every operation later used by `oracle.persisted_state`
    - DB verification `scoped_by` may be a single field or an explicit YAML array for composite natural keys; every scoped field must be present in `params`
    - For natural-key entities, keep the real `id_field` and declare composite identity in entity `key_fields`; do not replace `id_field` with a convenient fixture variable just to satisfy persisted-state validation
+   - For permission/access/grant/override relationship entities, never set `id_field` to `member_guid`, `user_guid`, actor GUIDs, or fixture variables just to make persisted-state checks compile. Keep a canonical entity-owned id field when available; otherwise model the relationship through `key_fields` and scope DB verification with all natural-key fields.
    - If `--validate-entity-inventory` reports a suspicious identity-like `id_field` warning, review the entity model before continuing. If the project genuinely uses that field as the entity identity, document the exception in `metadata.identity_field_policy.allow_id_fields`; use `metadata.identity_field_policy.enforcement: error` only when the project explicitly wants this lint to block.
 3. `--sync-authoring-plan`
    - after both inventories validate, synchronize `scope`, `entities`, reusable route operations, and DB verification templates into `authoring-plan.yaml`
@@ -208,9 +209,13 @@ After any edit to `operation-inventory.yaml` after `--sync-authoring-plan`, reru
 
 Do not manually patch synced route/setup/DB template sections in `authoring-plan.yaml` to compensate for an incomplete operation inventory. Fix the inventory source first, then sync again.
 
+Do not solve a persisted-state `id_field` diagnostic by changing entity identity to whichever variable is available in a case. Fix the DB verification template, `params`, `scoped_by`, captures, or entity `key_fields` instead.
+
 If `--sync-authoring-plan` produces `route: null`, `sql: ''`, empty `expected_outcomes`, or a capture like `response.json.user_id -> user_id` that was inferred from a bare target, treat the previous inventory stage as incomplete. Return to `operation-inventory.yaml`; do not rewrite the generated authoring plan by hand.
 
 Do not delete coverage cases just to make validation pass. If a case cannot be expressed safely, keep the coverage item as an unresolved blocker/open question in the report, or repair the staged inventory/source evidence until the case is valid.
+
+Do not author independently promoted scenarios that depend on another scenario having run first. Phrases such as "before this case runs", "grant must already be present", or "requires previous scenario" mean the case needs self-contained setup, a dedicated fixture, or an intentional deferred/open question; they are not acceptable runnable preconditions for batch execution.
 
 For lifecycle routes, do not author same-state negative or idempotency cases until `operation-inventory.yaml` records:
 

@@ -129,13 +129,42 @@ def _entity_inventory_item_diagnostics(
                     details={"entity": entity_name},
                 )
             )
-        elif _looks_like_foreign_identity_id_field(
-            entity_name=entity_name,
-            id_field=id_field,
-            key_fields=_string_list(item.get("key_fields")),
-            policy=identity_policy,
-        ):
-            strict = identity_policy["enforcement"] == "error"
+        else:
+            identity_risk = _foreign_identity_id_field_risk(
+                entity_name=entity_name,
+                id_field=id_field,
+                key_fields=_string_list(item.get("key_fields")),
+                policy=identity_policy,
+            )
+            if identity_risk is None:
+                continue
+            explicitly_allowed = _id_field_allowed(entity_name=entity_name, id_field=id_field, policy=identity_policy)
+            override_allowed = explicitly_allowed and identity_policy["allow_suspicious_id_field_override"]
+            strict = (
+                identity_policy["enforcement"] == "error"
+                or (not override_allowed and identity_risk == "composite_entity")
+                or (explicitly_allowed and not override_allowed)
+            )
+            if explicitly_allowed and not strict:
+                diagnostics.append(
+                    _diagnostic(
+                        code="adapter_entity_inventory_suspicious_identity_id_field_allowed",
+                        message=(
+                            "Entity id_field matches the suspicious identity-field policy and was allowed by "
+                            "an explicit unsafe override. Prefer an entity-owned id_field plus key_fields."
+                        ),
+                        path=path,
+                        severity=DiagnosticSeverity.WARNING,
+                        details={
+                            "entity": entity_name,
+                            "id_field": id_field,
+                            "policy": identity_policy["source"],
+                            "risk": identity_risk,
+                            "justification": identity_policy["justification"],
+                        },
+                    )
+                )
+                continue
             diagnostics.append(
                 _diagnostic(
                     code=(
@@ -153,10 +182,12 @@ def _entity_inventory_item_diagnostics(
                         "entity": entity_name,
                         "id_field": id_field,
                         "policy": identity_policy["source"],
+                        "risk": identity_risk,
                         "suggestion": (
                             "Use an entity-owned id_field, then include relationship/actor variables in key_fields "
-                            "when they form the natural key. If this id_field is intentional, document it in "
-                            "metadata.identity_field_policy.allow_id_fields."
+                            "when they form the natural key. For a genuinely intentional unsafe exception, document "
+                            "the field in metadata.identity_field_policy.allow_id_fields and also set "
+                            "allow_suspicious_id_field_override: true with a justification."
                         ),
                     },
                 )
@@ -173,6 +204,9 @@ def _entity_identity_policy(payload: dict[str, Any]) -> dict[str, Any]:
         "source": "metadata.identity_field_policy",
         "enforcement": _identity_policy_enforcement(raw_policy.get("enforcement")),
         "allow_id_fields": _string_set(raw_policy.get("allow_id_fields")),
+        "allow_suspicious_id_field_override": bool(raw_policy.get("allow_suspicious_id_field_override"))
+        and bool(str(raw_policy.get("justification") or "").strip()),
+        "justification": str(raw_policy.get("justification") or "").strip(),
         "suspicious_id_field_patterns": (
             []
             if disable_default_id_patterns
@@ -195,21 +229,20 @@ def _identity_policy_enforcement(value: Any) -> str:
     return "warn"
 
 
-def _looks_like_foreign_identity_id_field(
+def _foreign_identity_id_field_risk(
     *,
     entity_name: str,
     id_field: str,
     key_fields: list[str],
     policy: dict[str, Any],
-) -> bool:
-    if _id_field_allowed(entity_name=entity_name, id_field=id_field, policy=policy):
-        return False
+) -> str | None:
     if not _matches_any_pattern(id_field, policy["suspicious_id_field_patterns"]):
-        return False
-    return len([field for field in key_fields if field.strip()]) > 1 or _matches_any_pattern(
-        entity_name,
-        policy["composite_entity_patterns"],
-    )
+        return None
+    if _matches_any_pattern(entity_name, policy["composite_entity_patterns"]):
+        return "composite_entity"
+    if len([field for field in key_fields if field.strip()]) > 1:
+        return "composite_key"
+    return None
 
 
 def _id_field_allowed(*, entity_name: str, id_field: str, policy: dict[str, Any]) -> bool:

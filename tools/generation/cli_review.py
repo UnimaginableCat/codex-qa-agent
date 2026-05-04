@@ -95,6 +95,7 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
                 target_dir=Path(args.target_dir),
                 allow_invalid=args.allow_invalid,
                 allow_known_gaps=args.allow_known_gaps,
+                known_gaps_reviewed=args.known_gaps_reviewed,
                 purge_target_dir=args.purge_target_dir,
             )
         )
@@ -120,6 +121,7 @@ def run_promotion(args: argparse.Namespace) -> dict[str, Any]:
             target_dir=Path(args.target_dir),
             allow_invalid=args.allow_invalid,
             allow_known_gaps=args.allow_known_gaps,
+            known_gaps_reviewed=args.known_gaps_reviewed,
             purge_target_dir=args.purge_target_dir,
         )
     )
