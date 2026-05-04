@@ -87,6 +87,51 @@ The rendered scenario uses `actor = literal:founder`, so runtime selects env key
 `API_AUTH_TYPE__FOUNDER=basic`, `API_USERNAME__FOUNDER`, and `API_PASSWORD__FOUNDER`.
 Do not add `Authorization: Bearer {{...}}` headers for basic-auth projects.
 
+Do not make every role/member GUID a manual env prerequisite. If a scenario has actor
+credentials, derive internal identifiers through executable setup:
+
+- capture `company_member_guid` from a permissions/list API response when that response exposes it
+- otherwise use a read-only DB workflow step scoped by stable fixtures and the actor's login/email
+- keep env focused on credentials and stable root fixtures such as `company_guid` and `price_list_id`
+
+Use `metadata.identity_resolution` when a project needs different rules. The default lint warns on
+env-backed `company_member_guid` and `user_guid` style variables, but projects can allow a known
+external GUID or define their own discouraged identity patterns:
+
+```yaml
+metadata:
+  identity_resolution:
+    stable_env_fixtures:
+    - company_guid
+    - price_list_id
+    allow_env_identity_variables:
+    - external_customer_guid
+    discourage_env_identity:
+    - company_member_guid
+    env_identity_name_patterns:
+    - "target_.*_guid$"
+    disable_default_env_identity_patterns: false
+```
+
+Example shape:
+
+```yaml
+cases:
+- id: founder-grants-partner-edit
+  kind: workflow
+  setup:
+  - use_entity: price_list_permission_target
+    operation: discover_partner_member_guid
+  execute:
+    route:
+      method: POST
+      path: /api/price_list/{{price_list_id}}/permissions/update/
+    body:
+      partners:
+      - company_member_guid: "{{company_member_guid}}"
+        can_edit: true
+```
+
 Recommended staged workflow:
 
 Use strict sequential authoring. Do not fill all three staged files in one pass.
@@ -110,6 +155,7 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
    - do not manually repeat inventory-backed entity/operation templates unless the sync output shows missing executable details
 4. write `authoring-plan.yaml`
    - cases should reference the first two inventories instead of inventing lifecycle and status assumptions ad hoc
+   - when a request body needs a target member/user GUID, make the case a workflow and capture that GUID in a setup API/DB step instead of adding another env-backed `*_MEMBER_GUID`
    - same-state lifecycle cases such as `archive archived`, `activate active`, and `suspend suspended` should not be authored until the route inventory explicitly says whether they reject or return an idempotent success, with a code/test evidence reference
    - idempotent same-state success cases must verify the second call's 2xx response and persisted target state after the repeated call
    - then validate this file before the bundle gate

@@ -62,6 +62,17 @@ instead of authored `Authorization` headers. Role-specific cases can set `metada
 to values such as `founder` or `partner`; rendered scenarios then use `actor = literal:<role>` and
 runtime selects `API_AUTH_TYPE__<ROLE>`, `API_USERNAME__<ROLE>`, and `API_PASSWORD__<ROLE>`.
 
+Avoid turning every actor or company member GUID into an env prerequisite. Env should carry
+credentials and stable root fixtures such as `company_guid` or `price_list_id`; internal role
+identity values such as `company_member_guid` or `user_guid` should usually be discovered by an
+authored workflow setup API/DB step and captured for later steps.
+
+This lint is policy-driven through `metadata.identity_resolution`. By default authoring validation
+warns on env-backed `company_member_guid` / `user_guid` style variables, but a project can set
+`allow_env_identity_variables`, `stable_env_fixtures`, `discourage_env_identity`,
+`env_identity_name_patterns`, or `disable_default_env_identity_patterns` when its fixture model is
+different.
+
 For binary/download endpoints such as PDF or Excel export, assert `HTTP 200` plus
 `response body exists`. Do not assert `response JSON exists` unless the endpoint actually returns a
 JSON object or array.
