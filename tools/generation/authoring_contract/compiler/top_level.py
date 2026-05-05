@@ -100,11 +100,22 @@ def _promotion_blocking_open_question_diagnostics(
     authoring_plan: AuthoringPlan,
     source_ref: str,
 ) -> list[GenerationDiagnostic]:
-    blocking_questions = [
-        question
+    blocking_questions: list[dict[str, object]] = [
+        {"scope": "plan", "question": question}
         for question in authoring_plan.open_questions
         if _PROMOTION_BLOCKING_OPEN_QUESTION_RE.search(str(question))
     ]
+    for index, case in enumerate(authoring_plan.cases, start=1):
+        blocking_questions.extend(
+            {
+                "scope": "case",
+                "case_id": case.id,
+                "case_index": index,
+                "question": question,
+            }
+            for question in case.open_questions
+            if _PROMOTION_BLOCKING_OPEN_QUESTION_RE.search(str(question))
+        )
     if not blocking_questions:
         return []
     return [

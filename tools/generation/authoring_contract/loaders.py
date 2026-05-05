@@ -202,6 +202,16 @@ def _validate_payload_shape(payload: Any, source_ref: str) -> list[GenerationDia
                     owner=case_id,
                 )
             )
+            case_open_questions = case_payload.get("open_questions")
+            if case_open_questions is not None and not isinstance(case_open_questions, list):
+                diagnostics.append(
+                    authoring_diagnostic(
+                        "authoring_field_not_list",
+                        "Field 'cases[].open_questions' must be a JSON array.",
+                        source_ref=source_ref,
+                        details={"field": f"cases[{case_index}].open_questions", "case_id": case_id},
+                    )
+                )
     for field_name in ("assumptions", "open_questions"):
         value = payload.get(field_name)
         if value is not None and not isinstance(value, list):

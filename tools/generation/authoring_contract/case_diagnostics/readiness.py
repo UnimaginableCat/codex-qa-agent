@@ -10,6 +10,20 @@ from ..diagnostics import authoring_diagnostic
 from ..models import AuthoringCase
 
 
+_PLACEHOLDER_EVIDENCE_VALUES = {
+    "none",
+    "null",
+    "n/a",
+    "na",
+    "tbd",
+    "todo",
+    "unknown",
+    "placeholder",
+    "{}",
+    "[]",
+}
+
+
 def _readiness_metadata_diagnostics(
     case: AuthoringCase,
     case_ref: str,
@@ -35,11 +49,21 @@ def _readiness_metadata_diagnostics(
 
 def _has_readiness_evidence(metadata: dict[str, Any]) -> bool:
     for key in ("readiness_evidence", "evidence", "source_evidence", "evidence_refs"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
+        if _is_concrete_evidence_value(metadata.get(key)):
             return True
-        if isinstance(value, list) and any(str(item).strip() for item in value):
-            return True
-        if isinstance(value, dict) and any(str(item).strip() for item in value.values()):
-            return True
+    return False
+
+
+def _is_concrete_evidence_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return False
+        return normalized.lower() not in _PLACEHOLDER_EVIDENCE_VALUES
+    if isinstance(value, list):
+        return any(_is_concrete_evidence_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(_is_concrete_evidence_value(item) for item in value.values())
     return False
