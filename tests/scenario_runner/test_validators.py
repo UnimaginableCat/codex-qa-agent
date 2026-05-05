@@ -347,6 +347,24 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertEqual(results[0].status, StepStatus.PASS)
 
+    def test_api_response_field_is_empty_expectation(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {"partner_permissions": [], "name": "not-empty"},
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(["response partner_permissions is empty", "response name is empty"]),
+            payload,
+        )
+
+        self.assertEqual(results[0].status, StepStatus.PASS)
+        self.assertEqual(results[1].status, StepStatus.FAIL)
+        diagnostics = self.validator.inspect_contract(self._api_step(["response partner_permissions is empty"]))
+        self.assertTrue(diagnostics[0].supported)
+
     def test_response_length_without_field_is_blocked_as_ambiguous(self) -> None:
         results = self.validator.validate(
             self._api_step(["response length >= 1"]),

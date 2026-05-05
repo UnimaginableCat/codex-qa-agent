@@ -25,6 +25,7 @@ _RESPONSE_LENGTH_RE = re.compile(
 )
 _RESPONSE_VALUE_RE = re.compile(r"^\s*response\s+(.+?)\s*$", re.IGNORECASE)
 _RESPONSE_NOT_NULL_RE = re.compile(r"^\s*response\s+(.+?)\s+is\s+not\s+null\s*$", re.IGNORECASE)
+_RESPONSE_EMPTY_RE = re.compile(r"^\s*response\s+(.+?)\s+is\s+empty\s*$", re.IGNORECASE)
 _ARRAY_CONTAINS_RE = re.compile(
     r"^\s*array\s+contains\s+item\s+with\s+(.+?)\s*=\s*(.+?)\s*$",
     re.IGNORECASE,
@@ -237,6 +238,20 @@ class ScenarioStepValidator:
                 f"Actual value: {lookup.value!r}. {lookup.detail}",
             )
 
+        if match := _RESPONSE_EMPTY_RE.fullmatch(expectation):
+            field_path = self._parse_field_path(match.group(1))
+            lookup = self._try_get_path(response_body, field_path)
+            has_length = hasattr(lookup.value, "__len__") and not isinstance(lookup.value, (bool, int, float))
+            passed = lookup.exists and has_length and len(lookup.value) == 0
+            return self._result(
+                expectation,
+                passed,
+                (
+                    f"Field path: {field_path}. Actual value: {lookup.value!r}. "
+                    f"Actual type: {type(lookup.value).__name__}. {lookup.detail}"
+                ),
+            )
+
         if match := _ARRAY_CONTAINS_RE.fullmatch(expectation):
             field_path = self._parse_field_path(match.group(1))
             expected_value = self._parse_literal(match.group(2))
@@ -350,6 +365,7 @@ class ScenarioStepValidator:
                 _RESPONSE_LENGTH_RE.fullmatch(expectation),
                 _RESPONSE_NOT_NULL_RE.fullmatch(expectation),
                 _ARRAY_CONTAINS_RE.fullmatch(expectation),
+                _RESPONSE_EMPTY_RE.fullmatch(expectation),
                 (
                     (_RESPONSE_VALUE_RE.fullmatch(expectation) is not None)
                     and (

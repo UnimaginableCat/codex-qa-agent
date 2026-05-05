@@ -464,6 +464,41 @@ cases:
             )
         )
 
+    def test_permission_prerequisite_metadata_requires_typed_required_permission_state(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-permissions-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            cases=[
+                AuthoringCase(
+                    id="partner-with-create-creates-price-list",
+                    kind="api",
+                    objective="Partner with can_create creates a price list.",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/api/price_list/create/")),
+                    oracle=AuthoringOracle(status_code=201),
+                    metadata={
+                        "default_actor": "partner",
+                        "prerequisite_permission": "partner can_create=true must be granted before this case.",
+                    },
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_prerequisite_requires_required_state"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_validate_warns_on_env_backed_role_identity_guid_variables(self) -> None:
         plan = AuthoringPlan(
             version=1,
