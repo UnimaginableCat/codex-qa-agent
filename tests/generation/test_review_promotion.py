@@ -78,6 +78,20 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertEqual(review_set.items[0].readiness_category.value, "parser_invalid")
         self.assertEqual(review_set.items[0].promotion_advisory.value, "invalid_draft")
 
+    def test_review_service_handles_auth_required_draft_checklist(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _mark_first_draft_auth_required(payload)
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        auth_check = next(
+            check
+            for check in review_set.items[0].checklist.checks
+            if check.requirement.requirement_id == "auth_strategy"
+        )
+        self.assertEqual(auth_check.status.value, "satisfied")
+
     def test_review_service_defers_case_with_seeded_id_gap(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -642,6 +656,18 @@ def _mark_draft_invalid(render_result_path: Path) -> None:
     payload["validation_results"][0]["parse_valid"] = False
     payload["validation_results"][0]["diagnostics"] = [{"code": "test.invalid", "message": "invalid for test"}]
     render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _mark_first_draft_auth_required(payload: dict[str, object]) -> None:
+    render_result_path = Path(payload["artifact_paths"]["scenario_render_result"])
+    render_payload = json.loads(render_result_path.read_text(encoding="utf-8"))
+    render_payload["draft_set"]["drafts"][0]["metadata"]["auth_strategy_required"] = True
+    render_payload["draft_set"]["drafts"][0]["metadata"]["auth_strategy_present"] = True
+    render_result_path.write_text(json.dumps(render_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
+    draft_text = draft_path.read_text(encoding="utf-8")
+    draft_path.write_text(draft_text + "\nAuth strategy: Bearer token\n", encoding="utf-8")
 
 
 def _make_first_draft_expectation_unsupported(payload: dict[str, object]) -> None:

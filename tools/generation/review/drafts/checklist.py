@@ -14,6 +14,7 @@ from tools.generation.review.models import (
 
 from .scenario_introspection import (
     _draft_auth_requirement_known,
+    _draft_has_auth_strategy,
     _draft_has_expected_assertions,
     _draft_request_body_requirement_known,
     _draft_requires_auth_strategy,
