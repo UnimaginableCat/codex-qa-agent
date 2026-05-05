@@ -69,7 +69,13 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
             route_specs=route_specs,
         )
     )
-    diagnostics.extend(_route_inventory_diagnostics(_list_payload_items(payload, "routes"), path=path))
+    diagnostics.extend(
+        _route_inventory_diagnostics(
+            _list_payload_items(payload, "routes"),
+            path=path,
+            require_method_evidence=_route_method_evidence_required(payload),
+        )
+    )
     diagnostics.extend(
         _db_verification_inventory_diagnostics(
             _list_payload_items(payload, "db_verifications"),
@@ -97,6 +103,19 @@ def _operation_inventory_list_field_diagnostics(
                 )
             )
     return diagnostics
+
+
+def _route_method_evidence_required(payload: dict[str, Any]) -> bool:
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    contracts = metadata.get("contracts")
+    if not isinstance(contracts, dict):
+        return False
+    routes = contracts.get("routes")
+    if not isinstance(routes, dict):
+        return False
+    return bool(routes.get("method_evidence_required") or routes.get("require_method_evidence"))
 
 
 def _known_entities_from_sibling_inventory(path: Path) -> tuple[set[str], list[GenerationDiagnostic]]:

@@ -93,6 +93,36 @@ class DraftScenarioRenderer:
         diagnostics: list[GenerationDiagnostic] = []
 
         for test_case in plan.test_cases:
+            if _case_is_explicitly_deferred(test_case):
+                check = UnsupportedCheck(
+                    case_id=test_case.case_id,
+                    reason_code="case_readiness_deferred",
+                    message="Planned case was explicitly marked deferred and must not be rendered for promotion.",
+                    details={
+                        "readiness": _case_support_readiness(test_case),
+                        "deferred_reason": str(test_case.metadata.get("deferred_reason", "")),
+                    },
+                )
+                unsupported_checks.append(check)
+                deferred_items.append(
+                    DeferredScenarioItem(
+                        case_id=test_case.case_id,
+                        title=test_case.title,
+                        reason_code="case_readiness_deferred",
+                        message="Planned case was explicitly marked deferred and was not rendered as a runnable draft.",
+                        unsupported_checks=[check],
+                    )
+                )
+                diagnostics.append(
+                    GenerationDiagnostic(
+                        code="scenario_draft_deferred_by_case_readiness",
+                        message="Scenario draft rendering skipped a case explicitly marked deferred.",
+                        severity=DiagnosticSeverity.WARNING,
+                        source_ref=test_case.case_id,
+                        details={"reason_code": check.reason_code},
+                    )
+                )
+                continue
             blocking_gap_checks = _blocking_gap_checks(test_case)
             if blocking_gap_checks:
                 unsupported_checks.extend(blocking_gap_checks)
@@ -553,6 +583,8 @@ class DraftScenarioRenderer:
 
 
 def _supported_api_hint(test_case: PlannedTestCase) -> dict[str, Any] | None:
+    if _case_is_explicitly_deferred(test_case):
+        return None
     route_hint = _route_hint_support(test_case)
     if route_hint is not None:
         return route_hint
@@ -720,6 +752,8 @@ def _workflow_steps_renderable(test_case: PlannedTestCase) -> bool:
 
 
 def _workflow_route_binding(test_case: PlannedTestCase) -> dict[str, Any] | None:
+    if _case_is_explicitly_deferred(test_case):
+        return None
     for workflow_step in test_case.workflow_steps:
         if workflow_step.step_type.strip().lower() != "api" or workflow_step.route is None:
             continue
@@ -912,6 +946,14 @@ def _case_support_readiness(test_case: PlannedTestCase) -> str:
     if test_case.support is not None and test_case.support.readiness:
         return test_case.support.readiness
     return str(test_case.metadata.get("readiness", ""))
+
+
+def _case_is_explicitly_deferred(test_case: PlannedTestCase) -> bool:
+    readiness = _case_support_readiness(test_case).strip().lower()
+    if readiness in {"deferred", "unsupported_deferred", "not_ready", "not_promotable"}:
+        return True
+    tags = {tag.strip().lower() for tag in test_case.tags}
+    return "deferred" in tags or "deferred-multi-actor" in tags
 
 
 def _case_support_route_hints(test_case: PlannedTestCase) -> list[dict[str, Any]]:

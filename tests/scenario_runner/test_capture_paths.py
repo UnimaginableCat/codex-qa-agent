@@ -35,6 +35,13 @@ class CapturePathResolutionTests(unittest.TestCase):
 
         self.assertEqual(result, 100)
 
+    def test_capture_aliases_response_json_root_array_to_response_body(self) -> None:
+        payload = {"response": {"body": [{"company_member_guid": "partner-1"}]}}
+
+        result = self.executor.resolve_capture_value(payload, "response.json[0].company_member_guid")
+
+        self.assertEqual(result, "partner-1")
+
     def test_capture_keeps_existing_dotted_numeric_list_index(self) -> None:
         payload = {"response": {"body": {"attributes": [{"id": 29}]}}}
 

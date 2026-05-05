@@ -684,6 +684,99 @@ db_verifications: []
             )
         )
 
+    def test_validate_operation_inventory_blocks_missing_route_method_evidence_when_required(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: GET
+    path: /api/price_list/{{price_list_id}}/export/
+    success_status: 200
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      method_evidence_required: true
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_route_method_evidence_missing", codes)
+
+    def test_validate_operation_inventory_allows_route_method_evidence_when_required(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: POST
+    path: /api/price_list/{{price_list_id}}/export/
+    success_status: 200
+    method_evidence:
+      - code/demo/urls.py maps export/ to PriceListExportView
+      - code/demo/views.py PriceListExportView.post handles export
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      method_evidence_required: true
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+
     def test_validate_authoring_bundle_returns_pass_for_scaffolded_bundle(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

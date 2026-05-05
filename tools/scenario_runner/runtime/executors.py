@@ -323,6 +323,8 @@ class _BaseStepExecutor:
             expression = "response.body"
         elif expression.startswith("response.json."):
             expression = "response.body." + expression.removeprefix("response.json.")
+        elif expression.startswith("response.json["):
+            expression = "response.body" + expression.removeprefix("response.json")
 
         lookup = resolve_path(payload, expression)
         if not lookup.exists:

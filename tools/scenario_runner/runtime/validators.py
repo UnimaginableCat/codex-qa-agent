@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import json
 from numbers import Number
 import re
 from typing import Any
@@ -442,6 +443,11 @@ class ScenarioStepValidator:
             normalized.startswith("'") and normalized.endswith("'")
         ):
             return normalized[1:-1]
+        if normalized.startswith(("[", "{")):
+            try:
+                return json.loads(normalized)
+            except json.JSONDecodeError:
+                return normalized
         if re.fullmatch(r"-?\d+", normalized):
             return int(normalized)
         if re.fullmatch(r"-?(?:\d+\.\d+|\d+\.|\.\d+)(?:[eE][+-]?\d+)?|-?\d+[eE][+-]?\d+", normalized):
