@@ -288,12 +288,11 @@ def _has_same_state_evidence(value: Any) -> bool:
 
 def _has_method_evidence(value: Any) -> bool:
     if isinstance(value, str):
-        return bool(value.strip())
+        return False
     if isinstance(value, list):
         return any(_has_method_evidence(item) for item in value)
     if isinstance(value, dict):
-        return any(
-            bool(str(value.get(field) or "").strip())
-            for field in ("method_source", "source_ref", "source", "evidence")
-        )
+        has_source = bool(str(value.get("source_ref") or value.get("source") or "").strip())
+        has_evidence = bool(str(value.get("method_source") or value.get("evidence") or "").strip())
+        return has_source and has_evidence
     return False

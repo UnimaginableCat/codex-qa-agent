@@ -305,6 +305,7 @@ class AuthoringCase:
     scenario_variables: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     required_permission_state: list[dict[str, Any]] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -337,6 +338,7 @@ class AuthoringCase:
             required_permission_state=[
                 dict(item) for item in payload.get("required_permission_state", []) if isinstance(item, dict)
             ],
+            open_questions=[str(item) for item in payload.get("open_questions", [])],
         )
 
 

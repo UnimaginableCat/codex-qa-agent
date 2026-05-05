@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from tools.generation.domain.models import GenerationDiagnostic
 
 from ..case_diagnostics.identity import _env_backed_identity_guid_diagnostics
@@ -82,9 +84,52 @@ def validate_top_level(
             )
         )
     diagnostics.extend(_env_backed_identity_guid_diagnostics(authoring_plan, source_ref))
+    diagnostics.extend(_promotion_blocking_open_question_diagnostics(authoring_plan, source_ref))
     diagnostics.extend(_entity_identity_diagnostics(authoring_plan))
     diagnostics.extend(_duplicate_case_id_diagnostics(authoring_plan))
     return diagnostics
+
+
+_PROMOTION_BLOCKING_OPEN_QUESTION_RE = re.compile(
+    r"\b(?:before|prior to)\s+(?:promot(?:e|ing|ion)|render(?:ing)?|run(?:ning)?|execut(?:e|ion))\b",
+    re.IGNORECASE,
+)
+
+
+def _promotion_blocking_open_question_diagnostics(
+    authoring_plan: AuthoringPlan,
+    source_ref: str,
+) -> list[GenerationDiagnostic]:
+    blocking_questions: list[dict[str, object]] = [
+        {"scope": "plan", "question": question}
+        for question in authoring_plan.open_questions
+        if _PROMOTION_BLOCKING_OPEN_QUESTION_RE.search(str(question))
+    ]
+    for index, case in enumerate(authoring_plan.cases, start=1):
+        blocking_questions.extend(
+            {
+                "scope": "case",
+                "case_id": case.id,
+                "case_index": index,
+                "question": question,
+            }
+            for question in case.open_questions
+            if _PROMOTION_BLOCKING_OPEN_QUESTION_RE.search(str(question))
+        )
+    if not blocking_questions:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_open_question_blocks_promotion",
+            (
+                "Open questions declare work that must be resolved before promotion or execution. "
+                "Resolve these questions, mark the affected cases deferred, or move non-blocking notes "
+                "out of open_questions before downstream promotion."
+            ),
+            source_ref=source_ref,
+            details={"open_questions": blocking_questions},
+        )
+    ]
 
 
 def _is_code_project_path(value: str) -> bool:
