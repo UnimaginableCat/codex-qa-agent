@@ -294,6 +294,6 @@ def _has_method_evidence(value: Any) -> bool:
     if isinstance(value, dict):
         return any(
             bool(str(value.get(field) or "").strip())
-            for field in ("method", "method_source", "source_ref", "source", "evidence")
+            for field in ("method_source", "source_ref", "source", "evidence")
         )
     return False

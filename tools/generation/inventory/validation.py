@@ -115,7 +115,25 @@ def _route_method_evidence_required(payload: dict[str, Any]) -> bool:
     routes = contracts.get("routes")
     if not isinstance(routes, dict):
         return False
-    return bool(routes.get("method_evidence_required") or routes.get("require_method_evidence"))
+    if "method_evidence_required" in routes:
+        return _coerce_bool(routes.get("method_evidence_required"))
+    if "require_method_evidence" in routes:
+        return _coerce_bool(routes.get("require_method_evidence"))
+    return False
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off", ""}:
+            return False
+    return False
 
 
 def _known_entities_from_sibling_inventory(path: Path) -> tuple[set[str], list[GenerationDiagnostic]]:
