@@ -74,6 +74,7 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
             _list_payload_items(payload, "routes"),
             path=path,
             require_method_evidence=_route_method_evidence_required(payload),
+            require_action_like_method_evidence=not _route_method_evidence_explicitly_disabled(payload),
         )
     )
     diagnostics.extend(
@@ -116,24 +117,40 @@ def _route_method_evidence_required(payload: dict[str, Any]) -> bool:
     if not isinstance(routes, dict):
         return False
     if "method_evidence_required" in routes:
-        return _coerce_bool(routes.get("method_evidence_required"))
+        return _parse_bool(routes.get("method_evidence_required")) is True
     if "require_method_evidence" in routes:
-        return _coerce_bool(routes.get("require_method_evidence"))
+        return _parse_bool(routes.get("require_method_evidence")) is True
     return False
 
 
-def _coerce_bool(value: Any) -> bool:
+def _route_method_evidence_explicitly_disabled(payload: dict[str, Any]) -> bool:
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    contracts = metadata.get("contracts")
+    if not isinstance(contracts, dict):
+        return False
+    routes = contracts.get("routes")
+    if not isinstance(routes, dict):
+        return False
+    for key in ("method_evidence_required", "require_method_evidence"):
+        if key in routes and _parse_bool(routes.get(key)) is False:
+            return True
+    return False
+
+
+def _parse_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return value != 0
+        return value != 0 if value in {0, 1} else None
     if isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in {"true", "1", "yes", "y", "on"}:
             return True
-        if normalized in {"false", "0", "no", "n", "off", ""}:
+        if normalized in {"false", "0", "no", "n", "off"}:
             return False
-    return False
+    return None
 
 
 def _known_entities_from_sibling_inventory(path: Path) -> tuple[set[str], list[GenerationDiagnostic]]:

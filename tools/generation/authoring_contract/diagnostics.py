@@ -54,6 +54,7 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_permission_prerequisite_requires_required_state",
     "authoring_case_readiness_evidence_missing",
     "authoring_open_question_blocks_promotion",
+    "authoring_non_blocking_note_blocks_promotion",
 }
 
 

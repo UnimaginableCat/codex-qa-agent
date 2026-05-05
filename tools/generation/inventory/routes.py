@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from tools.generation.domain.models import GenerationDiagnostic
@@ -14,6 +15,16 @@ from tools.generation.inventory.common import (
 
 
 _ALLOWED_SAME_STATE_BEHAVIORS = {"reject", "idempotent_success"}
+_ACTION_LIKE_ROUTE_SEGMENTS = {
+    "calculate",
+    "download",
+    "export",
+    "export-excel",
+    "import",
+    "report",
+    "search",
+    "upload",
+}
 
 
 def _route_inventory_diagnostics(
@@ -21,6 +32,7 @@ def _route_inventory_diagnostics(
     *,
     path: Path,
     require_method_evidence: bool = False,
+    require_action_like_method_evidence: bool = True,
 ) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     for index, item in enumerate(items, start=1):
@@ -41,7 +53,13 @@ def _route_inventory_diagnostics(
                 item,
                 path=path,
                 route_index=index,
-                required=require_method_evidence,
+                required=(
+                    require_method_evidence
+                    or (
+                        require_action_like_method_evidence
+                        and _is_action_like_route_path(str(item.get("path") or ""))
+                    )
+                ),
             )
         )
         diagnostics.extend(_route_state_contract_diagnostics(item, path=path, route_index=index))
@@ -112,9 +130,10 @@ def _route_method_evidence_diagnostics(
         _diagnostic(
             code="adapter_operation_inventory_route_method_evidence_missing",
             message=(
-                "Route method evidence is required by metadata.contracts.routes.method_evidence_required. "
+                "Route method evidence is required by metadata.contracts.routes.method_evidence_required "
+                "or because the path is an action-like endpoint. "
                 "Record the router/controller/source line that proves the HTTP method; do not infer methods "
-                "from endpoint names such as export or download."
+                "from endpoint names such as search, export, or download."
             ),
             path=path,
             details={"route_index": route_index, "method": item.get("method"), "path": item.get("path")},
@@ -295,4 +314,21 @@ def _has_method_evidence(value: Any) -> bool:
         has_source = bool(str(value.get("source_ref") or value.get("source") or "").strip())
         has_evidence = bool(str(value.get("method_source") or value.get("evidence") or "").strip())
         return has_source and has_evidence
+    return False
+
+
+def _is_action_like_route_path(route_path: str) -> bool:
+    for segment in route_path.strip("/").split("/"):
+        normalized_segment = segment.strip().lower()
+        if not normalized_segment or normalized_segment.startswith("{{"):
+            continue
+        if normalized_segment in _ACTION_LIKE_ROUTE_SEGMENTS:
+            return True
+        tokens = {
+            token
+            for token in re.split(r"[-_.]+", normalized_segment)
+            if token
+        }
+        if tokens & _ACTION_LIKE_ROUTE_SEGMENTS:
+            return True
     return False

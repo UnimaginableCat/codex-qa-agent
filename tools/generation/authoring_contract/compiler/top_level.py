@@ -85,6 +85,7 @@ def validate_top_level(
         )
     diagnostics.extend(_env_backed_identity_guid_diagnostics(authoring_plan, source_ref))
     diagnostics.extend(_promotion_blocking_open_question_diagnostics(authoring_plan, source_ref))
+    diagnostics.extend(_promotion_blocking_non_blocking_note_diagnostics(authoring_plan, source_ref))
     diagnostics.extend(_entity_identity_diagnostics(authoring_plan))
     diagnostics.extend(_duplicate_case_id_diagnostics(authoring_plan))
     return diagnostics
@@ -130,6 +131,61 @@ def _promotion_blocking_open_question_diagnostics(
             details={"open_questions": blocking_questions},
         )
     ]
+
+
+def _promotion_blocking_non_blocking_note_diagnostics(
+    authoring_plan: AuthoringPlan,
+    source_ref: str,
+) -> list[GenerationDiagnostic]:
+    blocking_notes = [
+        {"scope": "plan", "metadata_key": "non_blocking_notes", "note": note}
+        for note in _metadata_note_strings(authoring_plan.metadata.get("non_blocking_notes"))
+        if _PROMOTION_BLOCKING_OPEN_QUESTION_RE.search(note)
+    ]
+    for index, case in enumerate(authoring_plan.cases, start=1):
+        blocking_notes.extend(
+            {
+                "scope": "case",
+                "case_id": case.id,
+                "case_index": index,
+                "metadata_key": "non_blocking_notes",
+                "note": note,
+            }
+            for note in _metadata_note_strings(case.metadata.get("non_blocking_notes"))
+            if _PROMOTION_BLOCKING_OPEN_QUESTION_RE.search(note)
+        )
+    if not blocking_notes:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_non_blocking_note_blocks_promotion",
+            (
+                "metadata.non_blocking_notes contains wording that says work must be reviewed or resolved "
+                "before promotion or execution. Keep true blockers in open_questions/deferred cases instead "
+                "of moving them to non-blocking notes."
+            ),
+            source_ref=source_ref,
+            details={"non_blocking_notes": blocking_notes},
+        )
+    ]
+
+
+def _metadata_note_strings(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        notes: list[str] = []
+        for item in value:
+            notes.extend(_metadata_note_strings(item))
+        return notes
+    if isinstance(value, dict):
+        notes: list[str] = []
+        for item in value.values():
+            notes.extend(_metadata_note_strings(item))
+        return notes
+    return []
 
 
 def _is_code_project_path(value: str) -> bool:

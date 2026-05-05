@@ -950,7 +950,11 @@ def _case_support_readiness(test_case: PlannedTestCase) -> str:
 
 def _case_is_explicitly_deferred(test_case: PlannedTestCase) -> bool:
     readiness = _case_support_readiness(test_case).strip().lower()
-    if readiness in {"deferred", "unsupported_deferred", "not_ready", "not_promotable"}:
+    if readiness.startswith("deferred") or readiness in {
+        "unsupported_deferred",
+        "not_ready",
+        "not_promotable",
+    }:
         return True
     tags = {tag.strip().lower() for tag in test_case.tags}
     return "deferred" in tags or "deferred-multi-actor" in tags
