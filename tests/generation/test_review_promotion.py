@@ -338,6 +338,29 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertEqual(result.error_count, 0)
         self.assertEqual(result.blocked_count, 1)
 
+    def test_batch_promotion_is_atomic_when_one_draft_is_blocked(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_workflow_draft_run(root)
+            _duplicate_first_draft(payload, draft_id="draft-tc-002", file_name="tc-002-clean-workflow.md")
+            _make_first_draft_expectation_unsupported(payload)
+
+            result = ScenarioDraftBatchPromotionService().promote(
+                ScenarioPromotionBatchRequest(run_id=payload["run_id"], workspace_root=root)
+            )
+
+            promoted_files = list((root / "scenarios").rglob("*.md"))
+
+        self.assertEqual(result.status.value, "BLOCKED")
+        self.assertEqual(result.promoted_count, 0)
+        self.assertEqual(result.error_count, 0)
+        self.assertEqual(result.blocked_count, 1)
+        self.assertTrue(any(item.status.value == "PASS" for item in result.results))
+        self.assertEqual(promoted_files, [])
+        self.assertTrue(
+            any(diagnostic.code == "scenario_batch_promotion_atomic_blocked" for diagnostic in result.diagnostics)
+        )
+
     def test_batch_promotion_can_purge_target_dir_before_rerun(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -66,8 +66,53 @@ class ScenarioDraftPromotionService:
             return result
         context_diagnostics = _run_context_consistency_diagnostics(run_context)
         if context_diagnostics:
-            return self._finalize(run_context, request, StepStatus.BLOCKED, context_diagnostics)
+            result = self._finalize(run_context, request, StepStatus.BLOCKED, context_diagnostics)
+            result.promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)
+            return result
 
+        result = self.prepare(
+            request,
+            run_context=run_context,
+            render_result=render_result,
+            ignore_existing_target=request.purge_target_dir,
+        )
+        if result.status != StepStatus.PASS:
+            result.promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)
+            return result
+
+        if request.purge_target_dir and result.target_path is not None:
+            _purge_target_dir(result.target_path.parent)
+        if result.source_path is None or result.target_path is None:
+            result.status = StepStatus.ERROR
+            result.diagnostics.append(
+                GenerationDiagnostic(
+                    code="scenario_promotion_prepared_paths_missing",
+                    message="Prepared promotion result is missing source or target path.",
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=request.draft_id,
+                )
+            )
+            result.promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)
+            return result
+
+        result.target_path.parent.mkdir(parents=True, exist_ok=True)
+        draft_content = result.source_path.read_text(encoding="utf-8")
+        result.target_path.write_text(
+            _promotion_header(run_context.run_id, request.draft_id) + draft_content,
+            encoding="utf-8",
+        )
+        result.promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)
+        return result
+
+    def prepare(
+        self,
+        request: ScenarioPromotionRequest,
+        *,
+        run_context: GenerationRunContext,
+        render_result: object,
+        ignore_existing_target: bool = False,
+    ) -> ScenarioPromotionResult:
+        diagnostics: list[GenerationDiagnostic] = []
         draft = _find_draft(render_result, request.draft_id)
         validation = _find_validation(render_result, request.draft_id)
         if draft is None:
@@ -180,10 +225,8 @@ class ScenarioDraftPromotionService:
                 source_path=source_path,
             )
         target_dir = _promotion_target_dir(target_dir, run_context)
-        if request.purge_target_dir:
-            _purge_target_dir(target_dir)
         target_path = target_dir / _promoted_scenario_filename(run_context.source_id, request.draft_id)
-        if target_path.exists():
+        if target_path.exists() and not ignore_existing_target:
             diagnostics.append(
                 GenerationDiagnostic(
                     code="scenario_promotion_target_exists",
@@ -205,9 +248,6 @@ class ScenarioDraftPromotionService:
                 target_path=target_path,
             )
 
-        target_dir.mkdir(parents=True, exist_ok=True)
-        draft_content = source_path.read_text(encoding="utf-8")
-        target_path.write_text(_promotion_header(run_context.run_id, request.draft_id) + draft_content, encoding="utf-8")
         return self._finalize(
             run_context,
             request,
@@ -235,8 +275,6 @@ class ScenarioDraftPromotionService:
             target_path=target_path,
             diagnostics=diagnostics,
         )
-        promotion_result_path = self.artifact_store.write_promotion_result(run_context, result)
-        result.promotion_result_path = promotion_result_path
         return result
 
 
@@ -320,10 +358,8 @@ class ScenarioDraftBatchPromotionService:
                 promoted_count=0,
                 error_count=0,
             )
-        if request.purge_target_dir:
-            _purge_target_dir(target_dir)
         results = [
-            self.promotion_service.promote(
+            self.promotion_service.prepare(
                 ScenarioPromotionRequest(
                     run_id=request.run_id,
                     draft_id=draft_id,
@@ -333,19 +369,73 @@ class ScenarioDraftBatchPromotionService:
                     allow_known_gaps=request.allow_known_gaps,
                     known_gaps_reviewed=request.known_gaps_reviewed,
                     purge_target_dir=False,
-                )
+                ),
+                run_context=run_context,
+                render_result=render_result,
+                ignore_existing_target=request.purge_target_dir,
             )
             for draft_id in draft_ids
         ]
-        promoted_count = sum(1 for item in results if item.status == StepStatus.PASS)
-        error_count = sum(1 for item in results if item.status == StepStatus.ERROR)
-        blocked_count = sum(1 for item in results if item.status == StepStatus.BLOCKED)
         status = _promotion_batch_status(results)
         diagnostics.extend(
             diagnostic
             for item in results
             for diagnostic in item.diagnostics
         )
+        if status != StepStatus.PASS:
+            diagnostics.append(
+                GenerationDiagnostic(
+                    code="scenario_batch_promotion_atomic_blocked",
+                    message=(
+                        "Batch promotion is atomic; no scenario files were written because at least one selected "
+                        "draft failed promotion preflight."
+                    ),
+                    severity=DiagnosticSeverity.ERROR,
+                    source_ref=request.run_id,
+                    details={
+                        "requested_count": len(draft_ids),
+                        "preflight_pass_count": sum(1 for item in results if item.status == StepStatus.PASS),
+                    },
+                )
+            )
+            error_count = sum(1 for item in results if item.status == StepStatus.ERROR)
+            blocked_count = sum(1 for item in results if item.status == StepStatus.BLOCKED)
+            return self._finalize(
+                run_context,
+                request,
+                status,
+                diagnostics=diagnostics,
+                results=results,
+                target_dir=target_dir,
+                promoted_count=0,
+                error_count=error_count,
+                blocked_count=blocked_count,
+            )
+
+        if request.purge_target_dir:
+            _purge_target_dir(target_dir)
+        for item in results:
+            if item.source_path is None or item.target_path is None:
+                item.status = StepStatus.ERROR
+                item.diagnostics.append(
+                    GenerationDiagnostic(
+                        code="scenario_batch_promotion_prepared_paths_missing",
+                        message="Prepared batch promotion item is missing source or target path.",
+                        severity=DiagnosticSeverity.ERROR,
+                        source_ref=item.draft_id,
+                    )
+                )
+                continue
+            item.target_path.parent.mkdir(parents=True, exist_ok=True)
+            draft_content = item.source_path.read_text(encoding="utf-8")
+            item.target_path.write_text(
+                _promotion_header(run_context.run_id, item.draft_id) + draft_content,
+                encoding="utf-8",
+            )
+        promoted_count = sum(1 for item in results if item.status == StepStatus.PASS)
+        error_count = sum(1 for item in results if item.status == StepStatus.ERROR)
+        blocked_count = sum(1 for item in results if item.status == StepStatus.BLOCKED)
+        status = _promotion_batch_status(results)
         return self._finalize(
             run_context,
             request,

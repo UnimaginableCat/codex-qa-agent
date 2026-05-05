@@ -124,7 +124,7 @@ def _route_method_evidence_diagnostics(
     route_index: int,
     required: bool,
 ) -> list[GenerationDiagnostic]:
-    if not required or _has_method_evidence(item.get("method_evidence")):
+    if not required or _has_method_evidence(item.get("method_evidence"), method=item.get("method")):
         return []
     return [
         _diagnostic(
@@ -305,16 +305,32 @@ def _has_same_state_evidence(value: Any) -> bool:
     return False
 
 
-def _has_method_evidence(value: Any) -> bool:
+def _has_method_evidence(value: Any, *, method: Any) -> bool:
     if isinstance(value, str):
         return False
     if isinstance(value, list):
-        return any(_has_method_evidence(item) for item in value)
+        return any(_has_method_evidence(item, method=method) for item in value)
     if isinstance(value, dict):
         has_source = bool(str(value.get("source_ref") or value.get("source") or "").strip())
-        has_evidence = bool(str(value.get("method_source") or value.get("evidence") or "").strip())
-        return has_source and has_evidence
+        evidence_text = str(value.get("method_source") or value.get("evidence") or "").strip()
+        has_evidence = bool(evidence_text)
+        return has_source and has_evidence and _method_evidence_mentions_declared_method(evidence_text, method)
     return False
+
+
+def _method_evidence_mentions_declared_method(evidence_text: str, method: Any) -> bool:
+    normalized_method = str(method or "").strip().lower()
+    if not normalized_method:
+        return False
+    normalized_evidence = evidence_text.lower()
+    if re.search(rf"\b{re.escape(normalized_method)}\b", normalized_evidence):
+        return True
+    handler_patterns = (
+        rf"\.{re.escape(normalized_method)}\b",
+        rf"\bdef\s+{re.escape(normalized_method)}\b",
+        rf"\b{re.escape(normalized_method)}\s*\(",
+    )
+    return any(re.search(pattern, normalized_evidence) for pattern in handler_patterns)
 
 
 def _is_action_like_route_path(route_path: str) -> bool:
