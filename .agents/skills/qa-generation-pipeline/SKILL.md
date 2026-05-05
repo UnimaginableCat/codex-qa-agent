@@ -77,7 +77,7 @@ For review and promotion gates, prefer JSON and verify numeric counts before con
 - review: require `status=PASS`, `draft_count > 0`, `invalid_draft_count = 0`, `deferred_item_count = 0`, and `total_edit_targets = 0`
 - review: report `drafts_with_edit_targets`, `total_edit_targets`, `drafts_with_high_priority_edit_targets`, and `high_priority_edit_target_count` explicitly; do not summarize review as clean solely because `status=PASS`
 - promotion: require `status=PASS`, `promoted_count = requested_count`, `error_count = 0`, and `blocked_count = 0`
-- promotion: if review finds edit targets or a non-promotable advisory, repair source authoring/drafts before promotion; use `--allow-known-gaps --known-gaps-reviewed` only when the operator explicitly accepts the concrete review findings
+- promotion: if review finds edit targets or a non-promotable advisory, repair source authoring/drafts before promotion; use `--allow-known-gaps --known-gaps-reviewed` only when the operator explicitly accepts the concrete review findings. A request that includes `promote` in the desired stage list is not consent to promote known gaps.
 
 Use guided runner mode by default. Use auto mode only when the user explicitly asks for non-interactive execution.
 

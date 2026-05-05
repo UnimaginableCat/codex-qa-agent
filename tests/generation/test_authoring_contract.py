@@ -673,6 +673,41 @@ cases:
         self.assertEqual(matching[0].details["open_questions"][0]["scope"], "case")
         self.assertEqual(matching[0].details["open_questions"][0]["case_id"], "customer-detail-visibility")
 
+    def test_non_blocking_notes_cannot_hide_promotion_blockers(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-permissions-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={
+                "non_blocking_notes": [
+                    "Search response shape should be reviewed before promoting visibility cases."
+                ]
+            },
+            cases=[
+                AuthoringCase(
+                    id="customer-search-visibility",
+                    kind="api",
+                    objective="Verify customer search visibility.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/price_list/1/search/")),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_non_blocking_note_blocks_promotion"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_validate_warns_on_env_backed_role_identity_guid_variables(self) -> None:
         plan = AuthoringPlan(
             version=1,
