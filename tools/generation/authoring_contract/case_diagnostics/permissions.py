@@ -138,7 +138,7 @@ def _find_matching_permission_effect(
 def _field_matches(required_state: dict[str, str], effect: dict[str, str], field: str) -> bool:
     required_value = required_state.get(field)
     effect_value = effect.get(field)
-    return not required_value or not effect_value or required_value == effect_value
+    return not required_value or required_value == effect_value
 
 
 def _permission_key(item: dict[str, Any]) -> str:

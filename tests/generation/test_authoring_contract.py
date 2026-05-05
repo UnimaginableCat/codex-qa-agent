@@ -326,6 +326,106 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
             )
         )
 
+    def test_required_permission_state_specific_subject_or_resource_requires_specific_effect(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="document-permissions-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="admin"),
+            entities={
+                "document_access": AuthoringEntitySpec(
+                    id_field="document_access_id",
+                    operations={
+                        "grant_publish_without_subject": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/api/documents/{{document_id}}/access/update/"),
+                            request_body={"can_publish": True},
+                            permission_state_effects=[
+                                {
+                                    "key": "document.publish",
+                                    "state": "allowed",
+                                    "resource": "{{document_id}}",
+                                }
+                            ],
+                        ),
+                        "grant_publish_without_resource": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/api/documents/{{document_id}}/access/update/"),
+                            request_body={"user_id": "{{target_user_id}}", "can_publish": True},
+                            permission_state_effects=[
+                                {
+                                    "key": "document.publish",
+                                    "state": "allowed",
+                                    "subject": "{{target_user_id}}",
+                                }
+                            ],
+                        ),
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="specific-subject-requires-subject-effect",
+                    kind="workflow",
+                    objective="Actor with publish access publishes a document after access is updated for that actor.",
+                    state_change="update",
+                    setup=[AuthoringSetupStep(use_entity="document_access", operation="grant_publish_without_subject")],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/api/documents/{{document_id}}/publish/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    required_permission_state=[
+                        {
+                            "key": "document.publish",
+                            "state": "allowed",
+                            "subject": "{{target_user_id}}",
+                            "resource": "{{document_id}}",
+                        }
+                    ],
+                    metadata={"default_actor": "editor"},
+                    scenario_variables=[
+                        "document_id = env:DOCUMENT_ID",
+                        "target_user_id = literal:editor-1",
+                    ],
+                ),
+                AuthoringCase(
+                    id="specific-resource-requires-resource-effect",
+                    kind="workflow",
+                    objective="Actor with publish access publishes the intended document after access is updated.",
+                    state_change="update",
+                    setup=[AuthoringSetupStep(use_entity="document_access", operation="grant_publish_without_resource")],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/api/documents/{{document_id}}/publish/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    required_permission_state=[
+                        {
+                            "key": "document.publish",
+                            "state": "allowed",
+                            "subject": "{{target_user_id}}",
+                            "resource": "{{document_id}}",
+                        }
+                    ],
+                    metadata={"default_actor": "editor"},
+                    scenario_variables=[
+                        "document_id = env:DOCUMENT_ID",
+                        "target_user_id = literal:editor-1",
+                    ],
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        setup_required_diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_permission_state_setup_required"
+        ]
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertEqual(len(setup_required_diagnostics), 2)
+
     def test_compile_file_blocks_invalid_required_permission_state_shape(self) -> None:
         with TemporaryDirectory() as tmp:
             authoring_plan_path = Path(tmp) / "authoring-plan.yaml"
