@@ -194,6 +194,7 @@ class AuthoringEntityOperation:
     expected_outcomes: list[str] = field(default_factory=list)
     captures: list[str] = field(default_factory=list)
     column_types: dict[str, str] = field(default_factory=dict)
+    permission_state_effects: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -234,6 +235,9 @@ class AuthoringEntityOperation:
             expected_outcomes=[str(item) for item in payload.get("expected_outcomes", [])],
             captures=[str(item) for item in payload.get("captures", []) or payload.get("capture", [])],
             column_types={str(key): str(value) for key, value in dict(payload.get("column_types") or {}).items()},
+            permission_state_effects=[
+                dict(item) for item in payload.get("permission_state_effects", []) if isinstance(item, dict)
+            ],
         )
 
 
@@ -300,6 +304,7 @@ class AuthoringCase:
     tags: list[str] = field(default_factory=list)
     scenario_variables: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    required_permission_state: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -329,6 +334,9 @@ class AuthoringCase:
             tags=[str(item) for item in payload.get("tags", [])],
             scenario_variables=[str(item) for item in payload.get("scenario_variables", [])],
             metadata=dict(payload.get("metadata") or {}),
+            required_permission_state=[
+                dict(item) for item in payload.get("required_permission_state", []) if isinstance(item, dict)
+            ],
         )
 
 

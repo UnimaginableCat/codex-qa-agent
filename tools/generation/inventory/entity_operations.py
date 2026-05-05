@@ -126,4 +126,25 @@ def _entity_operation_executable_diagnostics(
                 details={"operation_index": operation_index, "entity": entity_name, "operation": operation_name},
             )
         )
+    permission_state_effects = item.get("permission_state_effects")
+    if permission_state_effects is not None and not _is_valid_permission_state_effects(permission_state_effects):
+        diagnostics.append(
+            _diagnostic(
+                code="adapter_operation_inventory_permission_state_effects_invalid",
+                message="permission_state_effects must be a YAML array of objects with key, permission, or name.",
+                path=path,
+                details={"operation_index": operation_index, "entity": entity_name, "operation": operation_name},
+            )
+        )
     return diagnostics
+
+
+def _is_valid_permission_state_effects(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    for item in value:
+        if not isinstance(item, dict):
+            return False
+        if not str(item.get("key") or item.get("permission") or item.get("name") or "").strip():
+            return False
+    return True

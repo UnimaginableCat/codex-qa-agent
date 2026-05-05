@@ -194,6 +194,14 @@ def _validate_payload_shape(payload: Any, source_ref: str) -> list[GenerationDia
                     owner=case_id,
                 )
             )
+            diagnostics.extend(
+                _validate_permission_state_shape(
+                    case_payload.get("required_permission_state"),
+                    source_ref,
+                    field_path=f"cases[{case_index}].required_permission_state",
+                    owner=case_id,
+                )
+            )
     for field_name in ("assumptions", "open_questions"):
         value = payload.get(field_name)
         if value is not None and not isinstance(value, list):
@@ -203,6 +211,48 @@ def _validate_payload_shape(payload: Any, source_ref: str) -> list[GenerationDia
                     f"Field '{field_name}' must be a JSON array.",
                     source_ref=source_ref,
                     details={"field": field_name},
+                )
+            )
+    return diagnostics
+
+
+def _validate_permission_state_shape(
+    value: Any,
+    source_ref: str,
+    *,
+    field_path: str,
+    owner: str,
+) -> list[GenerationDiagnostic]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return [
+            authoring_diagnostic(
+                "authoring_permission_state_contract_invalid",
+                "required_permission_state must be a YAML array of objects.",
+                source_ref=source_ref,
+                details={"field": field_path, "owner": owner},
+            )
+        ]
+    diagnostics: list[GenerationDiagnostic] = []
+    for item_index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_permission_state_contract_invalid",
+                    "Each required_permission_state entry must be a YAML object.",
+                    source_ref=source_ref,
+                    details={"field": field_path, "owner": owner, "item_index": item_index},
+                )
+            )
+            continue
+        if not str(item.get("key") or item.get("permission") or item.get("name") or "").strip():
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_permission_state_contract_invalid",
+                    "Each required_permission_state entry must include key, permission, or name.",
+                    source_ref=source_ref,
+                    details={"field": field_path, "owner": owner, "item_index": item_index},
                 )
             )
     return diagnostics

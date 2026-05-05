@@ -147,6 +147,10 @@ def _sync_route_operation_from_inventory(
         expected_outcomes=list(existing_operation.expected_outcomes),
         captures=_capture_rules_from_inventory(operation_item.get("captures"), fallback=existing_operation.captures),
         column_types=dict(existing_operation.column_types),
+        permission_state_effects=_dict_list_from_payload(
+            operation_item.get("permission_state_effects"),
+            fallback=existing_operation.permission_state_effects,
+        ),
     )
 
 
@@ -175,6 +179,7 @@ def _sync_db_operation_from_inventory(
             str(key): str(value)
             for key, value in dict(verification_item.get("column_types") or existing_operation.column_types).items()
         },
+        permission_state_effects=list(existing_operation.permission_state_effects),
     )
 
 
