@@ -499,6 +499,103 @@ cases:
             )
         )
 
+    def test_evidence_supported_readiness_requires_concrete_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-permissions-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            cases=[
+                AuthoringCase(
+                    id="read-permissions",
+                    kind="api",
+                    objective="Read permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/price_list/1/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                    metadata={"default_actor": "founder", "readiness": "evidence_supported"},
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_case_readiness_evidence_missing"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_evidence_supported_readiness_allows_concrete_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-permissions-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            cases=[
+                AuthoringCase(
+                    id="read-permissions",
+                    kind="api",
+                    objective="Read permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/price_list/1/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                    metadata={
+                        "default_actor": "founder",
+                        "readiness": "evidence_supported",
+                        "readiness_evidence": [
+                            "operation-inventory.yaml route and status contract validated against controller source."
+                        ],
+                    },
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+
+    def test_open_question_blocks_authoring_when_it_must_be_resolved_before_promotion(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-permissions-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            open_questions=[
+                "Confirm exact JSON paths for nested position price/cost_price fields before promoting visibility cases."
+            ],
+            cases=[
+                AuthoringCase(
+                    id="read-permissions",
+                    kind="api",
+                    objective="Read permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/price_list/1/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_open_question_blocks_promotion"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_validate_warns_on_env_backed_role_identity_guid_variables(self) -> None:
         plan = AuthoringPlan(
             version=1,
