@@ -11,6 +11,7 @@ from ..case_diagnostics.lifecycle import (
     _workflow_same_state_contract_warning,
     _workflow_setup_state_mismatch_diagnostics,
 )
+from ..case_diagnostics.permissions import _permission_state_contract_diagnostics
 from ..case_diagnostics.request_constraints import _request_constraint_diagnostics
 from ..case_diagnostics.visibility import _visibility_claim_diagnostics
 from ..diagnostics import authoring_diagnostic, derive_authoring_status
@@ -50,6 +51,7 @@ def compile_case(
     diagnostics.extend(_case_shape_diagnostics(case, case_ref, index=index, kind=kind))
     diagnostics.extend(_boundary_case_diagnostics(authoring_plan, case, case_ref, index=index))
     diagnostics.extend(_visibility_claim_diagnostics(authoring_plan, case, case_ref, index=index))
+    diagnostics.extend(_permission_state_contract_diagnostics(authoring_plan, case, case_ref, index=index))
 
     if _requires_persistence(case.state_change) and (
         case.oracle is None or case.oracle.persisted_state is None

@@ -15,6 +15,7 @@ from .lifecycle import (
 from .db_expectations import _db_string_placeholder_quoting_diagnostics
 from .email import _normalized_email_expectation_diagnostics
 from .request_constraints import _request_constraint_diagnostics
+from .permissions import _permission_state_contract_diagnostics
 from .visibility import _visibility_claim_diagnostics
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "_is_same_state_inventory_case",
     "_normalized_email_expectation_diagnostics",
     "_normalized_inventory_state",
+    "_permission_state_contract_diagnostics",
     "_request_constraint_diagnostics",
     "_same_state_inventory_contract_diagnostics",
     "_visibility_claim_diagnostics",
