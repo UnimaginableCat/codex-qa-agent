@@ -217,6 +217,8 @@ Do not delete coverage cases just to make validation pass. If a case cannot be e
 
 Do not author independently promoted scenarios that depend on another scenario having run first. Phrases such as "before this case runs", "grant must already be present", or "requires previous scenario" mean the case needs self-contained setup, a dedicated fixture, or an intentional deferred/open question; they are not acceptable runnable preconditions for batch execution.
 
+Do not add `actor` to individual setup steps as a workaround for multi-actor workflows. The current authoring/runner contract is scenario-actor scoped; setup-step actor overrides are blocked until multi-actor workflow support exists end to end in authoring, rendering, parsing, preflight, and runtime.
+
 For lifecycle routes, do not author same-state negative or idempotency cases until `operation-inventory.yaml` records:
 
 - `target_state`

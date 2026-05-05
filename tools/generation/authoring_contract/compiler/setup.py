@@ -26,6 +26,24 @@ def expand_setup_steps(
     diagnostics: list[GenerationDiagnostic] = []
     available_names = set(available_variables or set())
     for step_index, setup_step in enumerate(setup_steps, start=1):
+        if setup_step.actor.strip():
+            diagnostics.append(
+                authoring_diagnostic(
+                    "authoring_setup_step_actor_unsupported",
+                    (
+                        "Setup step actor overrides are not supported by the current runner contract. "
+                        "Make the scenario single-actor, split the workflow, or keep it deferred until "
+                        "multi-actor workflow execution is implemented end-to-end."
+                    ),
+                    source_ref=case_ref,
+                    details={
+                        "entity": setup_step.use_entity,
+                        "operation": setup_step.operation,
+                        "step_index": step_index,
+                        "actor": setup_step.actor,
+                    },
+                )
+            )
         operation, lookup_diagnostics = resolve_entity_operation(
             authoring_plan,
             setup_step,

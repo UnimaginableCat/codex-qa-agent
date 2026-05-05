@@ -17,6 +17,7 @@ Prefer `scenario_runner` over manual API/DB replay when a valid scenario file or
 - Projections: summary, report, guided diagnostics, and operator-facing read models.
 - Persistence: run state, pause state, journal, summary, report, and step artifacts.
 - CLI: thin adapter over service contracts. Do not duplicate orchestration, pause/resume, or operator action logic in the agent.
+- Runner code, parser semantics, and generated scenario markdown are not part of scenario execution evidence. Do not modify `tools/scenario_runner/*` or `scenarios/generated/*` during a scenario run to make a paused or failing scenario continue. Treat missing runner support or invalid generated markdown as a `BLOCKED`/tooling defect and route back to tool development or generation repair.
 
 # Core Commands
 
@@ -144,3 +145,4 @@ Read these references only when needed:
 
 - Never write source code into `artifacts/`.
 - Do not bypass the runner unless it cannot start or the user explicitly asks for manual debugging.
+- Do not change runner source code, parser field support, pause-state JSON, or generated scenario files while handling a runner pause. If the run exposes unsupported scenario semantics, report the blocker and stop for an explicit tool/generation fix request.

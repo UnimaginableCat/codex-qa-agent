@@ -1693,6 +1693,70 @@ cases:
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
         self.assertIn("adapter_operation_inventory_unknown_entity", codes)
 
+    def test_validate_authoring_plan_blocks_setup_step_actor_override(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            authoring_plan_path = root / "authoring-plan.yaml"
+            authoring_plan_path.write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover multi-actor setup.
+scope:
+  surface: users-controller
+entities:
+  user:
+    id_field: user_id
+    operations:
+      discover:
+        route:
+          method: GET
+          path: /users
+        captures:
+          - response.json.0.id -> user_id
+cases:
+  - id: update-user
+    kind: workflow
+    objective: Setup with unsupported actor override.
+    state_change: update
+    setup:
+      - use_entity: user
+        operation: discover
+        actor: admin
+    execute:
+      route:
+        method: PUT
+        path: /users/{{user_id}}
+      body:
+        name: Updated
+    oracle:
+      status_code: 200
+      business_checks:
+        - HTTP 200
+      persisted_state:
+        entity: user
+        operation: discover
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    [
+                        "--validate-authoring-plan",
+                        "--authoring-plan-file",
+                        str(authoring_plan_path),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("authoring_setup_step_actor_unsupported", codes)
+
     def test_plan_only_mode_generates_plan_and_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
             stdout = io.StringIO()

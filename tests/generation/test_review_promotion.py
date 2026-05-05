@@ -78,6 +78,20 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertEqual(review_set.items[0].readiness_category.value, "parser_invalid")
         self.assertEqual(review_set.items[0].promotion_advisory.value, "invalid_draft")
 
+    def test_review_service_handles_auth_required_draft_checklist(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _mark_first_draft_auth_required(payload)
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        auth_check = next(
+            check
+            for check in review_set.items[0].checklist.checks
+            if check.requirement.requirement_id == "auth_strategy"
+        )
+        self.assertEqual(auth_check.status.value, "satisfied")
+
     def test_review_service_defers_case_with_seeded_id_gap(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -139,6 +153,76 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             any(diagnostic.code == "scenario_promotion_review_gate_blocked" for diagnostic in result.diagnostics)
         )
 
+    def test_promotion_blocks_low_priority_review_targets_without_override(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+
+            result = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(run_id=payload["run_id"], draft_id="draft-tc-001", workspace_root=root)
+            )
+
+        self.assertEqual(result.status.value, "BLOCKED")
+        self.assertIsNone(result.target_path)
+        self.assertTrue(
+            any(diagnostic.code == "scenario_promotion_review_gate_blocked" for diagnostic in result.diagnostics)
+        )
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "scenario_promotion_review_gate_blocked"
+        )
+        self.assertGreater(diagnostic.details["edit_target_count"], 0)
+        self.assertEqual(diagnostic.details["high_priority_edit_target_count"], 0)
+
+    def test_promotion_blocks_placeholder_context_metadata(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _set_context_metadata(payload, source_id="replace-with-source-id", project="code/replace-project")
+
+            result = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(
+                    run_id=payload["run_id"],
+                    draft_id="draft-tc-001",
+                    workspace_root=root,
+                    allow_known_gaps=True,
+                    known_gaps_reviewed=True,
+                )
+            )
+
+        self.assertEqual(result.status.value, "BLOCKED")
+        self.assertTrue(
+            any(
+                diagnostic.code == "scenario_promotion_run_context_placeholder_metadata"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_promotion_blocks_context_agent_plan_metadata_mismatch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_draft_run(root)
+            _set_context_metadata(payload, source_id="stale-source", project="code/demo")
+
+            result = ScenarioDraftPromotionService().promote(
+                ScenarioPromotionRequest(
+                    run_id=payload["run_id"],
+                    draft_id="draft-tc-001",
+                    workspace_root=root,
+                    allow_known_gaps=True,
+                    known_gaps_reviewed=True,
+                )
+            )
+
+        self.assertEqual(result.status.value, "BLOCKED")
+        self.assertTrue(
+            any(
+                diagnostic.code == "scenario_promotion_run_context_agent_plan_mismatch"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_promotion_blocks_known_gaps_without_review_confirmation(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -190,7 +274,13 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             root = Path(tmp)
             payload = _generate_draft_run(root)
             result = ScenarioDraftPromotionService().promote(
-                ScenarioPromotionRequest(run_id=payload["run_id"], draft_id="draft-tc-001", workspace_root=root)
+                ScenarioPromotionRequest(
+                    run_id=payload["run_id"],
+                    draft_id="draft-tc-001",
+                    workspace_root=root,
+                    allow_known_gaps=True,
+                    known_gaps_reviewed=True,
+                )
             )
             self.assertEqual(result.status.value, "PASS")
             self.assertTrue(result.target_path.exists())
@@ -201,7 +291,13 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             root = Path(tmp)
             payload = _generate_long_named_draft_run(root)
             result = ScenarioDraftPromotionService().promote(
-                ScenarioPromotionRequest(run_id=payload["run_id"], draft_id="draft-tc-001", workspace_root=root)
+                ScenarioPromotionRequest(
+                    run_id=payload["run_id"],
+                    draft_id="draft-tc-001",
+                    workspace_root=root,
+                    allow_known_gaps=True,
+                    known_gaps_reviewed=True,
+                )
             )
 
             self.assertEqual(result.status.value, "PASS")
@@ -215,7 +311,12 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             payload = _generate_draft_run(root)
             _duplicate_first_draft(payload, draft_id="draft-tc-002", file_name="tc-002-create-user-2.md")
             result = ScenarioDraftBatchPromotionService().promote(
-                ScenarioPromotionBatchRequest(run_id=payload["run_id"], workspace_root=root)
+                ScenarioPromotionBatchRequest(
+                    run_id=payload["run_id"],
+                    workspace_root=root,
+                    allow_known_gaps=True,
+                    known_gaps_reviewed=True,
+                )
             )
             self.assertEqual(result.status.value, "PASS")
             self.assertEqual(result.promoted_count, 2)
@@ -242,12 +343,19 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             root = Path(tmp)
             payload = _generate_draft_run(root)
             first_result = ScenarioDraftBatchPromotionService().promote(
-                ScenarioPromotionBatchRequest(run_id=payload["run_id"], workspace_root=root)
+                ScenarioPromotionBatchRequest(
+                    run_id=payload["run_id"],
+                    workspace_root=root,
+                    allow_known_gaps=True,
+                    known_gaps_reviewed=True,
+                )
             )
             second_result = ScenarioDraftBatchPromotionService().promote(
                 ScenarioPromotionBatchRequest(
                     run_id=payload["run_id"],
                     workspace_root=root,
+                    allow_known_gaps=True,
+                    known_gaps_reviewed=True,
                     purge_target_dir=True,
                 )
             )
@@ -280,6 +388,8 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
                         str(root),
                         "--target-dir",
                         "scenarios/promoted",
+                        "--allow-known-gaps",
+                        "--known-gaps-reviewed",
                     ]
                 )
             promote_payload = json.loads(promote_stdout.getvalue())
@@ -302,6 +412,8 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
                         payload["run_id"],
                         "--workspace-root",
                         str(root),
+                        "--allow-known-gaps",
+                        "--known-gaps-reviewed",
                     ]
                 )
             second_stdout = io.StringIO()
@@ -314,6 +426,8 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
                         "--workspace-root",
                         str(root),
                         "--purge-target-dir",
+                        "--allow-known-gaps",
+                        "--known-gaps-reviewed",
                     ]
                 )
             first_payload = json.loads(first_stdout.getvalue())
@@ -544,6 +658,18 @@ def _mark_draft_invalid(render_result_path: Path) -> None:
     render_result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _mark_first_draft_auth_required(payload: dict[str, object]) -> None:
+    render_result_path = Path(payload["artifact_paths"]["scenario_render_result"])
+    render_payload = json.loads(render_result_path.read_text(encoding="utf-8"))
+    render_payload["draft_set"]["drafts"][0]["metadata"]["auth_strategy_required"] = True
+    render_payload["draft_set"]["drafts"][0]["metadata"]["auth_strategy_present"] = True
+    render_result_path.write_text(json.dumps(render_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
+    draft_text = draft_path.read_text(encoding="utf-8")
+    draft_path.write_text(draft_text + "\nAuth strategy: Bearer token\n", encoding="utf-8")
+
+
 def _make_first_draft_expectation_unsupported(payload: dict[str, object]) -> None:
     draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
     draft_text = draft_path.read_text(encoding="utf-8")
@@ -560,6 +686,16 @@ def _add_first_draft_intercase_precondition(payload: dict[str, object]) -> None:
         1,
     )
     draft_path.write_text(draft_text, encoding="utf-8")
+
+
+def _set_context_metadata(payload: dict[str, object], *, source_id: str, project: str) -> None:
+    context_path = Path(payload["artifact_paths"]["context"])
+    context_payload = json.loads(context_path.read_text(encoding="utf-8"))
+    context_payload["source_id"] = source_id
+    context_payload["project"] = project
+    context_payload.setdefault("variables", {})["source_id"] = source_id
+    context_payload.setdefault("variables", {})["project"] = project
+    context_path.write_text(json.dumps(context_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _drop_route_binding_keep_case_support(render_result_path: Path) -> None:
