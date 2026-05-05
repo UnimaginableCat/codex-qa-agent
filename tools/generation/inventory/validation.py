@@ -117,9 +117,9 @@ def _route_method_evidence_required(payload: dict[str, Any]) -> bool:
     if not isinstance(routes, dict):
         return False
     if "method_evidence_required" in routes:
-        return _coerce_bool(routes.get("method_evidence_required"))
+        return _parse_bool(routes.get("method_evidence_required")) is True
     if "require_method_evidence" in routes:
-        return _coerce_bool(routes.get("require_method_evidence"))
+        return _parse_bool(routes.get("require_method_evidence")) is True
     return False
 
 
@@ -134,23 +134,23 @@ def _route_method_evidence_explicitly_disabled(payload: dict[str, Any]) -> bool:
     if not isinstance(routes, dict):
         return False
     for key in ("method_evidence_required", "require_method_evidence"):
-        if key in routes and not _coerce_bool(routes.get(key)):
+        if key in routes and _parse_bool(routes.get(key)) is False:
             return True
     return False
 
 
-def _coerce_bool(value: Any) -> bool:
+def _parse_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return value != 0
+        return value != 0 if value in {0, 1} else None
     if isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in {"true", "1", "yes", "y", "on"}:
             return True
-        if normalized in {"false", "0", "no", "n", "off", ""}:
+        if normalized in {"false", "0", "no", "n", "off"}:
             return False
-    return False
+    return None
 
 
 def _known_entities_from_sibling_inventory(path: Path) -> tuple[set[str], list[GenerationDiagnostic]]:

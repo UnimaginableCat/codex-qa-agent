@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from tools.generation.domain.models import GenerationDiagnostic
@@ -317,9 +318,17 @@ def _has_method_evidence(value: Any) -> bool:
 
 
 def _is_action_like_route_path(route_path: str) -> bool:
-    segments = [
-        segment.strip().lower()
-        for segment in route_path.strip("/").split("/")
-        if segment.strip() and not segment.strip().startswith("{{")
-    ]
-    return any(segment in _ACTION_LIKE_ROUTE_SEGMENTS for segment in segments)
+    for segment in route_path.strip("/").split("/"):
+        normalized_segment = segment.strip().lower()
+        if not normalized_segment or normalized_segment.startswith("{{"):
+            continue
+        if normalized_segment in _ACTION_LIKE_ROUTE_SEGMENTS:
+            return True
+        tokens = {
+            token
+            for token in re.split(r"[-_.]+", normalized_segment)
+            if token
+        }
+        if tokens & _ACTION_LIKE_ROUTE_SEGMENTS:
+            return True
+    return False
