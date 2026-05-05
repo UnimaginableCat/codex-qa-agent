@@ -16,7 +16,12 @@ from tools.generation.inventory.common import (
 _ALLOWED_SAME_STATE_BEHAVIORS = {"reject", "idempotent_success"}
 
 
-def _route_inventory_diagnostics(items: list[Any], *, path: Path) -> list[GenerationDiagnostic]:
+def _route_inventory_diagnostics(
+    items: list[Any],
+    *,
+    path: Path,
+    require_method_evidence: bool = False,
+) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     for index, item in enumerate(items, start=1):
         if not isinstance(item, dict):
@@ -31,6 +36,14 @@ def _route_inventory_diagnostics(items: list[Any], *, path: Path) -> list[Genera
             continue
 
         diagnostics.extend(_route_required_contract_diagnostics(item, path=path, route_index=index))
+        diagnostics.extend(
+            _route_method_evidence_diagnostics(
+                item,
+                path=path,
+                route_index=index,
+                required=require_method_evidence,
+            )
+        )
         diagnostics.extend(_route_state_contract_diagnostics(item, path=path, route_index=index))
         diagnostics.extend(_route_same_state_contract_diagnostics(item, path=path, route_index=index))
     return diagnostics
@@ -84,6 +97,29 @@ def _route_required_contract_diagnostics(
             )
         )
     return diagnostics
+
+
+def _route_method_evidence_diagnostics(
+    item: dict[str, Any],
+    *,
+    path: Path,
+    route_index: int,
+    required: bool,
+) -> list[GenerationDiagnostic]:
+    if not required or _has_method_evidence(item.get("method_evidence")):
+        return []
+    return [
+        _diagnostic(
+            code="adapter_operation_inventory_route_method_evidence_missing",
+            message=(
+                "Route method evidence is required by metadata.contracts.routes.method_evidence_required. "
+                "Record the router/controller/source line that proves the HTTP method; do not infer methods "
+                "from endpoint names such as export or download."
+            ),
+            path=path,
+            details={"route_index": route_index, "method": item.get("method"), "path": item.get("path")},
+        )
+    ]
 
 
 def _route_state_contract_diagnostics(
@@ -247,4 +283,17 @@ def _has_same_state_evidence(value: Any) -> bool:
         return bool(value.strip())
     if isinstance(value, list):
         return any(isinstance(item, str) and item.strip() for item in value)
+    return False
+
+
+def _has_method_evidence(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_has_method_evidence(item) for item in value)
+    if isinstance(value, dict):
+        return any(
+            bool(str(value.get(field) or "").strip())
+            for field in ("method_source", "source_ref", "source", "evidence")
+        )
     return False

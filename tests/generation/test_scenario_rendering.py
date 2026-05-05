@@ -226,6 +226,29 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertEqual(len(render_result.draft_set.deferred_items), 1)
         self.assertEqual(render_result.unsupported_checks[0].reason_code, "data_setup_unresolved")
 
+    def test_renderer_defers_case_explicitly_marked_deferred_even_with_complete_route(self) -> None:
+        plan = _plan(
+            [
+                PlannedTestCase(
+                    case_id="tc-deferred-001",
+                    title="Partner creates after founder grant",
+                    objective="Requires multi-actor setup before execution.",
+                    expected_results=["HTTP 201"],
+                    planned_route=PlannedRouteIntent(http_method="POST", endpoint_path="/price-lists"),
+                    metadata={
+                        "readiness": "deferred",
+                        "deferred_reason": "Runner cannot switch actors inside one workflow.",
+                    },
+                )
+            ]
+        )
+
+        render_result = DraftScenarioRenderer().render(plan)
+
+        self.assertEqual(render_result.draft_set.drafts, [])
+        self.assertEqual(len(render_result.draft_set.deferred_items), 1)
+        self.assertEqual(render_result.unsupported_checks[0].reason_code, "case_readiness_deferred")
+
     def test_renderer_can_still_use_route_hints_metadata(self) -> None:
         plan = _plan(
             [

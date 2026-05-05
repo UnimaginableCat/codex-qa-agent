@@ -332,6 +332,21 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
 
+    def test_api_equality_parses_json_array_literal(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {"partner_permissions": []},
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(["response partner_permissions = []"]),
+            payload,
+        )
+
+        self.assertEqual(results[0].status, StepStatus.PASS)
+
     def test_response_length_without_field_is_blocked_as_ambiguous(self) -> None:
         results = self.validator.validate(
             self._api_step(["response length >= 1"]),

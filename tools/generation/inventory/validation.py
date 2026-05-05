@@ -69,7 +69,13 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
             route_specs=route_specs,
         )
     )
-    diagnostics.extend(_route_inventory_diagnostics(_list_payload_items(payload, "routes"), path=path))
+    diagnostics.extend(
+        _route_inventory_diagnostics(
+            _list_payload_items(payload, "routes"),
+            path=path,
+            require_method_evidence=_route_method_evidence_required(payload),
+        )
+    )
     diagnostics.extend(
         _db_verification_inventory_diagnostics(
             _list_payload_items(payload, "db_verifications"),
@@ -97,6 +103,37 @@ def _operation_inventory_list_field_diagnostics(
                 )
             )
     return diagnostics
+
+
+def _route_method_evidence_required(payload: dict[str, Any]) -> bool:
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    contracts = metadata.get("contracts")
+    if not isinstance(contracts, dict):
+        return False
+    routes = contracts.get("routes")
+    if not isinstance(routes, dict):
+        return False
+    if "method_evidence_required" in routes:
+        return _coerce_bool(routes.get("method_evidence_required"))
+    if "require_method_evidence" in routes:
+        return _coerce_bool(routes.get("require_method_evidence"))
+    return False
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off", ""}:
+            return False
+    return False
 
 
 def _known_entities_from_sibling_inventory(path: Path) -> tuple[set[str], list[GenerationDiagnostic]]:
