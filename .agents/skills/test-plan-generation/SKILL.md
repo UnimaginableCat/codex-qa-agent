@@ -48,6 +48,8 @@ for later phases.
 
 # Core Commands
 
+Resolve `<venv-python>` before the first command. Prefer workspace/project venv interpreters such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, and `.venv/bin/python`; do not run `python -m tools.generation.cli` through the system interpreter as a probe before checking the venv. If no venv can run the generation CLI, stop as tooling `BLOCKED` or explicitly state the fallback being used.
+
 - Validate compiled plan:
   `<venv-python> -m tools.generation.cli --validate-agent-plan --agent-plan-file <bundle>/agent-plan.json --output-format text`
 - Validate authoring DSL:

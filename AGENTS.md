@@ -43,6 +43,10 @@ The goal is not only to execute steps, but to verify the intended functionality 
 8. Perform targeted code analysis, API replay, or DB verification only when runner artifacts show FAIL/BLOCKED/ERROR, contradictory evidence, incomplete evidence, or the user explicitly asks for investigation.
 9. Produce or summarize the final report from runner artifacts and any additional evidence.
 
+## Workspace interpreter rule
+
+All workspace tooling must run through the project/workspace venv by default. Before the first `tools.generation`, `tools.scenario_runner`, API, DB, or helper CLI command, resolve a local venv interpreter such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, or `.venv/bin/python`. Do not probe `python -m ...` with the system interpreter before checking the venv. If no venv can run the requested workspace CLI, report tooling readiness as `BLOCKED`; use `uv run`, system `python`, or `py` only as an explicitly stated fallback after venv readiness fails or when the user authorizes it.
+
 ## Scenario Variables DSL
 
 `## Variables` entries must be machine-readable. The runner must fail fast during validation if a variable value is ambiguous prose or uses an unsupported transform.
