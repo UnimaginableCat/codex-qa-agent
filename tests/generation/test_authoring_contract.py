@@ -439,6 +439,55 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         )
         self.assertEqual(diagnostic.details["missing_fields"], ["count", "template_id"])
 
+    def test_validate_ignores_metadata_strings_when_extracting_request_body_field_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="user-plan",
+            project="code/demo",
+            title="User API",
+            goal="Cover user action payloads.",
+            scope=AuthoringScope(surface="users"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="admin"),
+            entities={
+                "user_action": AuthoringEntitySpec(
+                    operations={
+                        "flag": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/users/{{user_id}}/flag"),
+                            request_body_evidence={
+                                "source_ref": "serializers/user.py",
+                                "evidence": "Uses serializer.",
+                            },
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="flag-user",
+                    kind="api",
+                    objective="Flag a user.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/users/{{user_id}}/flag"),
+                        body={"user": "{{user_id}}"},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=["user_id = env:USER_ID"],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_request_body_field_evidence_required"
+        )
+        self.assertEqual(diagnostic.details["missing_fields"], ["user"])
+        self.assertEqual(diagnostic.details["evidence_fields"], [])
+
     def test_validate_allows_request_body_evidence_text_that_names_authored_fields(self) -> None:
         plan = AuthoringPlan(
             version=1,

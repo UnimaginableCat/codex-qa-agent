@@ -229,6 +229,26 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         item = review_set.items[0]
         self.assertNotIn("data_setup_unresolved", item.gap_summary.gap_codes)
 
+    def test_review_service_blocks_indexed_collection_assertion_after_unrelated_prior_step(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_indexed_collection_workflow_draft_run(root, prior_step_kind="unrelated_auth_read")
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
+        self.assertIn("data_setup_unresolved", item.gap_summary.gap_codes)
+
+    def test_review_service_allows_indexed_collection_assertion_after_shape_proving_prior_step(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_indexed_collection_workflow_draft_run(root, prior_step_kind="same_path_shape_probe")
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
+        self.assertNotIn("data_setup_unresolved", item.gap_summary.gap_codes)
+
     def test_promotion_blocks_draft_with_high_priority_review_target(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -806,6 +826,77 @@ def _generate_indexed_collection_draft_run(
                             "readiness": "evidence_supported",
                             **dict(metadata or {}),
                         },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = cli.main(
+            [
+                "--agent-plan-file",
+                str(agent_plan_path),
+                "--workspace-root",
+                str(root),
+                "--render-drafts",
+            ]
+        )
+    payload = json.loads(stdout.getvalue())
+    if exit_code != 0:
+        raise AssertionError(payload)
+    return payload
+
+
+def _generate_indexed_collection_workflow_draft_run(root: Path, *, prior_step_kind: str) -> dict[str, object]:
+    if prior_step_kind == "same_path_shape_probe":
+        first_step = {
+            "step_type": "api",
+            "title": "Probe detail shape",
+            "route": {"http_method": "GET", "endpoint_path": "/api/price_list/{{price_list_id}}/"},
+            "expected_outcomes": [
+                "HTTP 200",
+                "response categories length >= 1",
+                "response categories.0.positions length >= 1",
+            ],
+        }
+    else:
+        first_step = {
+            "step_type": "api",
+            "title": "Read current user",
+            "route": {"http_method": "GET", "endpoint_path": "/api/me/"},
+            "expected_outcomes": ["HTTP 200", "response JSON exists"],
+        }
+    agent_plan_path = root / "agent-plan.json"
+    agent_plan_path.write_text(
+        json.dumps(
+            {
+                "source_id": "price-list-permissions-full",
+                "project": "code/demo",
+                "title": "Price list permissions",
+                "scenario_variables": ["price_list_id = env:PRICE_LIST_ID"],
+                "planned_test_cases": [
+                    {
+                        "case_id": "contractor-detail-workflow-masks-price",
+                        "title": "Contractor detail masks price",
+                        "objective": "Detail results apply contractor visibility and mask price.",
+                        "kind": "workflow",
+                        "metadata": {"default_actor": "contractor", "readiness": "evidence_supported"},
+                        "workflow_steps": [
+                            first_step,
+                            {
+                                "step_type": "api",
+                                "title": "Read detail",
+                                "route": {"http_method": "GET", "endpoint_path": "/api/price_list/{{price_list_id}}/"},
+                                "expected_outcomes": [
+                                    "HTTP 200",
+                                    "response JSON exists",
+                                    "response `categories.0.positions.0.price` = `null`",
+                                ],
+                            },
+                        ],
                     }
                 ],
             },

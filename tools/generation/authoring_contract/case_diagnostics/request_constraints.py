@@ -248,7 +248,7 @@ def _fields_from_evidence_value(value: Any) -> set[str]:
                 "properties",
             }:
                 fields.update(_field_names_from_declared_value(nested))
-            else:
+            elif isinstance(nested, (dict, list, tuple, set)):
                 fields.update(_fields_from_evidence_value(nested))
         return fields
     if isinstance(value, (list, tuple, set)):

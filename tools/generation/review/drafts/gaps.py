@@ -319,7 +319,7 @@ def _indexed_collection_data_setup_messages(
     indexed_paths = _indexed_collection_paths(step.api.expected)
     if not indexed_paths:
         return []
-    if _has_prior_executable_setup_step(scenario, step):
+    if _has_prior_indexed_collection_setup_evidence(scenario, step, indexed_paths):
         return []
     if _has_collection_presence_assertion(step.api.expected, indexed_paths):
         return []
@@ -334,8 +334,50 @@ def _indexed_collection_data_setup_messages(
         )
     ]
 
-def _has_prior_executable_setup_step(scenario: ScenarioDefinition, current_step: ScenarioStep) -> bool:
-    return any(step.step_number < current_step.step_number for step in scenario.steps)
+def _has_prior_indexed_collection_setup_evidence(
+    scenario: ScenarioDefinition,
+    current_step: ScenarioStep,
+    indexed_paths: list[str],
+) -> bool:
+    return any(
+        _step_proves_indexed_collection(prior_step, current_step, indexed_paths)
+        for prior_step in scenario.steps
+        if prior_step.step_number < current_step.step_number
+    )
+
+def _step_proves_indexed_collection(
+    prior_step: ScenarioStep,
+    current_step: ScenarioStep,
+    indexed_paths: list[str],
+) -> bool:
+    if prior_step.step_type != ScenarioStepType.API or prior_step.api is None:
+        return False
+    if _api_paths_match(prior_step.api.path, current_step.api.path if current_step.api is not None else ""):
+        if _has_collection_presence_assertion(prior_step.api.expected, indexed_paths):
+            return True
+    return _captures_indexed_collection_path(prior_step.api.capture, indexed_paths)
+
+def _api_paths_match(left: str, right: str) -> bool:
+    return _normalize_api_path(left) == _normalize_api_path(right)
+
+def _normalize_api_path(path: str) -> str:
+    return str(path or "").split("?", 1)[0].strip().rstrip("/").lower()
+
+def _captures_indexed_collection_path(capture_rules: list[str], indexed_paths: list[str]) -> bool:
+    if not capture_rules:
+        return False
+    required_roots = _collection_roots_for_indexed_paths(indexed_paths)
+    for rule in capture_rules:
+        source = str(rule).split("->", 1)[0].strip().lower()
+        source = source.replace("response.json.", "").replace("response.body.", "").replace("response.", "")
+        for indexed_path in indexed_paths:
+            normalized_path = indexed_path.replace("[", ".").replace("]", "").lower()
+            if normalized_path and normalized_path in source:
+                return True
+        source_roots = _collection_roots_for_indexed_path(source)
+        if required_roots and required_roots <= set(source_roots):
+            return True
+    return False
 
 def _indexed_collection_paths(expectations: list[str]) -> list[str]:
     paths: list[str] = []
