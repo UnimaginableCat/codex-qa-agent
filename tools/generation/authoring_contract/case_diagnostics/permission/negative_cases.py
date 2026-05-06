@@ -101,7 +101,7 @@ def _negative_permission_state_setup_required(authoring_plan: AuthoringPlan, cas
     if plan_contract.get("negative_cases_require_state_setup") is not None:
         return policy_bool(plan_contract.get("negative_cases_require_state_setup"))
     case_contract = case_contract_section(case, "permissions")
-    return policy_bool(case_contract.get("negative_cases_require_state_setup"))
+    return policy_bool(case_contract.get("negative_cases_require_state_setup"), default=True)
 
 
 def _negative_permission_baseline_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
@@ -109,7 +109,7 @@ def _negative_permission_baseline_required(authoring_plan: AuthoringPlan, case: 
     if plan_contract.get("negative_cases_require_baseline_check") is not None:
         return policy_bool(plan_contract.get("negative_cases_require_baseline_check"))
     case_contract = case_contract_section(case, "permissions")
-    return policy_bool(case_contract.get("negative_cases_require_baseline_check"))
+    return policy_bool(case_contract.get("negative_cases_require_baseline_check"), default=True)
 
 
 def _has_permission_fixture_contract(case: AuthoringCase) -> bool:

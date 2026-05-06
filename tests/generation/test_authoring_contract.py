@@ -2226,7 +2226,7 @@ cases:
             any(diagnostic.code == "authoring_env_backed_role_identity_guid" for diagnostic in result.diagnostics)
         )
 
-    def test_permission_negative_case_warns_without_state_setup(self) -> None:
+    def test_permission_negative_case_blocks_without_state_setup(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="price-list-plan",
@@ -2259,10 +2259,10 @@ cases:
 
         result = AuthoringPlanCompiler().validate(plan)
 
-        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertEqual(result.status, StepStatus.BLOCKED)
         self.assertTrue(
             any(
-                diagnostic.code == "authoring_permission_negative_case_state_setup_unresolved"
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
                 for diagnostic in result.diagnostics
             )
         )
@@ -2501,7 +2501,7 @@ cases:
             )
         )
 
-    def test_permission_negative_case_warns_when_stable_fixture_lacks_baseline_check(self) -> None:
+    def test_permission_negative_case_blocks_when_stable_fixture_lacks_baseline_check(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="price-list-plan",
@@ -2528,10 +2528,10 @@ cases:
 
         result = AuthoringPlanCompiler().validate(plan)
 
-        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertEqual(result.status, StepStatus.BLOCKED)
         self.assertTrue(
             any(
-                diagnostic.code == "authoring_permission_negative_case_baseline_check_unresolved"
+                diagnostic.code == "authoring_permission_negative_case_baseline_check_required"
                 for diagnostic in result.diagnostics
             )
         )
