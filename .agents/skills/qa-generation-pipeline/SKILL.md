@@ -130,6 +130,7 @@ Stop conditions:
 - Promoted scenario validation fails: repair source authoring or promoted scenario only if explicitly asked.
 - Promoted scenario compile validation reports `compile_valid_but_incomplete` only because env-backed inputs are unresolved: run `--validate-scenario-dir --mode preflight` or explicitly state that runner preflight is the next readiness check before batch execution.
 - Runner pauses in guided mode: show `operator_state`, available actions, and `pause_state_path`; wait for the operator choice.
+- Runner API step returns `404` HTML/text while `API_BASE_URL` and actor auth resolved: stop the execution path and repair the source authoring bundle. The likely defect is the authored path after `API_BASE_URL`; require `operation-inventory.yaml` route `runtime_path_evidence` proving the final external path before rerendering and re-promoting.
 - Runner terminal result: report terminal status without simulating manual decisions.
 
 # Environment Rules

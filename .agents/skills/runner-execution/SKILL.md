@@ -48,6 +48,8 @@ If the run finishes terminally without a pause-state or active decision point, r
 
 For guided batch execution, stop at the first real paused scenario returned by `batch_cli`. Report the batch summary, the paused scenario `summary`, `operator_state`, and the remaining scenario count. Do not continue the rest of the suite until the operator resolves that pause.
 
+If an API step returns `404` with an HTML/text body while `API_BASE_URL` and the actor profile are resolvable, treat this as likely wrong authored route path after the base URL. Do not guess prefixes such as `/api` or `/api/v1`, do not edit promoted markdown, and do not replay raw `requests` outside the runner to find a working path. Report the paused run and route defect, then route the fix back to the source generation bundle so `operation-inventory.yaml` records `runtime_path_evidence` for the final path after `API_BASE_URL`.
+
 # Default Guided Request
 
 When the user asks to run a scenario without specifying mode, treat this as the preferred guided workflow.
@@ -145,4 +147,5 @@ Read these references only when needed:
 
 - Never write source code into `artifacts/`.
 - Do not bypass the runner unless it cannot start or the user explicitly asks for manual debugging.
+- When manual API/DB debugging is explicitly needed, use `api-workflow` / `tools/api/run_request.py` and `db-verification` / `tools/db/query_check.py`; do not hand-roll env parsing, `requests`, or direct `psycopg` snippets that bypass actor-scoped env loaders and structured runtime signals.
 - Do not change runner source code, parser field support, pause-state JSON, or generated scenario files while handling a runner pause. If the run exposes unsupported scenario semantics, report the blocker and stop for an explicit tool/generation fix request.

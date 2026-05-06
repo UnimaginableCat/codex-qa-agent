@@ -114,6 +114,14 @@ start inside the authoring branch rather than being classified first.
 - For true multi-actor workflows, use `setup[].actor` for setup operations that must run under a different role and `execute.actor` for the main action when needed. Rendered workflow steps include `Actor: <role>`, parser/preflight/runtime preserve it, and runtime uses the step actor before falling back to the scenario-level `actor` variable.
 - For PDF, Excel, export, or other binary endpoints, use `response body exists` rather than `response JSON exists`; binary responses are not JSON assertions. Do not claim leak prevention or masking for a binary endpoint unless the plan includes an executable content inspection or a narrower smoke-test objective.
 - Never infer the HTTP method for PDF, Excel, export, download, report, calculate, search, or other action-like endpoints from the route name. Record the method from router/controller evidence. Operation inventories require structured `method_evidence` for action-like paths even when `metadata.contracts.routes.method_evidence_required` is not enabled; broad method evidence can still be required for all routes with that contract switch. Use `source_ref: code/<project>/.../urls.py` plus `evidence: <controller method/action proving POST>`. Free-form strings such as `search view is POST` or dictionaries that only repeat `method: POST` are not evidence. If the method cannot be proven, keep the case deferred/open rather than guessing `GET` or `POST` for an action-like path.
+- For runnable API scenarios, author route paths as the final request path after `API_BASE_URL`, not as app-local framework routes. Do not treat `apps/<app>/urls.py` as sufficient evidence for the runtime path. Prove the mounted/external path with root URLConf, API gateway/deployment routing, OpenAPI/schema, or a runtime smoke check. In `operation-inventory.yaml`, enable `metadata.contracts.routes.runtime_path_evidence_required: true` and add structured `runtime_path_evidence` on each route, for example:
+  ```yaml
+  runtime_path_evidence:
+    source_ref: code/<project>/project/urls.py
+    runtime_path: /api/v1/price-list/{{price_list_id}}/permissions/
+    evidence: Root URLConf mounts price-list URLs under /api/v1/ after API_BASE_URL.
+  ```
+  The authored `path` must match this runtime path. If only app-local evidence is available, keep the route unresolved instead of promoting `/price-list/...` guesses.
 - Do not require operators to hand-populate role identity GUIDs such as `PRICE_LIST_PARTNER_MEMBER_GUID`, `PRICE_LIST_CUSTOMER_MEMBER_GUID`, or `*_USER_GUID` when the scenario already has actor credentials. Prefer a workflow setup step that discovers the GUID through a permissions API response or read-only DB lookup and captures it into `company_member_guid` or `user_guid`. Env should hold credentials and stable fixture roots such as `company_guid` or `price_list_id`, not every user's internal GUID.
 - If a project really needs env-backed identity GUIDs, document that in `metadata.identity_resolution` with `allow_env_identity_variables` plus `justification`, or with `stable_env_fixtures`, `discourage_env_identity`, `env_identity_name_patterns`, or `disable_default_env_identity_patterns`; do not rely on implicit naming assumptions.
 - Use `defaults.scenario_variables[]` for plan-wide variables and `cases[].scenario_variables[]` for case-local variables.
@@ -181,6 +189,7 @@ Use the scaffolded bundle in this order:
    - controller routes
    - expected success/failure HTTP codes
    - `method_evidence` for non-obvious routes, especially export/download/action endpoints; when `metadata.contracts.routes.method_evidence_required: true` is enabled, routes without this evidence fail operation inventory validation
+   - `runtime_path_evidence` for executable API routes; when `metadata.contracts.routes.runtime_path_evidence_required: true` is enabled, routes without root-mounted/external path evidence fail operation inventory validation. This evidence proves the path segment after `API_BASE_URL`; app-local `apps/<app>/urls.py` evidence alone is not valid runtime path evidence.
    - lifecycle route `target_state`
    - lifecycle route `same_state_behavior`, `same_state_status`, and `same_state_evidence` when the command can be invoked on an entity already in the target state
    - DB verification templates with SQL, params, and expected outcomes for every operation later used by `oracle.persisted_state`
