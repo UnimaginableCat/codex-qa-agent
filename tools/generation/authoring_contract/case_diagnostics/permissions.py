@@ -208,7 +208,7 @@ def _negative_permission_case_state_setup_diagnostics(
     index: int,
     has_required_states: bool,
 ) -> list[GenerationDiagnostic]:
-    if not _looks_like_permission_negative_or_default_case(case):
+    if not _looks_like_permission_negative_or_default_case(authoring_plan, case):
         return []
     if has_required_states:
         return []
@@ -347,28 +347,143 @@ def _has_permission_baseline_setup(authoring_plan: AuthoringPlan, case: Authorin
     return False
 
 
-def _looks_like_permission_negative_or_default_case(case: AuthoringCase) -> bool:
+def _looks_like_permission_negative_or_default_case(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
     checks = [] if case.oracle is None else [str(item) for item in case.oracle.business_checks]
-    text = " ".join(
+    structured_claim = _permission_coverage_claim(case)
+    text = _permission_case_text(case, checks)
+    actor_text = _case_actor_text(authoring_plan, case).lower()
+    claim_text = _flatten_metadata_text(structured_claim).lower() if structured_claim is not None else ""
+    has_actor_context = bool(actor_text.strip())
+    has_permission_context = _mentions_permission_context(text) or _mentions_permission_context(claim_text)
+    has_denial_or_default_text = _mentions_denial_or_default(text) or _mentions_denial_or_default(claim_text)
+    has_false_permission_assertion = _mentions_false_permission_assertion(text) or _mentions_false_permission_assertion(
+        claim_text
+    )
+
+    if structured_claim is not None and (has_denial_or_default_text or has_false_permission_assertion):
+        return True
+    if case.oracle is not None and case.oracle.status_code == 403 and (has_actor_context or has_permission_context):
+        return True
+    if has_actor_context and has_denial_or_default_text:
+        return True
+    return has_actor_context and has_false_permission_assertion
+
+
+def _permission_case_text(case: AuthoringCase, checks: list[str]) -> str:
+    route_text = ""
+    execute_text = ""
+    if case.execute is not None:
+        route_text = "" if case.execute.route is None else f"{case.execute.route.method} {case.execute.route.path}"
+        execute_text = _flatten_metadata_text(
+            {
+                "headers": case.execute.headers,
+                "params": case.execute.params,
+                "body": case.execute.body,
+                "auth_strategy": case.execute.auth_strategy,
+            }
+        )
+    return " ".join(
         [
             case.id,
             case.title,
             case.objective,
             " ".join(case.tags),
             " ".join(checks),
+            route_text,
+            execute_text,
         ]
     ).lower()
-    if not any(token in text for token in ("partner", "member", "customer", "contractor", "actor")):
-        return False
-    if any(token in text for token in ("without", "default", "denied", "cannot", "lacks", "no override")):
-        return True
-    if case.oracle is not None and case.oracle.status_code == 403:
-        return True
+
+
+def _case_actor_text(authoring_plan: AuthoringPlan, case: AuthoringCase) -> str:
+    actor_parts: list[str] = []
+    if authoring_plan.defaults.actor:
+        actor_parts.append(authoring_plan.defaults.actor)
+    default_actor = case.metadata.get("default_actor")
+    if default_actor is not None:
+        actor_parts.append(str(default_actor))
+    for key in ("actor", "role", "persona"):
+        value = case.metadata.get(key)
+        if value is not None:
+            actor_parts.append(str(value))
+    if case.execute is not None and case.execute.actor:
+        actor_parts.append(case.execute.actor)
+    actor_parts.extend(step.actor for step in case.setup if step.actor)
+    return " ".join(actor_parts)
+
+
+def _permission_coverage_claim(case: AuthoringCase) -> dict[str, Any] | None:
+    coverage_claims = case.metadata.get("coverage_claims")
+    if not isinstance(coverage_claims, dict):
+        return None
+    permission_claim = coverage_claims.get("permissions") or coverage_claims.get("permission")
+    if not isinstance(permission_claim, dict) or not permission_claim:
+        return None
+    return dict(permission_claim)
+
+
+def _mentions_denial_or_default(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "without",
+            "default",
+            "denied",
+            "deny",
+            "cannot",
+            "forbidden",
+            "lacks",
+            "no override",
+            "negative",
+            "not allowed",
+            "disallow",
+            "rejected",
+            "blocked",
+            "absent",
+        )
+    )
+
+
+def _mentions_false_permission_assertion(text: str) -> bool:
     return any(
         token in text
         for token in (
             "can_edit` = `false",
             "can_create` = `false",
             "can_manage_permissions` = `false",
+            "can_edit: false",
+            "can_create: false",
+            "can_manage_permissions: false",
+            "can_edit false",
+            "can_create false",
+            "can_manage_permissions false",
+            "edit_denied",
+            "create_denied",
+            "manage_denied",
         )
     )
+
+
+def _mentions_permission_context(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "permission",
+            "permissions",
+            "can_edit",
+            "can_create",
+            "can_manage",
+            "override",
+            "access",
+        )
+    )
+
+
+def _flatten_metadata_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return " ".join(f"{key} {_flatten_metadata_text(nested)}" for key, nested in value.items())
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_flatten_metadata_text(item) for item in value)
+    return str(value)

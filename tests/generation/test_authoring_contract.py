@@ -967,6 +967,111 @@ cases:
             )
         )
 
+    def test_permission_negative_case_uses_default_actor_metadata_for_detection(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="document-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="create-document-denied",
+                    kind="api",
+                    objective="Create document action is denied.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/documents")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={"default_actor": "contributor"},
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_negative_case_uses_plan_default_actor_for_detection(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="document-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            defaults=AuthoringDefaults(actor="contributor"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="create-document-denied",
+                    kind="api",
+                    objective="Create document action is denied.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/documents")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_negative_case_uses_structured_permission_claim_for_detection(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="document-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="create-document-gate",
+                    kind="api",
+                    objective="Create document action follows the authored permission claim.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/documents")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={
+                        "coverage_claims": {
+                            "permissions": {
+                                "actor": "contributor",
+                                "permission": "can_publish",
+                                "expected_state": "false",
+                                "expected_result": "denied",
+                            }
+                        }
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_permission_negative_case_warns_when_stable_fixture_lacks_baseline_check(self) -> None:
         plan = AuthoringPlan(
             version=1,
