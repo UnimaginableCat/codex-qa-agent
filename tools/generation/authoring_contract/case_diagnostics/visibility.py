@@ -12,12 +12,14 @@ from ..diagnostics import authoring_diagnostic
 from ..models import AuthoringCase, AuthoringPlan
 
 _VISIBILITY_CLAIM_PATTERN = re.compile(
-    r"\b(?:mask|masks|masked|masking|leak|leaks|visibility|visible|can_view_price|can_view_cost|price|cost_price|selling price)\b",
+    r"\b(?:mask|masks|masked|masking|leak|leaks|visibility|visible|can_view_price|can_view_cost|cost_price|selling price|sale price|cost price|price field|cost field)\b",
     re.IGNORECASE,
 )
 _VISIBILITY_ASSERTION_PATTERN = re.compile(
-    r"(?:response\s+)?`?(?:price|cost_price|can_view_price|can_view_cost)`?\s*(?:=|!=|is null|is not null)|"
-    r"response contains field `(?:price|cost_price|can_view_price|can_view_cost)`",
+    r"(?:response\s+)?`?(?:(?:price|cost_price|can_view_price|can_view_cost)|"
+    r"[^`]*[.\[](?:price|cost_price|can_view_price|can_view_cost))`?\s*(?:=|!=|is null|is not null)|"
+    r"response contains field `(?:(?:price|cost_price|can_view_price|can_view_cost)|"
+    r"[^`]*[.\[](?:price|cost_price|can_view_price|can_view_cost))`",
     re.IGNORECASE,
 )
 
@@ -35,12 +37,14 @@ def _visibility_claim_diagnostics(
         for part in (case.id, case.title, case.objective, " ".join(case.tags))
         if str(part or "").strip()
     )
-    if not case_text or _VISIBILITY_CLAIM_PATTERN.search(case_text) is None:
+    structured_claim = _visibility_coverage_claim(case)
+    heuristic_claim = bool(case_text and _VISIBILITY_CLAIM_PATTERN.search(case_text) is not None)
+    if structured_claim is None and not heuristic_claim:
         return []
     checks = [] if case.oracle is None else [str(item) for item in case.oracle.business_checks]
     has_visibility_assertion = any(_VISIBILITY_ASSERTION_PATTERN.search(check) for check in checks)
     if not has_visibility_assertion and not (case.oracle is not None and case.oracle.persisted_state is not None):
-        strict = _visibility_assertions_required(authoring_plan, case)
+        strict = structured_claim is not None and _visibility_assertions_required(authoring_plan, case)
         diagnostics.append(
             authoring_diagnostic(
                 (
@@ -57,9 +61,11 @@ def _visibility_claim_diagnostics(
                 details={
                     "case_index": index,
                     "business_checks": checks,
+                    "structured_claim_present": structured_claim is not None,
                     "suggestion": (
-                        "Add a supported field assertion such as response `cost_price` = `null`, use a DB/content "
-                        "verification that proves the claim, or narrow the objective to a binary/download smoke check."
+                        "Add metadata.coverage_claims.visibility plus a supported field assertion such as response "
+                        "`cost_price` = `null`, use a DB/content verification that proves the claim, or narrow the "
+                        "objective to a binary/download smoke check."
                     ),
                 },
             )
@@ -72,6 +78,7 @@ def _visibility_claim_diagnostics(
             index=index,
             checks=checks,
             has_visibility_assertion=has_visibility_assertion,
+            structured_claim=structured_claim,
         )
     )
     diagnostics.extend(
@@ -95,6 +102,16 @@ def _visibility_assertions_required(authoring_plan: AuthoringPlan, case: Authori
     return policy_bool(coverage_contract.get("visibility_claims_require_field_assertions"))
 
 
+def _visibility_coverage_claim(case: AuthoringCase) -> dict[str, Any] | None:
+    coverage_claims = case.metadata.get("coverage_claims")
+    if not isinstance(coverage_claims, dict):
+        return None
+    visibility_claim = coverage_claims.get("visibility")
+    if not isinstance(visibility_claim, dict) or not visibility_claim:
+        return None
+    return dict(visibility_claim)
+
+
 def _collection_visibility_data_setup_diagnostics(
     *,
     authoring_plan: AuthoringPlan,
@@ -103,6 +120,7 @@ def _collection_visibility_data_setup_diagnostics(
     index: int,
     checks: list[str],
     has_visibility_assertion: bool,
+    structured_claim: dict[str, Any] | None,
 ) -> list[GenerationDiagnostic]:
     if not has_visibility_assertion:
         return []
@@ -116,7 +134,7 @@ def _collection_visibility_data_setup_diagnostics(
     if _oracle_proves_non_empty_collection(checks):
         return []
 
-    strict = _collection_visibility_data_setup_required(authoring_plan, case)
+    strict = _collection_visibility_data_setup_required(authoring_plan, case, structured_claim)
     return [
         authoring_diagnostic(
             (
@@ -135,6 +153,7 @@ def _collection_visibility_data_setup_diagnostics(
                 "case_index": index,
                 "route_path": route_path,
                 "business_checks": checks,
+                "structured_claim_present": structured_claim is not None,
                 "suggestion": (
                     "Create or discover matching data in setup, use a stable non_empty_fixture contract, or make "
                     "the oracle explicitly handle empty search results as fixture BLOCKED rather than product FAIL."
@@ -144,7 +163,15 @@ def _collection_visibility_data_setup_diagnostics(
     ]
 
 
-def _collection_visibility_data_setup_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+def _collection_visibility_data_setup_required(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    structured_claim: dict[str, Any] | None,
+) -> bool:
+    if structured_claim is not None and policy_bool(structured_claim.get("requires_non_empty_result")):
+        return True
+    if structured_claim is None:
+        return False
     plan_coverage_contract = plan_contract_section(authoring_plan, "coverage")
     if plan_coverage_contract.get("collection_visibility_requires_data_setup") is not None:
         return policy_bool(plan_coverage_contract.get("collection_visibility_requires_data_setup"))

@@ -1249,6 +1249,14 @@ cases:
                     state_change="read_only",
                     execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
                     oracle=AuthoringOracle(status_code=200, business_checks=["response JSON exists"]),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                            }
+                        }
+                    },
                 ),
             ],
             metadata={"contracts": {"coverage": {"visibility_claims_require_field_assertions": True}}},
@@ -1258,6 +1266,92 @@ cases:
 
         self.assertEqual(result.status, StepStatus.BLOCKED)
         self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_claim_missing_required_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_strict_visibility_contract_does_not_block_heuristic_only_claim(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(status_code=200, business_checks=["response JSON exists"]),
+                ),
+            ],
+            metadata={"contracts": {"coverage": {"visibility_claims_require_field_assertions": True}}},
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_claim_without_field_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_visibility_claim_missing_required_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_visibility_contract_does_not_treat_price_list_resource_name_as_masking_claim(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="create-price-list",
+                    kind="api",
+                    objective="Create price list.",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/price-lists")),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        business_checks=["response JSON exists"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="price_list",
+                            operation="verify_created",
+                        ),
+                    ),
+                ),
+            ],
+            entities={
+                "price_list": AuthoringEntitySpec(
+                    id_field="price_list_id",
+                    operations={
+                        "verify_created": AuthoringEntityOperation(
+                            sql="SELECT id FROM price_lists WHERE id = :price_list_id",
+                            params={"price_list_id": "{{price_list_id}}"},
+                            expected_outcomes=["one row exists"],
+                        )
+                    },
+                )
+            },
+            metadata={"contracts": {"coverage": {"visibility_claims_require_field_assertions": True}}},
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertFalse(
             any(
                 diagnostic.code == "authoring_visibility_claim_missing_required_assertion"
                 for diagnostic in result.diagnostics
@@ -1318,7 +1412,10 @@ cases:
                     execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/1/positions/1")),
                     oracle=AuthoringOracle(
                         status_code=200,
-                        business_checks=["response JSON exists", "response `cost_price` = `null`"],
+                        business_checks=[
+                            "response JSON exists",
+                            "response `categories.0.positions.0.cost_price` = `null`",
+                        ],
                     ),
                 ),
             ],
@@ -1330,6 +1427,12 @@ cases:
         self.assertFalse(
             any(
                 diagnostic.code == "authoring_visibility_claim_without_field_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_visibility_root_field_assertion_without_path_evidence"
                 for diagnostic in result.diagnostics
             )
         )
@@ -1489,6 +1592,15 @@ cases:
                         status_code=200,
                         business_checks=["response JSON exists", "response `cost_price` = `null`"],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
@@ -1539,6 +1651,15 @@ cases:
                         status_code=200,
                         business_checks=["response JSON exists", "response `cost_price` = `null`"],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
@@ -1577,6 +1698,15 @@ cases:
                             "response `cost_price` = `null`",
                         ],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
@@ -1615,6 +1745,15 @@ cases:
                             "response `cost_price` = `null`",
                         ],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
@@ -1666,6 +1805,15 @@ cases:
                         status_code=200,
                         business_checks=["response JSON exists", "response `cost_price` = `null`"],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
