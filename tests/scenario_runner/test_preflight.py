@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
@@ -22,6 +23,33 @@ from tools.scenario_runner.runtime.executors import StepExecutionOutcome
 
 
 class ScenarioRunnerPreflightTests(unittest.TestCase):
+    def test_preflight_import_does_not_require_requests(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        script = """
+import builtins
+
+real_import = builtins.__import__
+
+def guarded_import(name, *args, **kwargs):
+    if name == "requests" or name.startswith("requests."):
+        raise ModuleNotFoundError("No module named 'requests'")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+import tools.scenario_runner.orchestration.preflight
+print("ok")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "ok")
+
     def test_missing_env_file_blocks_before_step_execution(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
