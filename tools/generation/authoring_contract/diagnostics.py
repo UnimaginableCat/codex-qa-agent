@@ -61,6 +61,7 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_case_readiness_evidence_missing",
     "authoring_open_question_blocks_promotion",
     "authoring_non_blocking_note_blocks_promotion",
+    "authoring_scope_role_coverage_missing",
 }
 
 

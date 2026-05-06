@@ -86,6 +86,7 @@ def validate_top_level(
     diagnostics.extend(_env_backed_identity_guid_diagnostics(authoring_plan, source_ref))
     diagnostics.extend(_promotion_blocking_open_question_diagnostics(authoring_plan, source_ref))
     diagnostics.extend(_promotion_blocking_non_blocking_note_diagnostics(authoring_plan, source_ref))
+    diagnostics.extend(_scope_role_coverage_diagnostics(authoring_plan, source_ref))
     diagnostics.extend(_entity_identity_diagnostics(authoring_plan))
     diagnostics.extend(_duplicate_case_id_diagnostics(authoring_plan))
     return diagnostics
@@ -191,6 +192,189 @@ def _metadata_note_strings(value: object) -> list[str]:
 def _is_code_project_path(value: str) -> bool:
     normalized = value.strip().replace("\\", "/").strip("/")
     return normalized.startswith("code/") and len(normalized.split("/", 1)[1].strip()) > 0
+
+
+def _scope_role_coverage_diagnostics(
+    authoring_plan: AuthoringPlan,
+    source_ref: str,
+) -> list[GenerationDiagnostic]:
+    required_roles = _declared_scope_roles(authoring_plan)
+    if not required_roles:
+        return []
+    covered_roles = _covered_case_roles(authoring_plan)
+    waived_roles = _coverage_waived_roles(authoring_plan)
+    missing_roles = sorted(required_roles - covered_roles - waived_roles)
+    if not missing_roles:
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_scope_role_coverage_missing",
+            (
+                "Authoring scope declares role/actor coverage, but no case covers every declared role. "
+                "Add explicit cases for the missing roles or document an explicit coverage waiver."
+            ),
+            source_ref=source_ref,
+            details={
+                "missing_roles": missing_roles,
+                "declared_roles": sorted(required_roles),
+                "covered_roles": sorted(covered_roles),
+                "waived_roles": sorted(waived_roles),
+                "suggestion": (
+                    "Add a case with metadata.default_actor/execute.actor/coverage_claims.permissions.actor "
+                    "for each missing role, or add metadata.coverage.role_waivers with a reason."
+                ),
+            },
+        )
+    ]
+
+
+def _declared_scope_roles(authoring_plan: AuthoringPlan) -> set[str]:
+    roles: set[str] = set()
+    roles.update(_metadata_role_list(authoring_plan.metadata.get("required_actors")))
+    roles.update(_metadata_role_list(authoring_plan.metadata.get("required_roles")))
+    coverage = authoring_plan.metadata.get("coverage")
+    if isinstance(coverage, dict):
+        roles.update(_metadata_role_list(coverage.get("required_actors")))
+        roles.update(_metadata_role_list(coverage.get("required_roles")))
+    contracts = authoring_plan.metadata.get("contracts")
+    if isinstance(contracts, dict):
+        coverage_contract = contracts.get("coverage")
+        if isinstance(coverage_contract, dict):
+            roles.update(_metadata_role_list(coverage_contract.get("required_actors")))
+            roles.update(_metadata_role_list(coverage_contract.get("required_roles")))
+
+    for include_item in authoring_plan.scope.include:
+        roles.update(_explicit_scope_role_list(include_item))
+    return roles - _ROLE_COVERAGE_STOPWORDS
+
+
+def _explicit_scope_role_list(value: object) -> set[str]:
+    text = str(value or "").strip().lower()
+    if not text:
+        return set()
+
+    prefix_match = re.match(r"^(?:roles?|actors?|personas?)\s*:\s*(?P<roles>.+)$", text)
+    if prefix_match is not None:
+        return _role_tokens_from_text(prefix_match.group("roles"))
+
+    matrix_match = re.match(
+        r"^(?P<roles>[a-z0-9_-]+(?:\s*[/,;&]\s*[a-z0-9_-]+)+)\s+"
+        r"(?:roles?|actors?|personas?)\s+(?:matrix|coverage|set)\b",
+        text,
+    )
+    if matrix_match is not None:
+        return _role_tokens_from_text(matrix_match.group("roles"))
+
+    bracket_match = re.search(r"\[(?P<roles>[a-z0-9_/\-,;&\s]+)\]\s*(?:roles?|actors?|personas?)\b", text)
+    if bracket_match is not None:
+        return _role_tokens_from_text(bracket_match.group("roles"))
+
+    return set()
+
+
+def _covered_case_roles(authoring_plan: AuthoringPlan) -> set[str]:
+    covered: set[str] = set()
+    for case in authoring_plan.cases:
+        if case.execute is not None and case.execute.actor:
+            covered.add(_normalize_role_token(case.execute.actor))
+        default_actor = case.metadata.get("default_actor")
+        if default_actor:
+            covered.add(_normalize_role_token(str(default_actor)))
+        for key in ("actor", "role", "persona"):
+            value = case.metadata.get(key)
+            if value:
+                covered.update(_metadata_role_list(value))
+        coverage_claims = case.metadata.get("coverage_claims")
+        if isinstance(coverage_claims, dict):
+            for claim in coverage_claims.values():
+                if isinstance(claim, dict):
+                    covered.update(_metadata_role_list(claim.get("actor")))
+                    covered.update(_metadata_role_list(claim.get("role")))
+    return covered - _ROLE_COVERAGE_STOPWORDS
+
+
+def _coverage_waived_roles(authoring_plan: AuthoringPlan) -> set[str]:
+    waived: set[str] = set()
+    for key in ("role_waivers", "actor_waivers", "coverage_waivers"):
+        waived.update(_waived_roles_from_value(authoring_plan.metadata.get(key)))
+    coverage = authoring_plan.metadata.get("coverage")
+    if isinstance(coverage, dict):
+        for key in ("role_waivers", "actor_waivers", "coverage_waivers"):
+            waived.update(_waived_roles_from_value(coverage.get(key)))
+    return waived
+
+
+def _waived_roles_from_value(value: object) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        return {_normalize_role_token(value)}
+    if isinstance(value, list):
+        waived: set[str] = set()
+        for item in value:
+            waived.update(_waived_roles_from_value(item))
+        return waived
+    if isinstance(value, dict):
+        role = value.get("role") or value.get("actor") or value.get("name")
+        return set() if role is None else _metadata_role_list(role)
+    return set()
+
+
+def _metadata_role_list(value: object) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        if re.search(r"[,/;&\s]", value):
+            return _role_tokens_from_text(value)
+        return {_normalize_role_token(value)}
+    if isinstance(value, list):
+        roles: set[str] = set()
+        for item in value:
+            roles.update(_metadata_role_list(item))
+        return roles
+    return {_normalize_role_token(str(value))}
+
+
+def _role_tokens_from_text(text: str) -> set[str]:
+    return {
+        _normalize_role_token(match.group(0))
+        for match in re.finditer(r"\b[a-z][a-z0-9_-]{2,}\b", text.lower())
+    }
+
+
+def _normalize_role_token(value: str) -> str:
+    return str(value or "").strip().lower().replace(" ", "_")
+
+
+_ROLE_COVERAGE_STOPWORDS = {
+    "",
+    "access",
+    "api",
+    "case",
+    "cases",
+    "coverage",
+    "default",
+    "domain",
+    "effective",
+    "flow",
+    "flows",
+    "list",
+    "matrix",
+    "manage",
+    "permission",
+    "permissions",
+    "price",
+    "read",
+    "reads",
+    "right",
+    "rights",
+    "role",
+    "roles",
+    "surface",
+    "test",
+    "tests",
+    "verify",
+}
 
 
 def _entity_identity_diagnostics(authoring_plan: AuthoringPlan) -> list[GenerationDiagnostic]:

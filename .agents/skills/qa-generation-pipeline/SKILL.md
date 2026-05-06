@@ -120,6 +120,7 @@ Final status priority:
 Stop conditions:
 
 - Authoring validation fails: return to `agent-plan-authoring` and repair the staged bundle.
+- Authoring validation reports `authoring_scope_role_coverage_missing`: return to `agent-plan-authoring` and add a real structured case for the missing role, add a structured coverage claim, or add an explicit role waiver. Do not remove roles from scope or add role words to titles/objectives merely to pass validation.
 - Authoring validation emits `authoring_workflow_setup_state_mismatch`: stop and repair authoring unless a same-state lifecycle contract in `operation-inventory.yaml` explicitly proves that the mismatch is the intended behavior.
 - Render has deferred execution-critical cases: repair source authoring before promotion.
 - Review says drafts are not promotable: repair source authoring or selected draft source.
@@ -135,7 +136,7 @@ Stop conditions:
 
 # Environment Rules
 
-Use the workspace-root venv interpreter for CLI stages. For runner execution, follow `runner-execution` strictly: the workspace venv must exist, satisfy Python 3.14+, and have required dependencies. Do not use target project venvs under `code/<project>` for workspace tooling, and do not silently fall back to system `python`, `python3`, `py`, or `uv run` for scenario execution.
+Use the workspace-root venv interpreter for CLI stages. For runner execution, follow `runner-execution` strictly: the workspace venv must exist, satisfy Python 3.14+, and have required dependencies. Do not use target project venvs under `code/<project>` for workspace tooling, and do not silently fall back to system `python`, `python3`, `py`, or `uv run` for scenario execution. A root venv may have a symlinked executable that resolves outside the workspace; do not downgrade readiness from that path alone if the workspace CLI guard accepts the active venv prefix.
 
 For generation-only stages, if the workspace-root venv is missing or cannot run the generation CLI, report tooling readiness as `BLOCKED` instead of inventing output.
 

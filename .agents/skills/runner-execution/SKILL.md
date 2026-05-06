@@ -21,7 +21,7 @@ Prefer `scenario_runner` over manual API/DB replay when a valid scenario file or
 
 # Core Commands
 
-Use the workspace-root venv interpreter for runner execution. Do not use target project venvs under `code/<project>` for workspace runner CLI. Verify that the workspace venv exists and satisfies Python 3.14+ before running the CLI.
+Use the workspace-root venv interpreter for runner execution. Do not use target project venvs under `code/<project>` for workspace runner CLI. Verify that the workspace venv exists and satisfies Python 3.14+ before running the CLI. If the root venv executable resolves to an external base interpreter through a symlink, do not treat that alone as failure; rely on whether the runner CLI guard accepts the active workspace venv prefix.
 
 - Auto batch run: `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir <scenario-dir> --mode auto`
 - Guided batch run: `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir <scenario-dir>`
