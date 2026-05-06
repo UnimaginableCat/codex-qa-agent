@@ -485,6 +485,7 @@ def run_validate_authoring_bundle(args: argparse.Namespace) -> dict[str, Any]:
     bundle_dir = _resolve_bundle_dir(Path(args.path))
     overall_status, stage_results, _ = _evaluate_authoring_bundle(bundle_dir)
     authoring_plan_path = bundle_dir / AUTHORING_PLAN_FILENAME
+    managed_output_root = Path(*MANAGED_AGENT_PLAN_ROOT).as_posix()
     return to_json_safe(
         {
             "status": overall_status.value,
@@ -506,7 +507,7 @@ def run_validate_authoring_bundle(args: argparse.Namespace) -> dict[str, Any]:
                         "label": "compile_authoring_plan",
                         "command": (
                             f"python -m tools.generation.cli --compile-authoring-plan "
-                            f"--authoring-plan-file {authoring_plan_path} --output {MANAGED_AGENT_PLAN_ROOT}"
+                            f"--authoring-plan-file {authoring_plan_path} --output {managed_output_root}"
                         ),
                     },
                     {
