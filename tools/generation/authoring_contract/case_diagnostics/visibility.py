@@ -131,10 +131,34 @@ def _collection_visibility_data_setup_diagnostics(
         return []
     if _has_collection_data_contract(case):
         return []
+    strict = _collection_visibility_data_setup_required(authoring_plan, case, structured_claim)
+    if strict:
+        return [
+            authoring_diagnostic(
+                "authoring_collection_visibility_data_setup_required",
+                (
+                    "Search or collection visibility case asserts price/cost masking and requires non-empty data, "
+                    "but it does not define setup or metadata proving that the fixture contains matching rows. "
+                    "A response length assertion only turns missing fixture data into a runtime FAIL; it does not "
+                    "prove that the masking behavior will be exercised."
+                ),
+                severity=DiagnosticSeverity.ERROR,
+                source_ref=case_ref,
+                details={
+                    "case_index": index,
+                    "route_path": route_path,
+                    "business_checks": checks,
+                    "structured_claim_present": structured_claim is not None,
+                    "suggestion": (
+                        "Create/discover matching data in setup, or document an explicit non_empty_fixture/"
+                        "seeded_result contract for the exact response path being indexed."
+                    ),
+                },
+            )
+        ]
     if _oracle_proves_non_empty_collection(checks):
         return []
 
-    strict = _collection_visibility_data_setup_required(authoring_plan, case, structured_claim)
     return [
         authoring_diagnostic(
             (
@@ -269,13 +293,64 @@ def _is_search_or_collection_route(route_path: str, case: AuthoringCase) -> bool
 
 
 def _has_collection_data_contract(case: AuthoringCase) -> bool:
+    if _has_structured_collection_data_contract(case.metadata):
+        return True
     metadata_text = _flatten_metadata_text(case.metadata).lower()
     open_question_text = " ".join(case.open_questions).lower()
     combined = f"{metadata_text} {open_question_text}"
-    if any(token in combined for token in ("non_empty_fixture", "non-empty fixture", "nonempty fixture")):
+    if any(
+        token in combined
+        for token in (
+            "non_empty_fixture",
+            "non-empty fixture",
+            "nonempty fixture",
+            "non_empty_result_fixture",
+            "non-empty result fixture",
+        )
+    ):
         return True
-    if any(token in combined for token in ("seeded search", "seeded result", "stable fixture", "fixture_result")):
+    if any(token in combined for token in ("seeded search", "seeded result", "fixture_result")):
         return True
+    return False
+
+
+def _has_structured_collection_data_contract(metadata: dict[str, Any]) -> bool:
+    for key in ("data_contract", "fixture_contract", "response_data_contract", "readiness_contract"):
+        if _contract_proves_non_empty_data(metadata.get(key)):
+            return True
+    coverage_claims = metadata.get("coverage_claims")
+    if isinstance(coverage_claims, dict):
+        for claim in coverage_claims.values():
+            if _contract_proves_non_empty_data(claim):
+                return True
+    return False
+
+
+def _contract_proves_non_empty_data(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for key in (
+        "non_empty",
+        "non_empty_fixture",
+        "seeded",
+        "fixture_seeded",
+        "requires_seeded_fixture",
+        "has_matching_rows",
+    ):
+        if policy_bool(value.get(key)):
+            return True
+    for key in (
+        "non_empty_paths",
+        "non_empty_response_paths",
+        "seeded_paths",
+        "fixture_paths",
+        "indexed_paths",
+    ):
+        paths = value.get(key)
+        if isinstance(paths, str) and paths.strip():
+            return True
+        if isinstance(paths, list) and any(str(path).strip() for path in paths):
+            return True
     return False
 
 
