@@ -6,9 +6,11 @@ from tools.generation.domain.models import GenerationDiagnostic, PlannedDbVerifi
 
 from ..diagnostics import authoring_diagnostic
 from ..helpers import (
+    _capture_targets,
     _extract_placeholders,
     _extract_placeholders_from_value,
     _persistance_template_mixes_primary_key_and_entity_id,
+    _requires_persistence,
 )
 from ..models import AuthoringCase, AuthoringPlan
 
@@ -91,6 +93,16 @@ def build_db_verification(
             )
         )
         return None, diagnostics, set()
+    created_entity_diagnostic = _created_entity_persistence_uses_fixture_id_diagnostic(
+        case=case,
+        case_ref=case_ref,
+        entity_name=entity_name,
+        operation_name=operation_name,
+        placeholders=placeholders,
+    )
+    if created_entity_diagnostic is not None:
+        diagnostics.append(created_entity_diagnostic)
+        return None, diagnostics, set()
     if _persistance_template_mixes_primary_key_and_entity_id(
         sql=operation.sql,
         expected_outcomes=expected_outcomes,
@@ -122,4 +134,60 @@ def build_db_verification(
         ),
         diagnostics,
         placeholders,
+    )
+
+
+def _created_entity_persistence_uses_fixture_id_diagnostic(
+    *,
+    case: AuthoringCase,
+    case_ref: str,
+    entity_name: str,
+    operation_name: str,
+    placeholders: set[str],
+) -> GenerationDiagnostic | None:
+    if not _requires_persistence(case.state_change):
+        return None
+    if str(case.state_change or "").strip().lower() != "create":
+        return None
+    if case.oracle is None:
+        return None
+
+    captured_targets = _capture_targets(case.oracle.captures)
+    created_id_targets = sorted(
+        target for target in captured_targets if target.startswith("created_") and target.endswith("_id")
+    )
+    if not created_id_targets:
+        return None
+
+    fixture_scopes: list[dict[str, str]] = []
+    for created_target in created_id_targets:
+        canonical_target = created_target.removeprefix("created_")
+        if canonical_target in placeholders and created_target not in placeholders:
+            fixture_scopes.append(
+                {
+                    "created_capture": created_target,
+                    "fixture_placeholder": canonical_target,
+                }
+            )
+    if not fixture_scopes:
+        return None
+
+    return authoring_diagnostic(
+        "authoring_created_entity_persistence_uses_fixture_id",
+        (
+            "Create-case persisted-state verification captures a new entity id but scopes the DB check with the "
+            "pre-existing fixture id placeholder. This can validate the fixture row instead of the entity created "
+            "by the case."
+        ),
+        source_ref=case_ref,
+        details={
+            "entity": entity_name,
+            "operation": operation_name,
+            "fixture_scopes": fixture_scopes,
+            "placeholders": sorted(placeholders),
+            "suggestion": (
+                "Scope the DB verification by the captured created_* id, or model the created resource as a "
+                "separate authored entity with an id_field matching the captured variable."
+            ),
+        },
     )

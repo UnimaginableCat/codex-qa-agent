@@ -1151,6 +1151,73 @@ cases:
             )
         )
 
+    def test_search_visibility_assertion_warns_without_non_empty_data_setup(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `cost_price` = `null`"],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_unresolved"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_contract_can_require_search_visibility_data_setup(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"collection_visibility_requires_data_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `cost_price` = `null`"],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_compile_merges_default_headers_into_setup_and_case_requests(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -1986,6 +2053,118 @@ cases:
         self.assertEqual(result.status, StepStatus.BLOCKED)
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertIn("authoring_persisted_state_id_field_semantic_mismatch", codes)
+
+    def test_compile_blocks_create_persistence_that_uses_fixture_id_instead_of_captured_created_id(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list create permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                scenario_variables=[
+                    "price_list_id = env:PRICE_LIST_ID",
+                    "company_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                ]
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    id_field="price_list_permission_id",
+                    key_fields=["price_list_id", "company_member_guid"],
+                    operations={
+                        "verify_auto_edit": AuthoringEntityOperation(
+                            sql=(
+                                "SELECT can_edit FROM price_list_permission "
+                                "WHERE price_list_id = :price_list_id "
+                                "AND company_member_guid = :company_member_guid"
+                            ),
+                            params={
+                                "price_list_id": "{{price_list_id}}",
+                                "company_member_guid": "{{company_member_guid}}",
+                            },
+                            expected_outcomes=["one row exists", "`can_edit` = `true`"],
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-create-price-list",
+                    kind="api",
+                    objective="Partner creates a price list and receives auto edit.",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/price-lists")),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> created_price_list_id"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="price_list_permission",
+                            operation="verify_auto_edit",
+                        ),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_created_entity_persistence_uses_fixture_id"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(
+            diagnostics[0].details["fixture_scopes"],
+            [{"created_capture": "created_price_list_id", "fixture_placeholder": "price_list_id"}],
+        )
+
+    def test_compile_allows_created_entity_persistence_scoped_by_captured_created_id(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list create permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            entities={
+                "created_price_list": AuthoringEntitySpec(
+                    id_field="created_price_list_id",
+                    operations={
+                        "verify_created": AuthoringEntityOperation(
+                            sql="SELECT id FROM price_lists WHERE id = :created_price_list_id",
+                            params={"created_price_list_id": "{{created_price_list_id}}"},
+                            expected_outcomes=["one row exists"],
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-create-price-list",
+                    kind="api",
+                    objective="Partner creates a price list.",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/price-lists")),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> created_price_list_id"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="created_price_list",
+                            operation="verify_created",
+                        ),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertNotIn("authoring_created_entity_persistence_uses_fixture_id", codes)
 
     def test_compile_allows_db_check_persisted_state_placeholders_from_declared_variables(self) -> None:
         plan = AuthoringPlan(
