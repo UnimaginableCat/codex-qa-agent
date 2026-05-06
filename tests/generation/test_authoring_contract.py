@@ -904,6 +904,294 @@ cases:
             any(diagnostic.code == "authoring_env_backed_role_identity_guid" for diagnostic in result.diagnostics)
         )
 
+    def test_permission_negative_case_warns_without_state_setup(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="partner-create-price-list-denied-without-grant",
+                    kind="api",
+                    objective="Partner cannot create a price list without company-level can_create override.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/price-lists")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={"default_actor": "partner"},
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_unresolved"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_contract_can_require_permission_negative_case_state_setup(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="partner-update-price-list-denied-without-edit",
+                    kind="api",
+                    objective="Partner cannot update an existing price list without can_edit override.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="PUT", path="/price-lists/1")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={"default_actor": "partner"},
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_negative_case_uses_default_actor_metadata_for_detection(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="document-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="create-document-denied",
+                    kind="api",
+                    objective="Create document action is denied.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/documents")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={"default_actor": "contributor"},
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_negative_case_uses_plan_default_actor_for_detection(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="document-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            defaults=AuthoringDefaults(actor="contributor"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="create-document-denied",
+                    kind="api",
+                    objective="Create document action is denied.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/documents")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_negative_case_uses_structured_permission_claim_for_detection(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="document-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="create-document-gate",
+                    kind="api",
+                    objective="Create document action follows the authored permission claim.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/documents")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={
+                        "coverage_claims": {
+                            "permissions": {
+                                "actor": "contributor",
+                                "permission": "can_publish",
+                                "expected_state": "false",
+                                "expected_result": "denied",
+                            }
+                        }
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_negative_case_warns_when_stable_fixture_lacks_baseline_check(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="partner-update-price-list-denied-without-edit",
+                    kind="api",
+                    objective="Partner cannot update an existing price list without can_edit override.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="PUT", path="/price-lists/1")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={
+                        "default_actor": "partner",
+                        "stable_permission_fixture": "PRICE_LIST_ID has no partner can_edit override.",
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_baseline_check_unresolved"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_contract_can_require_permission_negative_fixture_baseline_check(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={
+                "contracts": {
+                    "permissions": {
+                        "negative_cases_require_state_setup": True,
+                        "negative_cases_require_baseline_check": True,
+                    }
+                }
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-update-price-list-denied-without-edit",
+                    kind="api",
+                    objective="Partner cannot update an existing price list without can_edit override.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="PUT", path="/price-lists/1")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={
+                        "default_actor": "partner",
+                        "stable_permission_fixture": "PRICE_LIST_ID has no partner can_edit override.",
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_baseline_check_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_negative_case_allows_documented_baseline_check(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={
+                "contracts": {
+                    "permissions": {
+                        "negative_cases_require_state_setup": True,
+                        "negative_cases_require_baseline_check": True,
+                    }
+                }
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-update-price-list-denied-without-edit",
+                    kind="api",
+                    objective="Partner cannot update an existing price list without can_edit override.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="PUT", path="/price-lists/1")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={
+                        "default_actor": "partner",
+                        "stable_permission_fixture": "PRICE_LIST_ID has no partner can_edit override.",
+                        "permission_baseline_checked": "Preflight setup verifies can_edit=false before execution.",
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_baseline_check_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_identity_resolution_allow_requires_justification(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -1066,6 +1354,14 @@ cases:
                     state_change="read_only",
                     execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
                     oracle=AuthoringOracle(status_code=200, business_checks=["response JSON exists"]),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                            }
+                        }
+                    },
                 ),
             ],
             metadata={"contracts": {"coverage": {"visibility_claims_require_field_assertions": True}}},
@@ -1075,6 +1371,92 @@ cases:
 
         self.assertEqual(result.status, StepStatus.BLOCKED)
         self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_claim_missing_required_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_strict_visibility_contract_does_not_block_heuristic_only_claim(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(status_code=200, business_checks=["response JSON exists"]),
+                ),
+            ],
+            metadata={"contracts": {"coverage": {"visibility_claims_require_field_assertions": True}}},
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_claim_without_field_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_visibility_claim_missing_required_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_visibility_contract_does_not_treat_price_list_resource_name_as_masking_claim(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="create-price-list",
+                    kind="api",
+                    objective="Create price list.",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/price-lists")),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        business_checks=["response JSON exists"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="price_list",
+                            operation="verify_created",
+                        ),
+                    ),
+                ),
+            ],
+            entities={
+                "price_list": AuthoringEntitySpec(
+                    id_field="price_list_id",
+                    operations={
+                        "verify_created": AuthoringEntityOperation(
+                            sql="SELECT id FROM price_lists WHERE id = :price_list_id",
+                            params={"price_list_id": "{{price_list_id}}"},
+                            expected_outcomes=["one row exists"],
+                        )
+                    },
+                )
+            },
+            metadata={"contracts": {"coverage": {"visibility_claims_require_field_assertions": True}}},
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertFalse(
             any(
                 diagnostic.code == "authoring_visibility_claim_missing_required_assertion"
                 for diagnostic in result.diagnostics
@@ -1135,7 +1517,10 @@ cases:
                     execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/1/positions/1")),
                     oracle=AuthoringOracle(
                         status_code=200,
-                        business_checks=["response JSON exists", "response `cost_price` = `null`"],
+                        business_checks=[
+                            "response JSON exists",
+                            "response `categories.0.positions.0.cost_price` = `null`",
+                        ],
                     ),
                 ),
             ],
@@ -1147,6 +1532,114 @@ cases:
         self.assertFalse(
             any(
                 diagnostic.code == "authoring_visibility_claim_without_field_assertion"
+                for diagnostic in result.diagnostics
+            )
+        )
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_visibility_root_field_assertion_without_path_evidence"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_visibility_root_price_assertion_warns_without_response_shape_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="contractor-detail-masks-price",
+                    kind="api",
+                    objective="Contractor detail read masks price.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/1")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `price` = `null`"],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_root_field_assertion_without_path_evidence"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_contract_can_require_visibility_root_price_response_shape_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"root_visibility_assertions_require_path_evidence": True}}},
+            cases=[
+                AuthoringCase(
+                    id="contractor-detail-masks-price",
+                    kind="api",
+                    objective="Contractor detail read masks price.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/1")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `price` = `null`"],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_root_field_assertion_requires_path_evidence"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_visibility_root_price_assertion_allows_response_shape_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"root_visibility_assertions_require_path_evidence": True}}},
+            cases=[
+                AuthoringCase(
+                    id="contractor-detail-masks-price",
+                    kind="api",
+                    objective="Contractor detail read masks price.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/1")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `price` = `null`"],
+                    ),
+                    metadata={"response_shape_evidence": "Serializer exposes root price for this endpoint."},
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_visibility_root_field_assertion_requires_path_evidence"
                 for diagnostic in result.diagnostics
             )
         )
@@ -1204,6 +1697,15 @@ cases:
                         status_code=200,
                         business_checks=["response JSON exists", "response `cost_price` = `null`"],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
@@ -1254,6 +1756,15 @@ cases:
                         status_code=200,
                         business_checks=["response JSON exists", "response `cost_price` = `null`"],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
@@ -1292,6 +1803,15 @@ cases:
                             "response `cost_price` = `null`",
                         ],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
@@ -1330,6 +1850,15 @@ cases:
                             "response `cost_price` = `null`",
                         ],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
@@ -1381,6 +1910,15 @@ cases:
                         status_code=200,
                         business_checks=["response JSON exists", "response `cost_price` = `null`"],
                     ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        }
+                    },
                 ),
             ],
         )
