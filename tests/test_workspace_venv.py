@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -77,6 +80,52 @@ class WorkspaceVenvGuardTests(unittest.TestCase):
         self.assertIsInstance(details, dict)
         self.assertEqual(details["code"], "workspace_venv_required")
         self.assertEqual(details["workspace_root"], str(root))
+
+    def test_scenario_runner_package_initializer_is_lightweight(self) -> None:
+        script = (
+            "import json, sys\n"
+            "import tools.scenario_runner\n"
+            "print(json.dumps({\n"
+            "    'orchestration': 'tools.scenario_runner.orchestration' in sys.modules,\n"
+            "    'runtime': 'tools.scenario_runner.runtime' in sys.modules,\n"
+            "    'parser': 'tools.scenario_runner.parser' in sys.modules,\n"
+            "}))\n"
+        )
+
+        completed = subprocess.run(  # noqa: S603
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(completed.stdout)
+
+        self.assertFalse(payload["orchestration"])
+        self.assertFalse(payload["runtime"])
+        self.assertFalse(payload["parser"])
+
+    def test_generation_package_initializer_is_lightweight(self) -> None:
+        script = (
+            "import json, sys\n"
+            "import tools.generation\n"
+            "print(json.dumps({\n"
+            "    'authoring': 'tools.generation.authoring' in sys.modules,\n"
+            "    'application': 'tools.generation.application' in sys.modules,\n"
+            "    'review': 'tools.generation.review' in sys.modules,\n"
+            "}))\n"
+        )
+
+        completed = subprocess.run(  # noqa: S603
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(completed.stdout)
+
+        self.assertFalse(payload["authoring"])
+        self.assertFalse(payload["application"])
+        self.assertFalse(payload["review"])
 
 
 if __name__ == "__main__":
