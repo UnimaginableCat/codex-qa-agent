@@ -11,7 +11,7 @@ from ..case_diagnostics.lifecycle import (
     _workflow_same_state_contract_warning,
     _workflow_setup_state_mismatch_diagnostics,
 )
-from ..case_diagnostics.permissions import _permission_state_contract_diagnostics
+from ..case_diagnostics.permission import _permission_state_contract_diagnostics
 from ..case_diagnostics.readiness import _readiness_metadata_diagnostics
 from ..case_diagnostics.request_constraints import _request_constraint_diagnostics
 from ..case_diagnostics.variables import _env_backed_id_equality_diagnostics

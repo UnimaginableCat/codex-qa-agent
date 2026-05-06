@@ -15,7 +15,7 @@ from .lifecycle import (
 from .db_expectations import _db_string_placeholder_quoting_diagnostics
 from .email import _normalized_email_expectation_diagnostics
 from .request_constraints import _request_constraint_diagnostics
-from .permissions import _permission_state_contract_diagnostics
+from .permission import _permission_state_contract_diagnostics
 from .readiness import _readiness_metadata_diagnostics
 from .visibility import _visibility_claim_diagnostics
 
