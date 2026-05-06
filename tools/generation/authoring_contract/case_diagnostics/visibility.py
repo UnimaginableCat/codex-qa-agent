@@ -99,9 +99,11 @@ def _collection_visibility_data_setup_diagnostics(
     route_path = "" if case.execute is None or case.execute.route is None else case.execute.route.path
     if not _is_search_or_collection_route(route_path, case):
         return []
-    if case.setup:
+    if _setup_proves_collection_data(authoring_plan, case):
         return []
     if _has_collection_data_contract(case):
+        return []
+    if _oracle_proves_non_empty_collection(checks):
         return []
 
     strict = _collection_visibility_data_setup_required(authoring_plan, case)
@@ -162,6 +164,92 @@ def _has_collection_data_contract(case: AuthoringCase) -> bool:
     if any(token in combined for token in ("seeded search", "seeded result", "stable fixture", "fixture_result")):
         return True
     return False
+
+
+def _oracle_proves_non_empty_collection(checks: list[str]) -> bool:
+    combined = " ".join(checks).lower()
+    non_empty_patterns = (
+        r"\bat least one\b",
+        r"\bone or more\b",
+        r"\bnon[-_ ]?empty\b",
+        r"\bnot empty\b",
+        r"\blength\s*>\s*0\b",
+        r"\blength\s*>=\s*[1-9]\d*\b",
+        r"\bcount\s*>\s*0\b",
+        r"\bcount\s*>=\s*[1-9]\d*\b",
+        r"\bsize\s*>\s*0\b",
+        r"\bsize\s*>=\s*[1-9]\d*\b",
+        r"\bitems?\s*>\s*0\b",
+        r"\bitems?\s*>=\s*[1-9]\d*\b",
+        r"\bresults?\s*>\s*0\b",
+        r"\bresults?\s*>=\s*[1-9]\d*\b",
+    )
+    if any(re.search(pattern, combined) for pattern in non_empty_patterns):
+        return True
+    indexed_result_patterns = (
+        r"response\s+contains\s+field\s+`[^`]*(?:\.0|\[0\])",
+        r"response\s+`[^`]*(?:\.0|\[0\])[^`]*`\s+exists",
+        r"response\s+`[^`]*(?:\.0|\[0\])[^`]*`\s+is\s+not\s+null",
+    )
+    return any(re.search(pattern, combined) for pattern in indexed_result_patterns)
+
+
+def _setup_proves_collection_data(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+    for setup_step in case.setup:
+        entity = authoring_plan.entities.get(setup_step.use_entity.strip())
+        if entity is None:
+            continue
+        operation = entity.operations.get(setup_step.operation.strip())
+        if operation is None:
+            continue
+        if _operation_proves_collection_data(setup_step.use_entity, setup_step.operation, operation.to_dict()):
+            return True
+    return False
+
+
+def _operation_proves_collection_data(entity_name: str, operation_name: str, payload: dict[str, Any]) -> bool:
+    route_payload = payload.get("route")
+    route_text = _flatten_metadata_text(route_payload) if isinstance(route_payload, dict) else ""
+    text = " ".join(
+        [
+            entity_name,
+            operation_name,
+            route_text,
+            _flatten_metadata_text(payload.get("request_body")),
+            _flatten_metadata_text(payload.get("captures") or payload.get("capture")),
+            _flatten_metadata_text(payload.get("expected_outcomes")),
+        ]
+    ).lower()
+    if any(token in text for token in ("non_empty_fixture", "non-empty fixture", "nonempty fixture")):
+        return True
+    if any(token in text for token in ("seeded search", "seeded result", "fixture_result")):
+        return True
+    blocked_setup_tokens = (
+        "permission",
+        "auth",
+        "credential",
+        "token",
+        "login",
+        "session",
+        "role",
+        "access",
+        "grant",
+        "revoke",
+        "member",
+    )
+    if any(token in text for token in blocked_setup_tokens):
+        return False
+    data_verbs = ("create", "seed", "ensure", "discover", "find", "prepare", "provision", "index")
+    if not any(token in text for token in data_verbs):
+        return False
+    captures = payload.get("captures")
+    if not isinstance(captures, list):
+        captures = payload.get("capture")
+    capture_text = " ".join(str(item) for item in captures or [])
+    if re.search(r"->\s*[A-Za-z_][A-Za-z0-9_]*(?:_id|_guid)\b", capture_text):
+        return True
+    expected_outcomes = " ".join(str(item) for item in payload.get("expected_outcomes") or []).lower()
+    return "one row exists" in expected_outcomes or "response contains field `id`" in expected_outcomes
 
 
 def _flatten_metadata_text(value: Any) -> str:

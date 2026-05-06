@@ -1218,6 +1218,183 @@ cases:
             )
         )
 
+    def test_strict_search_visibility_data_setup_ignores_permission_only_setup(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"collection_visibility_requires_data_setup": True}}},
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/1/permissions/update"),
+                            captures=["response.json.0.company_member_guid -> partner_company_member_guid"],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="workflow",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_partner_edit",
+                        )
+                    ],
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `cost_price` = `null`"],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_strict_search_visibility_data_setup_accepts_non_empty_oracle_check(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"collection_visibility_requires_data_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=[
+                            "response JSON exists",
+                            "response categories length >= 1",
+                            "response `cost_price` = `null`",
+                        ],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_strict_search_visibility_data_setup_accepts_indexed_result_oracle_check(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"collection_visibility_requires_data_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=[
+                            "response JSON exists",
+                            "response contains field `categories.0.positions.0.id`",
+                            "response `cost_price` = `null`",
+                        ],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_strict_search_visibility_data_setup_accepts_data_creating_setup(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"collection_visibility_requires_data_setup": True}}},
+            entities={
+                "price_list_position": AuthoringEntitySpec(
+                    operations={
+                        "create_position": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/1/positions/create"),
+                            captures=["response.json.id -> position_id"],
+                            expected_outcomes=["HTTP 201", "response contains field `id`"],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="workflow",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_position",
+                            operation="create_position",
+                        )
+                    ],
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `cost_price` = `null`"],
+                    ),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_compile_merges_default_headers_into_setup_and_case_requests(self) -> None:
         plan = AuthoringPlan(
             version=1,
