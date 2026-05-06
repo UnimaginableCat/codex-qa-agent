@@ -829,6 +829,149 @@ cases:
             )
         )
 
+    def test_scope_role_matrix_requires_cases_for_each_declared_role(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(
+                surface="price-list-permissions",
+                include=["partner/customer/contractor/member/outsider role matrix"],
+            ),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            cases=[
+                AuthoringCase(
+                    id="partner-permissions",
+                    kind="api",
+                    objective="Partner reads permissions.",
+                    state_change="read_only",
+                    metadata={"default_actor": "partner"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+                AuthoringCase(
+                    id="customer-permissions",
+                    kind="api",
+                    objective="Customer reads permissions.",
+                    state_change="read_only",
+                    metadata={"default_actor": "customer"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+                AuthoringCase(
+                    id="contractor-permissions",
+                    kind="api",
+                    objective="Contractor reads permissions.",
+                    state_change="read_only",
+                    metadata={"default_actor": "contractor"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+                AuthoringCase(
+                    id="outsider-permissions",
+                    kind="api",
+                    objective="Outsider denied.",
+                    state_change="read_only",
+                    metadata={"default_actor": "outsider"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=403),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_scope_role_coverage_missing"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].details["missing_roles"], ["member"])
+
+    def test_scope_role_matrix_accepts_declared_role_case(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(
+                surface="price-list-permissions",
+                include=["partner/member role matrix"],
+            ),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            cases=[
+                AuthoringCase(
+                    id="partner-permissions",
+                    kind="api",
+                    objective="Partner reads permissions.",
+                    state_change="read_only",
+                    metadata={"default_actor": "partner"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+                AuthoringCase(
+                    id="member-permissions",
+                    kind="api",
+                    objective="Member reads permissions.",
+                    state_change="read_only",
+                    metadata={"default_actor": "member"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(diagnostic.code == "authoring_scope_role_coverage_missing" for diagnostic in result.diagnostics)
+        )
+
+    def test_scope_role_matrix_allows_explicit_coverage_waiver(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(
+                surface="price-list-permissions",
+                include=["partner/member role matrix"],
+            ),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            metadata={
+                "coverage": {
+                    "role_waivers": [
+                        {"role": "member", "reason": "member actor fixture is not available in this environment."}
+                    ]
+                }
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-permissions",
+                    kind="api",
+                    objective="Partner reads permissions.",
+                    state_change="read_only",
+                    metadata={"default_actor": "partner"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(diagnostic.code == "authoring_scope_role_coverage_missing" for diagnostic in result.diagnostics)
+        )
+
     def test_evidence_supported_readiness_rejects_placeholder_evidence_values(self) -> None:
         for placeholder in ([None], [{}], ["TODO"], {"source_ref": None}, {"source_ref": {}}):
             with self.subTest(placeholder=placeholder):
