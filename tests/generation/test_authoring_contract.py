@@ -753,6 +753,82 @@ cases:
             )
         )
 
+    def test_permission_setup_requires_binding_for_placeholder_grant_subject(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="basic",
+                actor="founder",
+                scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_captured_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-list/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "key": "can_edit",
+                                    "subject": "{{partner_company_member_guid}}",
+                                    "resource": "price_list",
+                                    "state": "true",
+                                    "mode": "set",
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-edit-after-placeholder-grant",
+                    kind="workflow",
+                    objective="Partner can edit after granting the captured partner principal.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_captured_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-list/{{price_list_id}}/update/"),
+                        body={"name": "Updated"},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_evidence_supported_readiness_rejects_placeholder_evidence_values(self) -> None:
         for placeholder in ([None], [{}], ["TODO"], {"source_ref": None}, {"source_ref": {}}):
             with self.subTest(placeholder=placeholder):

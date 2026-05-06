@@ -390,12 +390,14 @@ def _has_method_evidence(value: Any, *, method: Any) -> bool:
 
 
 def _method_evidence_source_can_prove_method(value: dict[str, Any], source_ref: str) -> bool:
+    if _is_route_mapping_source(source_ref):
+        return False
     capability_text = _evidence_capability_text(value)
     if any(token in capability_text for token in _ROUTE_MAPPING_CAPABILITY_TOKENS):
         return False
     if any(token in capability_text for token in _METHOD_CAPABILITY_TOKENS):
         return True
-    return not _is_route_mapping_source(source_ref)
+    return True
 
 
 def _evidence_capability_text(value: dict[str, Any]) -> str:

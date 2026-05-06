@@ -9,6 +9,7 @@ from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnos
 
 from .policy import case_contract_section, plan_contract_section, policy_bool
 from ..diagnostics import authoring_diagnostic
+from ..helpers import _declared_variable_names
 from ..models import AuthoringCase, AuthoringEntityOperation, AuthoringPlan
 
 
@@ -321,7 +322,11 @@ def _actor_bound_permission_setup_diagnostics(
         operation = entity.operations.get(setup_step.operation.strip())
         if operation is None:
             continue
-        needs_binding, identity_fields = _operation_requires_actor_identity_binding(operation, execute_actor)
+        needs_binding, identity_fields = _operation_requires_actor_identity_binding(
+            operation,
+            execute_actor,
+            declared_variable_names=_declared_variable_names(authoring_plan, case),
+        )
         if not needs_binding:
             continue
         return [
@@ -413,9 +418,15 @@ def _has_structured_identity_binding_contract(metadata: dict[str, Any]) -> bool:
 def _operation_requires_actor_identity_binding(
     operation: AuthoringEntityOperation,
     actor: str,
+    *,
+    declared_variable_names: set[str],
 ) -> tuple[bool, list[str]]:
     actor = actor.lower()
-    identity_fields = _discovered_identity_fields(operation.to_dict())
+    identity_fields = [
+        field
+        for field in _discovered_identity_fields(operation.to_dict())
+        if field not in declared_variable_names
+    ]
     if not identity_fields:
         return False, []
     for effect in _operation_permission_effects(operation):
@@ -433,7 +444,18 @@ def _permission_subject_targets_execute_actor(subject: str, actor: str) -> bool:
         return True
     if normalized_subject in {"execute_actor", "current_actor", "current_user", "actor_under_test"}:
         return True
+    if _permission_subject_is_identity_placeholder(normalized_subject):
+        return True
     return normalized_subject in {f"{{{{{actor}}}}}", f"${{{actor}}}", f"env:{actor.upper()}"}
+
+
+def _permission_subject_is_identity_placeholder(subject: str) -> bool:
+    placeholder_match = re.fullmatch(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}", subject)
+    if placeholder_match is None:
+        placeholder_match = re.fullmatch(r"\$\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}", subject)
+    if placeholder_match is None:
+        return False
+    return _is_principal_identity_field(placeholder_match.group(1))
 
 
 def _discovered_identity_fields(value: Any) -> list[str]:
@@ -446,8 +468,7 @@ def _collect_discovered_identity_fields(value: Any, fields: set[str]) -> None:
     if value is None:
         return
     if isinstance(value, dict):
-        for key, nested in value.items():
-            _collect_discovered_identity_fields(key, fields)
+        for nested in value.values():
             _collect_discovered_identity_fields(nested, fields)
         return
     if isinstance(value, (list, tuple, set)):
@@ -459,11 +480,21 @@ def _collect_discovered_identity_fields(value: Any, fields: set[str]) -> None:
     if "env:" in text.lower():
         return
     for match in re.finditer(
-        r"\b(?:(?:[a-z0-9]+)_)?(?:company_)?(?:member|user|actor|principal|subject|account|employee|contact)_(?:id|guid|uuid)\b",
+        _PRINCIPAL_IDENTITY_FIELD_PATTERN,
         text,
         re.IGNORECASE,
     ):
         fields.add(match.group(0))
+
+
+_PRINCIPAL_IDENTITY_FIELD_PATTERN = (
+    r"\b(?:(?:[a-z0-9]+)_)?(?:company_)?"
+    r"(?:member|user|actor|principal|subject|account|employee|contact)_(?:id|guid|uuid)\b"
+)
+
+
+def _is_principal_identity_field(value: str) -> bool:
+    return bool(re.fullmatch(_PRINCIPAL_IDENTITY_FIELD_PATTERN, value, flags=re.IGNORECASE))
 
 
 def _negative_permission_baseline_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
