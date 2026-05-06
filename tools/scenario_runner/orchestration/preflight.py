@@ -7,11 +7,13 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+from tools.api.loaders import ApiEnvLoader
 from tools.common.statuses import StepStatus
+from tools.db.loaders import DbEnvLoader
 
 from ..persistence.artifacts import ARTIFACTS_DIRNAME, PARSED_PLANS_DIRNAME, RUNS_DIRNAME
 from .compiler import CompiledScenario, ExternalVariableRequirement
-from ..domain.models import ScenarioDefinition, ScenarioStepType
+from ..domain.models import ScenarioDefinition, ScenarioStepType, ScenarioVariableSource
 from ..projections.summary import resolve_final_status
 from ..runtime.variables import _default_env_loader, _load_env_values, _lookup_env_variable
 
@@ -83,6 +85,7 @@ class ScenarioPreflightChecker:
         checks.extend(self._check_scenario_shape(scenario_definition, workspace_root))
         checks.extend(self._check_environment_and_project(scenario_definition, workspace_root))
         checks.extend(self._check_external_variable_inputs(scenario_definition, required_external_inputs, workspace_root))
+        checks.extend(self._check_step_actor_profiles(scenario_definition, workspace_root))
         checks.extend(self._check_required_dependencies(scenario_definition))
         checks.extend(self._check_tool_entrypoints(scenario_definition, workspace_root))
         checks.extend(self._check_output_directories(workspace_root))
@@ -315,6 +318,107 @@ class ScenarioPreflightChecker:
                     )
                 )
         return checks
+
+    def _check_step_actor_profiles(
+        self,
+        scenario_definition: ScenarioDefinition,
+        workspace_root: Path,
+    ) -> list[PreflightCheckResult]:
+        env_path = self._resolve_path(workspace_root, scenario_definition.environment)
+        if not scenario_definition.environment.strip() or not env_path.exists():
+            return []
+
+        default_actor = self._literal_variable_value(scenario_definition, "actor")
+        actor_checks: list[PreflightCheckResult] = []
+        for step in scenario_definition.steps:
+            actor = step.actor.strip() or default_actor
+            if not actor or "{{" in actor:
+                continue
+            if step.step_type == ScenarioStepType.API:
+                actor_checks.append(self._check_api_actor_profile(env_path, actor, step.step_id))
+            elif step.step_type == ScenarioStepType.DB:
+                actor_checks.append(self._check_db_actor_profile(env_path, actor, step.step_id))
+        if not actor_checks:
+            return [
+                self._pass(
+                    "step_actor_profiles_resolvable",
+                    "No literal step actor profiles require preflight resolution.",
+                )
+            ]
+        if all(check.status == StepStatus.PASS for check in actor_checks):
+            return [
+                PreflightCheckResult(
+                    name="step_actor_profiles_resolvable",
+                    status=StepStatus.PASS,
+                    message="Step actor profiles are resolvable before runtime.",
+                    details={"profiles": [check.details for check in actor_checks]},
+                )
+            ]
+        return [
+            PreflightCheckResult(
+                name="step_actor_profiles_resolvable",
+                status=resolve_final_status([check.status for check in actor_checks]),
+                message="One or more step actor profiles could not be resolved before runtime.",
+                details={"profile_checks": [check.to_dict() for check in actor_checks]},
+            )
+        ]
+
+    @staticmethod
+    def _literal_variable_value(scenario_definition: ScenarioDefinition, variable_name: str) -> str:
+        for definition in scenario_definition.variables:
+            if definition.name == variable_name and definition.source == ScenarioVariableSource.LITERAL:
+                return definition.raw_value.strip()
+        return ""
+
+    @staticmethod
+    def _check_api_actor_profile(env_path: Path, actor: str, step_id: str) -> PreflightCheckResult:
+        try:
+            env = ApiEnvLoader().load(env_path, actor=actor)
+        except Exception as exc:  # noqa: BLE001
+            return PreflightCheckResult(
+                name=f"api_actor_profile_resolvable:{step_id}",
+                status=StepStatus.BLOCKED,
+                message=f"API actor profile '{actor}' is not resolvable: {exc}",
+                details={"actor": actor, "step_id": step_id},
+            )
+        if not env.is_ready():
+            return PreflightCheckResult(
+                name=f"api_actor_profile_resolvable:{step_id}",
+                status=StepStatus.BLOCKED,
+                message=f"API actor profile '{actor}' does not define a usable API base URL.",
+                details={"actor": actor, "step_id": step_id, "api_base_url_key": env.api_base_url_key},
+            )
+        return PreflightCheckResult(
+            name=f"api_actor_profile_resolvable:{step_id}",
+            status=StepStatus.PASS,
+            message="API actor profile is resolvable.",
+            details={"actor": actor, "step_id": step_id, "api_base_url_key": env.api_base_url_key},
+        )
+
+    @staticmethod
+    def _check_db_actor_profile(env_path: Path, actor: str, step_id: str) -> PreflightCheckResult:
+        try:
+            env = DbEnvLoader().load(env_path, actor=actor)
+        except Exception as exc:  # noqa: BLE001
+            return PreflightCheckResult(
+                name=f"db_actor_profile_resolvable:{step_id}",
+                status=StepStatus.BLOCKED,
+                message=f"DB actor profile '{actor}' is not resolvable: {exc}",
+                details={"actor": actor, "step_id": step_id},
+            )
+        if not env.is_ready():
+            return PreflightCheckResult(
+                name=f"db_actor_profile_resolvable:{step_id}",
+                status=StepStatus.BLOCKED,
+                message=f"DB actor profile '{actor}' does not define a usable database connection.",
+                details={"actor": actor, "step_id": step_id, "database_url_key": env.database_url_key},
+            )
+        return PreflightCheckResult(
+            name=f"db_actor_profile_resolvable:{step_id}",
+            status=StepStatus.PASS,
+            message="DB actor profile is resolvable.",
+            details={"actor": actor, "step_id": step_id, "database_url_key": env.database_url_key},
+        )
 
     @staticmethod
     def _check_required_text(name: str, value: str, message: str) -> PreflightCheckResult:

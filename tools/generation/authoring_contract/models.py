@@ -118,6 +118,7 @@ class AuthoringRoute:
 @dataclass(slots=True)
 class AuthoringExecute:
     route: AuthoringRoute | None = None
+    actor: str = ""
     headers: dict[str, Any] = field(default_factory=dict)
     params: dict[str, Any] = field(default_factory=dict)
     body: Any = None
@@ -131,6 +132,7 @@ class AuthoringExecute:
         route_payload = payload.get("route")
         return cls(
             route=None if not isinstance(route_payload, dict) else AuthoringRoute.from_dict(route_payload),
+            actor=str(payload.get("actor", "")),
             headers=dict(payload.get("headers") or {}),
             params=dict(payload.get("params") or {}),
             body=payload.get("body"),

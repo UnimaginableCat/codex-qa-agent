@@ -50,6 +50,7 @@ def convert_step_draft(
     step_id = f"step-{draft.step_number}"
     capture = _normalize_string_list(draft.fields.get("capture"))
     expected = _normalize_string_list(draft.fields.get("expected"))
+    actor = str(draft.fields.get("actor") or "").strip()
     metadata = {"parse_warnings": draft.warnings, "source_line": draft.line_number}
 
     if step_type == ScenarioStepType.API:
@@ -94,6 +95,7 @@ def convert_step_draft(
             step_number=draft.step_number,
             title=step_name,
             step_type=step_type,
+            actor=actor,
             api=api_definition,
             metadata=metadata,
         )
@@ -119,6 +121,7 @@ def convert_step_draft(
         step_number=draft.step_number,
         title=step_name,
         step_type=step_type,
+        actor=actor,
         db=db_definition,
         metadata=metadata,
     )

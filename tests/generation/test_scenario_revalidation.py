@@ -181,7 +181,7 @@ class ScenarioRevalidationTests(unittest.TestCase):
             any(target.target_type.value == "add_expected_assertion" for target in result.edit_targets.targets)
         )
 
-    def test_compile_mode_blocks_unsupported_step_actor_field(self) -> None:
+    def test_compile_mode_accepts_step_actor_field(self) -> None:
         with TemporaryDirectory() as tmp:
             scenario_path = _write_scenario(Path(tmp), _unsupported_step_actor_scenario())
 
@@ -190,9 +190,8 @@ class ScenarioRevalidationTests(unittest.TestCase):
             )
 
         self.assertEqual(result.parse_status.value, "valid")
-        self.assertEqual(result.compile_validation.compile_status.value, "failed")
-        self.assertEqual(result.execution_readiness_category.value, "compile_blocked")
-        self.assertTrue(
+        self.assertEqual(result.compile_validation.compile_status.value, "success")
+        self.assertFalse(
             any(
                 issue.details.get("code") == "unsupported_step_field_ignored"
                 for issue in result.compile_validation.issues

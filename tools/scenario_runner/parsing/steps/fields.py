@@ -16,6 +16,7 @@ KNOWN_STEP_FIELDS = {field.value for field in StepFieldKind}
 _SIMPLE_VALUE_FIELDS = {
     StepFieldKind.TYPE.value,
     StepFieldKind.NAME.value,
+    StepFieldKind.ACTOR.value,
     StepFieldKind.METHOD.value,
     StepFieldKind.PATH.value,
 }

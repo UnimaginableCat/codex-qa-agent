@@ -66,6 +66,7 @@ Compiler behavior:
 - carries `defaults.environment` into rendered scenario `## Environment`
 - carries `defaults.actor` into rendered scenario `## Variables` as `actor = literal:<value>`
 - lets a case override that actor with `metadata.default_actor`, which is useful for role-specific basic-auth env profiles
+- carries `setup[].actor` and `execute.actor` into rendered workflow steps as `Actor: <value>` for multi-actor scenarios
 - merges `defaults.headers` into authored API/workflow request headers, with case-level and entity-operation headers taking precedence on key conflicts
 - carries first-class `defaults.scenario_variables[]` and `cases[].scenario_variables[]` into rendered scenario `## Variables`
 - uses that rendered `actor` variable to select actor-scoped API/DB env keys like `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`, with fallback to base keys
@@ -86,6 +87,21 @@ cases:
 The rendered scenario uses `actor = literal:founder`, so runtime selects env keys like
 `API_AUTH_TYPE__FOUNDER=basic`, `API_USERNAME__FOUNDER`, and `API_PASSWORD__FOUNDER`.
 Do not add `Authorization: Bearer {{...}}` headers for basic-auth projects.
+
+For grant-then-act workflows, keep the scenario self-contained instead of relying on a pre-granted
+fixture actor:
+
+```yaml
+setup:
+- use_entity: price_list_permission
+  operation: grant_partner_edit
+  actor: founder
+execute:
+  actor: partner
+  route:
+    method: PUT
+    path: /api/price_list/{{price_list_id}}/update/
+```
 
 Do not make every role/member GUID a manual env prerequisite. If a scenario has actor
 credentials, derive internal identifiers through executable setup:

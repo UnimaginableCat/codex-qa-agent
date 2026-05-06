@@ -873,9 +873,15 @@ def _render_workflow_step_block(
             f"### Step {step_number}",
             "Type: api",
             f"Name: {_escape_line(title)}",
-            f"Method: {route.http_method.strip().upper()}",
-            f"Path: {route.endpoint_path.strip()}",
         ]
+        if workflow_step.actor.strip():
+            lines.append(f"Actor: {_escape_line(workflow_step.actor.strip())}")
+        lines.extend(
+            [
+                f"Method: {route.http_method.strip().upper()}",
+                f"Path: {route.endpoint_path.strip()}",
+            ]
+        )
         if workflow_step.request_headers:
             lines.extend(["Headers:", "```json", _json_block(workflow_step.request_headers), "```"])
         if workflow_step.request_params:
@@ -896,15 +902,21 @@ def _render_workflow_step_block(
         f"### Step {step_number}",
         "Type: db",
         f"Name: {_escape_line(title)}",
-        "SQL:",
-        "```sql",
-        workflow_step.sql.strip(),
-        "```",
-        "Params:",
-        "```json",
-        _json_block(workflow_step.params),
-        "```",
     ]
+    if workflow_step.actor.strip():
+        lines.append(f"Actor: {_escape_line(workflow_step.actor.strip())}")
+    lines.extend(
+        [
+            "SQL:",
+            "```sql",
+            workflow_step.sql.strip(),
+            "```",
+            "Params:",
+            "```json",
+            _json_block(workflow_step.params),
+            "```",
+        ]
+    )
     if workflow_step.capture:
         lines.extend(["Capture:", *(f"- {_escape_line(item)}" for item in workflow_step.capture)])
     if workflow_step.expected_outcomes:

@@ -269,6 +269,47 @@ class ScenarioVariableTests(unittest.TestCase):
         self.assertEqual(executor.run_variables["actor"], "api-client")
         self.assertEqual(executor.step_payload["actor"], "api-client")
 
+    def test_step_actor_overrides_scenario_actor_for_api_step_payload(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Step Actor Payload
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - actor = literal:founder
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: partner action
+                Actor: partner
+                Method: GET
+                Path: /health
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.run_variables["actor"], "founder")
+        self.assertEqual(executor.step_payload["actor"], "partner")
+
     def test_actor_variable_flows_into_db_step_payload(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -310,6 +351,49 @@ class ScenarioVariableTests(unittest.TestCase):
         self.assertEqual(summary.final_status, StepStatus.PASS)
         self.assertEqual(executor.run_variables["actor"], "admin")
         self.assertEqual(executor.step_payload["actor"], "admin")
+
+    def test_step_actor_overrides_scenario_actor_for_db_step_payload(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Step Actor DB Payload
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - actor = literal:founder
+
+                ## Steps
+
+                ### Step 1
+                Type: db
+                Name: partner db check
+                Actor: partner
+                SQL:
+                ```sql
+                select 1
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory(tool_results=[self._db_result([{"value": 1}])])
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.run_variables["actor"], "founder")
+        self.assertEqual(executor.step_payload["actor"], "partner")
 
     def test_variables_section_supports_generated_template_and_derived_transforms(self) -> None:
         with TemporaryDirectory() as tmp:

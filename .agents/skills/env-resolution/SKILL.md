@@ -52,6 +52,8 @@ Check for fields like:
 If the scenario declares `actor = literal:<value>` in `## Variables`, also check actor-scoped
 variants such as `API_BASE_URL__<ACTOR>`, `API_BEARER_TOKEN__<ACTOR>`, `DATABASE_URL__<ACTOR>`,
 and matching DB credential aliases before falling back to the base keys.
+If individual steps declare `Actor: <value>`, check those actor-scoped profiles as well; step actors
+override the scenario-level actor for that API or DB step.
 
 # Output requirements
 

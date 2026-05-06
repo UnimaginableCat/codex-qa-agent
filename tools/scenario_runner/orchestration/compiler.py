@@ -359,6 +359,7 @@ class ScenarioCompiler:
         requirements: list[tuple[str, str, str]] = []
         if step.api is not None:
             for field_name, value in (
+                ("step.actor", step.actor),
                 ("api.method", step.api.method),
                 ("api.path", step.api.path),
                 ("api.headers", step.api.headers),
@@ -373,6 +374,7 @@ class ScenarioCompiler:
                     requirements.append((requirement_name, "expectation", rule))
         if step.db is not None:
             for field_name, value in (
+                ("step.actor", step.actor),
                 ("db.sql", step.db.sql),
                 ("db.params", step.db.params),
             ):

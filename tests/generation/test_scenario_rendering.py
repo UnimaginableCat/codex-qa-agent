@@ -20,7 +20,22 @@ from tools.generation.domain.models import (
     PlannedWorkflowStep,
     RouteSupportHint,
 )
+from tools.generation.authoring_contract import AuthoringPlanCompiler
+from tools.generation.authoring_contract.models import (
+    AuthoringCase,
+    AuthoringDefaults,
+    AuthoringEntityOperation,
+    AuthoringEntitySpec,
+    AuthoringExecute,
+    AuthoringOracle,
+    AuthoringPersistedStateRef,
+    AuthoringPlan,
+    AuthoringRoute,
+    AuthoringScope,
+    AuthoringSetupStep,
+)
 from tools.generation.persistence.artifacts import GENERATION_ARTIFACTS_DIRNAME, FileGenerationArtifactStore
+from tools.generation.planning.assembly import NormalizedTestPlanAssembler
 from tools.generation.rendering import DraftScenarioRenderer, ScenarioDraftPreviewService, ScenarioRenderResult
 from tools.scenario_runner.parser import MarkdownScenarioParser
 
@@ -335,12 +350,14 @@ class ScenarioRenderingTests(unittest.TestCase):
                             PlannedWorkflowStep(
                                 step_type="api",
                                 title="Authenticate session",
+                                actor="founder",
                                 route=PlannedRouteIntent(http_method="POST", endpoint_path="/api/sessions/authenticate"),
                                 expected_outcomes=["HTTP 200"],
                             ),
                             PlannedWorkflowStep(
                                 step_type="api",
                                 title="Revoke session",
+                                actor="partner",
                                 route=PlannedRouteIntent(http_method="POST", endpoint_path="/api/sessions/{{session_id}}/revoke"),
                                 expected_outcomes=["HTTP 204"],
                             ),
@@ -353,8 +370,96 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertEqual(len(render_result.draft_set.drafts), 1)
         draft = render_result.draft_set.drafts[0]
         self.assertIn("### Step 1", draft.markdown)
+        self.assertIn("Actor: founder", draft.markdown)
         self.assertIn("### Step 2", draft.markdown)
+        self.assertIn("Actor: partner", draft.markdown)
         self.assertIn("DB verification required: yes.", draft.markdown)
+
+    def test_authoring_multi_actor_workflow_renders_parser_valid_step_actors(self) -> None:
+        authoring_plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-permissions",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Founder grants edit and partner acts.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            entities={
+                "permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price_list/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            expected_outcomes=["HTTP 200"],
+                        ),
+                        "verify_price_list_exists": AuthoringEntityOperation(
+                            sql="SELECT id FROM price_list_pricelist WHERE id = :price_list_id",
+                            params={"price_list_id": "{{price_list_id}}"},
+                            expected_outcomes=["one row exists"],
+                        ),
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="founder-grants-then-partner-updates",
+                    kind="workflow",
+                    objective="Founder grants can_edit, then partner updates the same price list.",
+                    state_change="update",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="permission",
+                            operation="grant_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="PUT", path="/api/price_list/{{price_list_id}}/update/"),
+                        actor="partner",
+                        body={"name": "{{price_list_name}}"},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="permission",
+                            operation="verify_price_list_exists",
+                        ),
+                    ),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "partner_company_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                        "price_list_name = literal:Updated",
+                    ],
+                )
+            ],
+        )
+        compiled = AuthoringPlanCompiler().compile(authoring_plan)
+        self.assertEqual(compiled.status.value, "PASS")
+        assert compiled.compiled_plan is not None
+        normalized = NormalizedTestPlanAssembler().assemble_from_agent_plan(compiled.compiled_plan)
+
+        render_result = DraftScenarioRenderer().render(normalized)
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("Actor: founder", draft.markdown)
+        self.assertIn("Actor: partner", draft.markdown)
+        with TemporaryDirectory() as tmp:
+            scenario_path = Path(tmp) / "scenario.md"
+            scenario_path.write_text(draft.markdown, encoding="utf-8")
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+
+        self.assertEqual([step.actor for step in scenario.steps[:2]], ["founder", "partner"])
 
     def test_renderer_appends_case_level_db_verification_to_workflow_case(self) -> None:
         render_result = DraftScenarioRenderer().render(

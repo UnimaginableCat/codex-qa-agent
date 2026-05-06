@@ -72,6 +72,7 @@ class ScenarioStep:
     step_number: int
     title: str
     step_type: ScenarioStepType
+    actor: str = ""
     api: ApiStepDefinition | None = None
     db: DbStepDefinition | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

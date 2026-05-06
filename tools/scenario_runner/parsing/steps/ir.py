@@ -17,6 +17,7 @@ class StepFieldKind(StrEnum):
 
     TYPE = "type"
     NAME = "name"
+    ACTOR = "actor"
     METHOD = "method"
     PATH = "path"
     HEADERS = "headers"

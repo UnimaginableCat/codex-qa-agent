@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
@@ -22,6 +23,33 @@ from tools.scenario_runner.runtime.executors import StepExecutionOutcome
 
 
 class ScenarioRunnerPreflightTests(unittest.TestCase):
+    def test_preflight_import_does_not_require_requests(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        script = """
+import builtins
+
+real_import = builtins.__import__
+
+def guarded_import(name, *args, **kwargs):
+    if name == "requests" or name.startswith("requests."):
+        raise ModuleNotFoundError("No module named 'requests'")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+import tools.scenario_runner.orchestration.preflight
+print("ok")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "ok")
+
     def test_missing_env_file_blocks_before_step_execution(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -122,6 +150,49 @@ class ScenarioRunnerPreflightTests(unittest.TestCase):
         self.assertEqual(executor.execute_count, 0)
         self.assertEqual(summary.steps, [])
         self.assertEqual(summary.message, "Scenario preflight failed with status BLOCKED.")
+
+    def test_step_actor_profile_is_checked_before_execution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_workspace(root, create_env=True, create_project=True, create_api_tool=True)
+            (root / "env" / "demo.env").write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=http://localhost",
+                        "API_AUTH_TYPE__PARTNER=none",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            scenario = self._scenario(root, ScenarioStepType.API)
+            scenario.steps[0].actor = "partner"
+            executor = _CountingStepExecutorFactory()
+            service = ScenarioRunnerService(step_executor_factory=executor)
+
+            with self._dependencies_available():
+                summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.execute_count, 1)
+        self.assertTrue(
+            any(check["name"] == "step_actor_profiles_resolvable" for check in summary.details["preflight_checks"])
+        )
+
+    def test_missing_role_actor_profile_blocks_before_execution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_workspace(root, create_env=True, create_project=True, create_api_tool=True)
+            scenario = self._scenario(root, ScenarioStepType.API)
+            scenario.steps[0].actor = "partner"
+            executor = _CountingStepExecutorFactory()
+            service = ScenarioRunnerService(step_executor_factory=executor)
+
+            with self._dependencies_available():
+                summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.BLOCKED)
+        self.assertEqual(executor.execute_count, 0)
+        self.assertTrue(any("step_actor_profiles_resolvable" in issue for issue in summary.tooling_issues))
 
     def test_invalid_variables_section_blocks_before_step_execution(self) -> None:
         with TemporaryDirectory() as tmp:
