@@ -188,6 +188,7 @@ class AuthoringEntityOperation:
     request_headers: dict[str, Any] = field(default_factory=dict)
     request_params: dict[str, Any] = field(default_factory=dict)
     request_body: Any = None
+    request_body_evidence: Any = None
     request_constraints: list[dict[str, Any]] = field(default_factory=list)
     auth_strategy: list[str] = field(default_factory=list)
     oracle: AuthoringOracle | None = None
@@ -227,6 +228,11 @@ class AuthoringEntityOperation:
             request_headers=headers,
             request_params=request_params,
             request_body=request_body,
+            request_body_evidence=(
+                payload.get("request_body_evidence")
+                or payload.get("request_body_schema")
+                or payload.get("serializer_evidence")
+            ),
             request_constraints=[
                 dict(item) for item in payload.get("request_constraints", []) if isinstance(item, dict)
             ],

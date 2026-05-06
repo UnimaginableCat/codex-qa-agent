@@ -226,6 +226,168 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(compiled_case.metadata["default_actor"], "partner")
         self.assertNotIn("Authorization", compiled_case.request_headers)
 
+    def test_compile_uses_execute_actor_as_api_case_default_actor(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover anonymous access.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            cases=[
+                AuthoringCase(
+                    id="anonymous-permissions-rejected",
+                    kind="api",
+                    objective="Verify unauthenticated permissions request is rejected.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/price-lists/{{price_list_id}}/permissions"),
+                        actor="anonymous",
+                        auth_strategy=["none"],
+                    ),
+                    oracle=AuthoringOracle(status_code=401),
+                    scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        compiled_case = result.compiled_plan.planned_test_cases[0]
+        self.assertEqual(compiled_case.auth_strategy, ["none"])
+        self.assertEqual(compiled_case.metadata["default_actor"], "anonymous")
+
+    def test_validate_blocks_env_backed_id_equality_against_json_id(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list detail.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="basic",
+                actor="member",
+                scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+            ),
+            cases=[
+                AuthoringCase(
+                    id="member-reads-price-list",
+                    kind="api",
+                    objective="Verify member can read the target price list.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/{{price_list_id}}")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response `id` = `{{price_list_id}}`"],
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_env_id_equality_type_ambiguous"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_blocks_read_only_post_body_without_request_body_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover template calculation.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="contractor"),
+            cases=[
+                AuthoringCase(
+                    id="contractor-template-calculate",
+                    kind="api",
+                    objective="Verify calculate masks totals.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                        body={"template_id": "{{template_id}}"},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "template_id = literal:123",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_request_body_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_allows_read_only_post_body_with_operation_schema_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover template calculation.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="contractor"),
+            entities={
+                "price_list_template": AuthoringEntitySpec(
+                    operations={
+                        "calculate": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                            request_body_evidence={
+                                "source_ref": "serializers/price_list_template_serializers.py",
+                                "required": ["templates", "quantity"],
+                            },
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="contractor-template-calculate",
+                    kind="api",
+                    objective="Verify calculate masks totals.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                        body={"templates": ["{{template_id}}"], "quantity": "1.0000"},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "template_id = literal:123",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_request_body_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_required_permission_state_blocks_api_case_without_setup(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -2535,6 +2697,56 @@ cases:
             )
         )
 
+    def test_visibility_indexed_response_path_requires_shape_evidence_even_with_fixture_contract(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list visibility.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            cases=[
+                AuthoringCase(
+                    id="customer-detail-masks-cost-price",
+                    kind="api",
+                    objective="Customer detail response applies cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/{{id}}")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=[
+                            "response JSON exists",
+                            "response contains field `positions_flat.0.id`",
+                            "response `positions_flat.0.cost_price` = `null`",
+                        ],
+                    ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["positions_flat.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        },
+                        "fixture_contract": {
+                            "non_empty_paths": ["positions_flat.0.id"],
+                            "source": "seeded price list fixture has at least one position.",
+                        },
+                    },
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_visibility_response_path_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_strict_indexed_detail_visibility_requires_data_setup_or_provenance(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -2621,6 +2833,7 @@ cases:
                             "non_empty_paths": ["items"],
                             "source": "env fixture CATALOG_SEARCH_QUERY returns at least one indexed item.",
                         },
+                        "response_shape_evidence": "CatalogSearchSerializer exposes items.0.cost_price.",
                     },
                 ),
             ],
@@ -2679,6 +2892,8 @@ cases:
                                 "fields": ["cost_price"],
                                 "response_paths": ["categories.0.positions.0.cost_price"],
                                 "requires_non_empty_result": True,
+                                "source_ref": "serializers/search_result.py",
+                                "evidence": "Search response groups matching positions under categories.0.positions.",
                             }
                         }
                     },

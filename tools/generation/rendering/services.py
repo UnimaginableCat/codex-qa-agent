@@ -226,6 +226,7 @@ class DraftScenarioRenderer:
                             ) or test_case.request_body is not None,
                             "db_verification_required": _test_case_requires_db_verification(test_case),
                             "db_verification_present": _test_case_has_db_verification(test_case),
+                            "no_persistence_expected": _test_case_declares_no_persistence_expected(test_case),
                             "case_gaps": [gap.to_dict() for gap in test_case.gaps],
                         },
                     )
@@ -297,6 +298,7 @@ class DraftScenarioRenderer:
                         "request_body_present": test_case.request_body is not None,
                         "db_verification_required": _test_case_requires_db_verification(test_case),
                         "db_verification_present": _test_case_has_db_verification(test_case),
+                        "no_persistence_expected": _test_case_declares_no_persistence_expected(test_case),
                         "case_gaps": [gap.to_dict() for gap in test_case.gaps],
                     },
                 )
@@ -380,6 +382,8 @@ class DraftScenarioRenderer:
         notes.append(f"Auth strategy required: {'yes' if requires_auth_strategy else 'no'}.")
         notes.append(f"Request body required: {'yes' if requires_request_body else 'no'}.")
         notes.append(f"DB verification required: {'yes' if requires_db_verification else 'no'}.")
+        if _test_case_declares_no_persistence_expected(test_case):
+            notes.append("No persistence expected: case is explicitly authored as read-only.")
         if support.get("handler_name"):
             notes.append(f"Handler: {support['handler_name']}.")
         if support.get("controller_name"):
@@ -532,6 +536,8 @@ class DraftScenarioRenderer:
                 f"DB verification required: {'yes' if db_verification_required else 'no'}.",
             ]
         )
+        if _test_case_declares_no_persistence_expected(test_case):
+            lines.append("No persistence expected: case is explicitly authored as read-only.")
         if actor:
             lines.append(f"Actor: {actor}")
         if db_verification_required and not db_verification_present:
@@ -806,6 +812,8 @@ def _db_only_workflow_binding(test_case: PlannedTestCase) -> dict[str, Any] | No
 
 
 def _test_case_requires_db_verification(test_case: PlannedTestCase) -> bool:
+    if _test_case_declares_no_persistence_expected(test_case):
+        return False
     if test_case.requires_db_verification:
         return True
     return _workflow_requires_persisted_state_verification(test_case)
@@ -835,6 +843,8 @@ def _test_case_has_capture_rules(test_case: PlannedTestCase) -> bool:
 
 
 def _workflow_requires_persisted_state_verification(test_case: PlannedTestCase) -> bool:
+    if _test_case_declares_no_persistence_expected(test_case):
+        return False
     if not test_case.workflow_steps:
         return False
     case_level_success = _expectations_indicate_success(test_case.expected_results)
@@ -849,6 +859,13 @@ def _workflow_requires_persisted_state_verification(test_case: PlannedTestCase) 
         ):
             return True
     return False
+
+
+def _test_case_declares_no_persistence_expected(test_case: PlannedTestCase) -> bool:
+    if test_case.metadata.get("no_persistence_expected") is True:
+        return True
+    state_change = str(test_case.metadata.get("state_change") or "").strip().lower()
+    return state_change in {"read_only", "read-only", "none", "no_change"}
 
 
 def _expectations_indicate_success(expectations: list[str]) -> bool:

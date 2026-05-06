@@ -5,9 +5,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from tools.generation.domain.models import GenerationDiagnostic
 from tools.scenario_runner.domain.models import ScenarioVariableDefinition, ScenarioVariableSource
 from tools.scenario_runner.parsing.variables.validation import build_variable_definition
 
+from ..diagnostics import authoring_diagnostic
 from ..helpers import _PLACEHOLDER_PATTERN, _VARIABLE_NAME_PATTERN, _extract_placeholders
 from ..models import AuthoringCase, AuthoringPlan
 
@@ -16,6 +18,73 @@ _EXPECTATION_COMPARISON_RE = re.compile(
     r"^\s*(?:response\s+)?(?P<left>.+?)\s*(?P<operator>=|!=)\s*(?P<right>.+?)\s*$",
     re.IGNORECASE,
 )
+_RESPONSE_ENV_PLACEHOLDER_EQUALITY_RE = re.compile(
+    r"^\s*response\s+`?(?P<path>[^`=]+?)`?\s*=\s*`?\{\{\s*(?P<variable>[A-Za-z_][A-Za-z0-9_]*)\s*\}\}`?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _env_backed_id_equality_diagnostics(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    *,
+    index: int,
+) -> list[GenerationDiagnostic]:
+    """Block exact API id equality against untyped env values.
+
+    Env-backed variables resolve as strings. Exact comparisons such as
+    response `id` = `{{price_list_id}}` are therefore ambiguous when the API
+    serializes ids as numbers, and they can create false runtime FAILs.
+    """
+
+    if case.oracle is None:
+        return []
+    definitions = _scenario_variable_definitions(authoring_plan, case)
+    diagnostics: list[GenerationDiagnostic] = []
+    for check in case.oracle.business_checks:
+        match = _RESPONSE_ENV_PLACEHOLDER_EQUALITY_RE.fullmatch(str(check))
+        if match is None:
+            continue
+        response_path = _strip_wrapping_quotes(match.group("path")).strip()
+        variable_name = match.group("variable").strip()
+        if not _path_targets_numeric_id(response_path):
+            continue
+        definition = definitions.get(variable_name)
+        if definition is None or definition.source != ScenarioVariableSource.ENV:
+            continue
+        diagnostics.append(
+            authoring_diagnostic(
+                "authoring_env_id_equality_type_ambiguous",
+                (
+                    "Case compares an API id field to an env-backed placeholder. Env values resolve as strings, "
+                    "while JSON ids are often numeric, so this assertion can fail on type mismatch even when the "
+                    "identity is correct."
+                ),
+                source_ref=case_ref,
+                details={
+                    "case_index": index,
+                    "business_check": str(check),
+                    "response_path": response_path,
+                    "variable": variable_name,
+                    "env_name": definition.env_name,
+                    "suggestion": (
+                        "Use a typed runtime capture/DB verification, assert `response contains field` plus a "
+                        "stronger persisted-state check, or introduce a typed variable contract before exact id equality."
+                    ),
+                },
+            )
+        )
+    return diagnostics
+
+
+def _path_targets_numeric_id(path: str) -> bool:
+    normalized = path.strip().strip("`").replace("[", ".").replace("]", "")
+    parts = [part for part in normalized.split(".") if part]
+    if not parts:
+        return False
+    last_part = parts[-1].lower()
+    return last_part == "id" or last_part.endswith("_id")
 
 
 def _scenario_variable_definitions(

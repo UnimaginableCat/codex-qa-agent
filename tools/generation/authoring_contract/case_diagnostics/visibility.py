@@ -82,6 +82,14 @@ def _visibility_claim_diagnostics(
         )
     )
     diagnostics.extend(
+        _visibility_response_path_evidence_diagnostics(
+            case=case,
+            case_ref=case_ref,
+            index=index,
+            structured_claim=structured_claim,
+        )
+    )
+    diagnostics.extend(
         _root_visibility_field_assertion_diagnostics(
             authoring_plan=authoring_plan,
             case=case,
@@ -92,6 +100,83 @@ def _visibility_claim_diagnostics(
         )
     )
     return diagnostics
+
+
+def _visibility_response_path_evidence_diagnostics(
+    *,
+    case: AuthoringCase,
+    case_ref: str,
+    index: int,
+    structured_claim: dict[str, Any] | None,
+) -> list[GenerationDiagnostic]:
+    if structured_claim is None:
+        return []
+    indexed_paths = [
+        path
+        for path in _visibility_claim_response_paths(structured_claim)
+        if _contains_indexed_path(path)
+    ]
+    if not indexed_paths:
+        return []
+    if _has_visibility_response_path_evidence(case, structured_claim):
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_visibility_response_path_evidence_required",
+            (
+                "Visibility claim asserts indexed response paths, but the case does not include response-shape "
+                "evidence proving those exact JSON paths. Invented paths can pass authoring review and then fail "
+                "at runtime before exercising the masking behavior."
+            ),
+            severity=DiagnosticSeverity.ERROR,
+            source_ref=case_ref,
+            details={
+                "case_index": index,
+                "response_paths": indexed_paths,
+                "suggestion": (
+                    "Add metadata.response_shape_evidence/exact_response_path_evidence or visibility claim "
+                    "source_ref/evidence from the serializer/API response that proves the exact indexed path."
+                ),
+            },
+        )
+    ]
+
+
+def _visibility_claim_response_paths(structured_claim: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for key in ("response_paths", "paths"):
+        raw_paths = structured_claim.get(key)
+        if isinstance(raw_paths, str):
+            paths.append(raw_paths)
+        elif isinstance(raw_paths, list):
+            paths.extend(str(path) for path in raw_paths if str(path).strip())
+    return paths
+
+
+def _has_visibility_response_path_evidence(case: AuthoringCase, structured_claim: dict[str, Any]) -> bool:
+    for payload in (case.metadata, structured_claim):
+        if not isinstance(payload, dict):
+            continue
+        if _payload_has_response_path_evidence(payload):
+            return True
+    return False
+
+
+def _payload_has_response_path_evidence(payload: dict[str, Any]) -> bool:
+    for key in (
+        "response_shape_evidence",
+        "exact_response_path_evidence",
+        "serializer_evidence",
+        "response_serializer_evidence",
+        "source_ref",
+        "evidence",
+    ):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, (dict, list)) and value:
+            return True
+    return False
 
 
 def _visibility_assertions_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
