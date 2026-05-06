@@ -67,8 +67,8 @@ Keep reporting status separate from lifecycle labels such as `active`, `paused`,
 
 ## Shared scenario rules
 
-- Prefer the project/workspace venv before falling back to other interpreters. If tooling/env readiness is missing and blocks execution, classify that as `BLOCKED`.
-- For all workspace CLIs, including `tools.generation` and `tools.scenario_runner`, resolve the workspace/project venv before the first command. Check local candidates such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, and `.venv/bin/python`. Do not probe `python -m ...` with the system interpreter before checking the venv. Use `uv run`, system `python`, or `py` only as an explicitly stated fallback after venv readiness fails or when the user authorizes it.
+- Prefer the workspace-root venv before falling back to any other interpreter. If tooling/env readiness is missing and blocks execution, classify that as `BLOCKED`.
+- For all workspace CLIs, including `tools.generation`, `tools.scenario_runner`, `tools/api`, and `tools/db`, resolve the workspace-root venv before the first command. Check only root-level candidates such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, and `.venv/bin/python`. Do not use `code/<project>/.venv*`, `python -m ...`, `python3 -m ...`, `py -m ...`, or `uv run` as probes before the workspace venv check. Use a project venv, `uv run`, system `python`, `python3`, or `py` only after the workspace-root venv fails and the user explicitly authorizes that fallback.
 - For CLI gates, require explicit machine-readable or text status evidence before continuing. Empty stdout, truncated output without `Status: ...`, or an unreadable JSON payload is not a successful gate; rerun with JSON/text output or read the persisted artifact before reporting `PASS`.
 - For runnable scenarios, do not start with broad code analysis by default. Use the runner first, then inspect code only if the result or the user requires it.
 - Manual API or DB execution is fallback work unless the user explicitly asked for that path or the runner cannot execute the required check.

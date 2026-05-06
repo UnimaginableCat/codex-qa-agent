@@ -21,7 +21,7 @@ Prefer `scenario_runner` over manual API/DB replay when a valid scenario file or
 
 # Core Commands
 
-Use the project/workspace venv interpreter for runner execution. Verify that the venv exists and satisfies Python 3.14+ before running the CLI.
+Use the workspace-root venv interpreter for runner execution. Do not use target project venvs under `code/<project>` for workspace runner CLI. Verify that the workspace venv exists and satisfies Python 3.14+ before running the CLI.
 
 - Auto batch run: `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir <scenario-dir> --mode auto`
 - Guided batch run: `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir <scenario-dir>`
@@ -30,7 +30,7 @@ Use the project/workspace venv interpreter for runner execution. Verify that the
 - Inspect pause: `<venv-python> -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
 - Resume: `<venv-python> -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
 
-Do not silently fall back to system `python` or `py`. If the project venv is missing, too old, or lacks dependencies, report the run as environment/tooling `BLOCKED` unless the user explicitly authorizes a non-venv fallback.
+Do not silently fall back to project venvs, system `python`, `python3`, `py`, or `uv run`. If the workspace-root venv is missing, too old, or lacks dependencies, report the run as environment/tooling `BLOCKED` unless the user explicitly authorizes a non-workspace fallback.
 
 # Execution Policy
 
@@ -54,11 +54,11 @@ If an API step returns `404` with an HTML/text body while `API_BASE_URL` and the
 
 When the user asks to run a scenario without specifying mode, treat this as the preferred guided workflow.
 
-Also apply this mandatory environment rule: use the project/workspace venv for the runner; if the venv cannot run the CLI, stop as environment/tooling `BLOCKED` instead of switching interpreters.
+Also apply this mandatory environment rule: use the workspace-root venv for the runner; if that venv cannot run the CLI, stop as environment/tooling `BLOCKED` instead of switching interpreters.
 
 ```text
 Выполни scenario через runner-execution в guided mode: scenarios/<path>.md.
-Используй scenario_runner CLI строго через venv проекта, проверь Python 3.14+ interpreter в этом venv, запусти --mode guided.
+Используй scenario_runner CLI строго через venv в корне workspace, проверь Python 3.14+ interpreter в этом venv, запусти --mode guided.
 Если run остановится на pause/decision point, покажи operator_state, available_actions и pause_state_path, но не выбирай action без моего подтверждения.
 После моего выбора продолжи через --resume <pause-state.json> --action <action_id>.
 В финале дай status, continuation/termination, summary/report paths и ключевые blockers/failures.
@@ -68,7 +68,7 @@ For scenario directories:
 
 ```text
 Выполни suite через runner-execution в guided mode: scenarios/<dir>/.
-Используй tools.scenario_runner.batch_cli строго через venv проекта.
+Используй tools.scenario_runner.batch_cli строго через venv в корне workspace.
 Если batch дойдет до реального pause-state, остановись на первом paused scenario, покажи batch_summary, summary, operator_state, remaining_scenarios и pause_state_path.
 Не собирай временные inline Python или shell loops для массового прогона, если directory suite можно выполнить через batch_cli.
 ```
@@ -77,7 +77,7 @@ For scenario directories:
 
 1. Read `AGENTS.md` and the target scenario.
 2. Identify the target project under `code/` and the declared env file.
-3. Resolve the project/workspace venv interpreter and verify Python 3.14+.
+3. Resolve the workspace-root venv interpreter and verify Python 3.14+.
 4. If the input is one scenario file, execute `tools.scenario_runner.cli`. If the input is a scenario directory/suite, execute `tools.scenario_runner.batch_cli`.
 5. Use guided mode unless the user explicitly requested auto/non-interactive mode.
 6. Parse runner JSON output.

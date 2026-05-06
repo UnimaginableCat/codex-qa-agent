@@ -2,19 +2,20 @@
 
 ## Python Selection
 
-The runner must be executed through the project/workspace venv. The venv must satisfy Python 3.14+.
+The runner must be executed through the workspace-root venv. The venv must satisfy Python 3.14+.
 
 Resolution order:
 
-1. Check explicit local venv paths:
-   - `.venv/bin/python`
-   - `venv/bin/python`
+1. Check explicit workspace-root venv paths:
+   - `.venv314/Scripts/python.exe`
    - `.venv/Scripts/python.exe`
-   - `venv/Scripts/python.exe`
+   - `.venv314/bin/python`
+   - `.venv/bin/python`
+   Do not check or use `code/<project>/.venv*` for workspace runner/tooling commands.
 2. Verify interpreter version before using it.
-3. Use the local venv only if it satisfies Python 3.14+ and has required dependencies.
-4. If the local venv is missing, older than Python 3.14, or lacks dependencies, stop and report environment/tooling `BLOCKED`.
-5. Use system `python` or `py` only if the user explicitly authorizes a non-venv fallback for this run.
+3. Use the workspace-root venv only if it satisfies Python 3.14+ and has required dependencies.
+4. If the workspace-root venv is missing, older than Python 3.14, or lacks dependencies, stop and report environment/tooling `BLOCKED`.
+5. Use project venvs, system `python`, `python3`, `py`, or `uv run` only if the user explicitly authorizes a non-workspace fallback for this run.
 
 Do not report an unsupported venv/interpreter failure as product behavior.
 
@@ -22,7 +23,7 @@ Do not report an unsupported venv/interpreter failure as product behavior.
 
 If runner preflight reports missing Python dependencies, classify the scenario as environment/tooling blocked in that execution context. Do not diagnose the target product from that result.
 
-If the project venv is not runnable, report that a valid runner venv must be prepared before scenario execution can be meaningful.
+If the workspace-root venv is not runnable, report that a valid runner venv must be prepared before scenario execution can be meaningful.
 
 ## Network Checks
 

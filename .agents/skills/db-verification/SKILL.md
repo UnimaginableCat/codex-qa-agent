@@ -8,6 +8,7 @@ description: Use this skill to execute read-only database verification steps for
 This skill verifies whether the system state in the database matches expectations after scenario execution.
 
 Apply the shared workspace instructions from `qa-entrypoint` first. This skill adds DB-step execution and SQL-specific rules.
+Run the DB tool with the workspace-root venv interpreter only; do not use target project venvs, system `python`, `python3`, `py`, or `uv run` unless the user explicitly authorizes a non-workspace fallback.
 
 Use this skill when:
 - a scenario step is of type DB
