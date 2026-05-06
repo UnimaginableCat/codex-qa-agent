@@ -87,7 +87,7 @@ def _draft_gap_summary(
         gap_messages.append("DB verification is required for this case but no DB step is present in the draft.")
 
     readiness = str(route_binding.get("readiness") or "")
-    if readiness == "route_resolved":
+    if readiness == "route_resolved" and gap_codes:
         gap_codes.append("non_route_requirements_remaining")
         gap_messages.append("Route is resolved, but non-route execution details still remain.")
 
