@@ -102,7 +102,7 @@ def _normalized_permission_states(items: list[dict[str, Any]]) -> list[dict[str,
             continue
         normalized = {
             "key": key,
-            "state": str(item.get("state") or item.get("value") or "").strip().lower(),
+            "state": _permission_state_value(item),
             "subject": str(item.get("subject") or "").strip(),
             "resource": str(item.get("resource") or "").strip(),
         }
@@ -131,9 +131,16 @@ def _operation_permission_effects(operation: AuthoringEntityOperation) -> list[d
             continue
         effect = {
             "key": key,
-            "state": str(item.get("state") or item.get("value") or "").strip().lower(),
+            "state": _permission_state_value(item),
             "actor": str(item.get("actor") or "").strip(),
-            "subject": str(item.get("subject") or "").strip(),
+            "subject": str(
+                item.get("subject")
+                or item.get("subject_variable")
+                or item.get("principal")
+                or item.get("principal_variable")
+                or item.get("captured_variable")
+                or ""
+            ).strip(),
             "resource": str(item.get("resource") or "").strip(),
             "mode": str(item.get("mode") or item.get("action") or "").strip().lower(),
         }
@@ -170,6 +177,13 @@ def _field_matches(required_state: dict[str, str], effect: dict[str, str], field
 
 def _permission_key(item: dict[str, Any]) -> str:
     return str(item.get("key") or item.get("permission") or item.get("name") or "").strip()
+
+
+def _permission_state_value(item: dict[str, Any]) -> str:
+    for key in ("state", "value"):
+        if key in item and item.get(key) is not None:
+            return str(item.get(key)).strip().lower()
+    return ""
 
 
 def _permission_prerequisite_metadata_diagnostics(
@@ -313,7 +327,7 @@ def _actor_bound_permission_setup_diagnostics(
     execute_actor = _effective_execute_actor(authoring_plan, case).lower()
     if not execute_actor:
         return []
-    if _has_actor_identity_binding_contract(case, execute_actor):
+    if _has_actor_identity_binding_contract(authoring_plan, case, execute_actor):
         return []
 
     for setup_step in case.setup:
@@ -366,12 +380,17 @@ def _effective_execute_actor(authoring_plan: AuthoringPlan, case: AuthoringCase)
     return authoring_plan.defaults.actor
 
 
-def _has_actor_identity_binding_contract(case: AuthoringCase, actor: str) -> bool:
+def _has_actor_identity_binding_contract(authoring_plan: AuthoringPlan, case: AuthoringCase, actor: str) -> bool:
     if _has_structured_identity_binding_contract(case.metadata, actor):
         return True
     metadata_text = _flatten_metadata_text(case.metadata).lower()
     actor = actor.lower()
-    return _identity_binding_text_is_strong(metadata_text, actor)
+    if _identity_binding_text_is_strong(metadata_text, actor):
+        return True
+    if _has_structured_identity_binding_contract(authoring_plan.metadata, actor):
+        return True
+    plan_metadata_text = _flatten_metadata_text(authoring_plan.metadata).lower()
+    return _identity_binding_text_is_strong(plan_metadata_text, actor)
 
 
 def _has_structured_identity_binding_contract(metadata: dict[str, Any], actor: str) -> bool:
@@ -516,11 +535,7 @@ def _operation_requires_actor_identity_binding(
     declared_variable_names: set[str],
 ) -> tuple[bool, list[str]]:
     actor = actor.lower()
-    identity_fields = [
-        field
-        for field in _discovered_identity_fields(operation.to_dict())
-        if field not in declared_variable_names
-    ]
+    identity_fields = _discovered_identity_fields(operation.to_dict())
     if not identity_fields:
         return False, []
     for effect in _operation_permission_effects(operation):
@@ -545,6 +560,8 @@ def _permission_subject_targets_execute_actor(subject: str, actor: str) -> bool:
     if normalized_subject == actor:
         return True
     if normalized_subject in {"execute_actor", "current_actor", "current_user", "actor_under_test"}:
+        return True
+    if _is_principal_identity_field(normalized_subject):
         return True
     if _permission_subject_is_identity_placeholder(normalized_subject):
         return True

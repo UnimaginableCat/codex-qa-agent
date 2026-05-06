@@ -410,7 +410,19 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
                     required_permission_state=[
                         {"key": "document.publish", "state": "allowed", "subject": "{{target_user_id}}"}
                     ],
-                    metadata={"default_actor": "editor"},
+                    metadata={
+                        "default_actor": "editor",
+                        "identity_resolution": {
+                            "actor_binding": {
+                                "actor": "editor",
+                                "subject_variable": "target_user_id",
+                                "evidence": (
+                                    "actor_identity_binding: target_user_id is the current actor user_id "
+                                    "for the editor actor profile."
+                                ),
+                            }
+                        },
+                    },
                     scenario_variables=[
                         "document_id = env:DOCUMENT_ID",
                         "target_user_id = literal:editor-1",
@@ -452,7 +464,19 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
                     required_permission_state=[
                         {"key": "document.publish", "state": "allowed", "subject": "{{target_user_id}}"}
                     ],
-                    metadata={"default_actor": "editor"},
+                    metadata={
+                        "default_actor": "editor",
+                        "identity_resolution": {
+                            "actor_binding": {
+                                "actor": "editor",
+                                "subject_variable": "target_user_id",
+                                "evidence": (
+                                    "actor_identity_binding: target_user_id is the current actor user_id "
+                                    "for the editor actor profile."
+                                ),
+                            }
+                        },
+                    },
                     scenario_variables=[
                         "document_id = env:DOCUMENT_ID",
                         "target_user_id = literal:editor-1",
@@ -539,7 +563,19 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
                     required_permission_state=[
                         {"key": "document.publish", "state": "allowed", "subject": "{{target_user_id}}"}
                     ],
-                    metadata={"default_actor": "editor"},
+                    metadata={
+                        "default_actor": "editor",
+                        "identity_resolution": {
+                            "actor_binding": {
+                                "actor": "editor",
+                                "subject_variable": "target_user_id",
+                                "evidence": (
+                                    "actor_identity_binding: target_user_id is the current actor user_id "
+                                    "for the editor actor profile."
+                                ),
+                            }
+                        },
+                    },
                     scenario_variables=[
                         "document_id = env:DOCUMENT_ID",
                         "target_user_id = literal:editor-1",
@@ -1130,6 +1166,243 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertFalse(
             any(
                 diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_setup_rejects_subject_variable_with_weak_plan_actor_binding(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="bearer",
+                actor="founder",
+                scenario_variables=[
+                    "price_list_id = env:PRICE_LIST_ID",
+                    "partner_company_member_guid = env:PRICE_LIST_PARTNER_MEMBER_GUID",
+                ],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-lists/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "permission": "can_edit",
+                                    "subject_variable": "partner_company_member_guid",
+                                    "value": True,
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-updates-after-grant",
+                    kind="workflow",
+                    objective="Partner updates after founder grants edit.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-lists/{{price_list_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+            metadata={
+                "identity_resolution": {
+                    "actor_binding": {
+                        "actor": "partner",
+                        "subject_variable": "partner_company_member_guid",
+                        "evidence": "PRICE_LIST_PARTNER_MEMBER_GUID must belong to the partner credentials.",
+                    }
+                }
+            },
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_setup_allows_subject_variable_with_strong_plan_actor_binding(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="bearer",
+                actor="founder",
+                scenario_variables=[
+                    "price_list_id = env:PRICE_LIST_ID",
+                    "partner_company_member_guid = env:PARTNER_COMPANY_MEMBER_GUID",
+                ],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-lists/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "permission": "can_edit",
+                                    "subject_variable": "partner_company_member_guid",
+                                    "value": True,
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-updates-after-grant",
+                    kind="workflow",
+                    objective="Partner updates after founder grants edit.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-lists/{{price_list_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+            metadata={
+                "identity_resolution": {
+                    "actor_binding": {
+                        "actor": "partner",
+                        "subject_variable": "partner_company_member_guid",
+                        "env_var": "PARTNER_COMPANY_MEMBER_GUID",
+                        "evidence": (
+                            "actor-scoped env PARTNER_COMPANY_MEMBER_GUID is the company_member_guid "
+                            "for the partner actor profile."
+                        ),
+                    }
+                }
+            },
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_required_permission_state_matches_boolean_false_permission_effect_value(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "revoke_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/api/price-lists/1/permissions/update/"),
+                            permission_state_effects=[
+                                {
+                                    "permission": "can_edit",
+                                    "subject": "partner",
+                                    "value": False,
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-edit-denied-after-revoke",
+                    kind="workflow",
+                    objective="Partner edit is denied after can_edit is revoked.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="revoke_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-lists/1/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=403),
+                    required_permission_state=[
+                        {
+                            "permission": "can_edit",
+                            "subject": "partner",
+                            "value": False,
+                        }
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_permission_state_setup_required"
                 for diagnostic in result.diagnostics
             )
         )
