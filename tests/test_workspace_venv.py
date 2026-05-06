@@ -64,7 +64,7 @@ class WorkspaceVenvGuardTests(unittest.TestCase):
         self.assertEqual(diagnostic["code"], "workspace_venv_required")
         self.assertEqual(diagnostic["details"]["workspace_root"], str(root))
 
-    def test_execution_payload_reports_error_workspace_venv_error(self) -> None:
+    def test_execution_payload_reports_blocked_workspace_venv_error(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             exc = WorkspaceVenvError(
@@ -75,7 +75,7 @@ class WorkspaceVenvGuardTests(unittest.TestCase):
 
             payload = workspace_venv_error_payload(exc, payload_kind="execution_result")
 
-        self.assertEqual(payload["status"], "ERROR")
+        self.assertEqual(payload["status"], "BLOCKED")
         details = payload["details"]
         self.assertIsInstance(details, dict)
         self.assertEqual(details["code"], "workspace_venv_required")

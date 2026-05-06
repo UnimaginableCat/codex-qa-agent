@@ -56,7 +56,7 @@ def workspace_venv_error_payload(exc: WorkspaceVenvError, *, payload_kind: Paylo
             "artifact_paths": {},
         }
     return {
-        "status": "ERROR",
+        "status": "BLOCKED",
         "message": str(exc),
         "details": details,
     }
