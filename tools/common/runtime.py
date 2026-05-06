@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 
@@ -44,15 +45,23 @@ class WorkspaceVenvError(ToolingError):
         self,
         *,
         current_executable: Path,
+        current_prefix: Path | None = None,
+        virtual_env: Path | None = None,
         workspace_root: Path,
         expected_prefixes: tuple[Path, ...],
     ) -> None:
         self.current_executable = current_executable
+        self.current_prefix = current_prefix
+        self.virtual_env = virtual_env
         self.workspace_root = workspace_root
         self.expected_prefixes = expected_prefixes
+        prefix_note = f" Runtime prefix is '{current_prefix}'." if current_prefix is not None else ""
+        virtual_env_note = f" VIRTUAL_ENV is '{virtual_env}'." if virtual_env is not None else ""
         super().__init__(
             "Workspace tooling must run through a venv located directly under the workspace root. "
-            f"Current interpreter is '{current_executable}'. "
+            f"Current interpreter is '{current_executable}'."
+            f"{prefix_note}"
+            f"{virtual_env_note} "
             "Use one of: "
             + ", ".join(str(path) for path in expected_prefixes)
         )
@@ -69,16 +78,29 @@ def ensure_supported_python_version() -> None:
         )
 
 
-def ensure_workspace_venv(*, workspace_root: Path, executable: str | None = None) -> None:
+def ensure_workspace_venv(
+    *,
+    workspace_root: Path,
+    executable: str | None = None,
+    sys_prefix: str | None = None,
+    virtual_env: str | None = None,
+) -> None:
     """Raise unless the interpreter lives inside a root-level workspace .venv* directory."""
 
     root = workspace_root.resolve()
     current_executable = Path(executable or sys.executable).resolve()
+    current_prefix = Path(sys_prefix or sys.prefix).resolve()
+    virtual_env_path = _optional_resolved_path(virtual_env if virtual_env is not None else os.environ.get("VIRTUAL_ENV"))
     expected_prefixes = _workspace_venv_prefixes(root)
-    if any(_is_relative_to(current_executable, prefix) for prefix in expected_prefixes):
+    if any(
+        _is_relative_to(current_executable, prefix) or _is_relative_to(current_prefix, prefix)
+        for prefix in expected_prefixes
+    ):
         return
     raise WorkspaceVenvError(
         current_executable=current_executable,
+        current_prefix=current_prefix,
+        virtual_env=virtual_env_path,
         workspace_root=root,
         expected_prefixes=expected_prefixes,
     )
@@ -103,3 +125,9 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _optional_resolved_path(value: str | None) -> Path | None:
+    if not value:
+        return None
+    return Path(value).resolve()
