@@ -411,8 +411,15 @@ def _route_path_shape(path: str) -> str:
 
 
 def _is_app_local_urlconf_source(source_ref: str) -> bool:
-    normalized = source_ref.replace("\\", "/").lower()
+    normalized = _strip_source_location_suffix(source_ref).replace("\\", "/").lower()
     return "/apps/" in normalized and normalized.endswith("/urls.py")
+
+
+def _strip_source_location_suffix(source_ref: str) -> str:
+    stripped = source_ref.strip()
+    stripped = re.sub(r"#l\d+$", "", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r":\d+(?::\d+)?$", "", stripped)
+    return stripped
 
 
 def _is_action_like_route_path(route_path: str) -> bool:
