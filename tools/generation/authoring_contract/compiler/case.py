@@ -14,6 +14,7 @@ from ..case_diagnostics.lifecycle import (
 from ..case_diagnostics.permissions import _permission_state_contract_diagnostics
 from ..case_diagnostics.readiness import _readiness_metadata_diagnostics
 from ..case_diagnostics.request_constraints import _request_constraint_diagnostics
+from ..case_diagnostics.variables import _env_backed_id_equality_diagnostics
 from ..case_diagnostics.visibility import _visibility_claim_diagnostics
 from ..diagnostics import authoring_diagnostic, derive_authoring_status
 from ..helpers import (
@@ -54,6 +55,7 @@ def compile_case(
     diagnostics.extend(_readiness_metadata_diagnostics(case, case_ref, index=index))
     diagnostics.extend(_visibility_claim_diagnostics(authoring_plan, case, case_ref, index=index))
     diagnostics.extend(_permission_state_contract_diagnostics(authoring_plan, case, case_ref, index=index))
+    diagnostics.extend(_env_backed_id_equality_diagnostics(authoring_plan, case, case_ref, index=index))
 
     if _requires_persistence(case.state_change) and (
         case.oracle is None or case.oracle.persisted_state is None
@@ -305,6 +307,8 @@ def _build_case_input(
         "authoring_kind": case.kind,
         "state_change": case.state_change,
     }
+    if kind == "api" and case.execute is not None and case.execute.actor.strip():
+        metadata["default_actor"] = case.execute.actor.strip()
 
     if kind == "workflow":
         workflow_steps = [*setup_steps]

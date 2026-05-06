@@ -147,7 +147,21 @@ def _scenario_requires_db_verification(
         return True
     if _draft_requires_db_verification(draft):
         return True
+    if scenario is not None and _scenario_has_db_step(scenario):
+        return True
+    if _scenario_declares_no_persistence_expected(scenario, draft):
+        return False
     if scenario is not None and _scenario_has_successful_mutating_api_step(scenario):
+        return True
+    return False
+
+def _scenario_declares_no_persistence_expected(
+    scenario: ScenarioDefinition | None,
+    draft: ScenarioDraft,
+) -> bool:
+    if draft.metadata.get("no_persistence_expected") is True:
+        return True
+    if scenario is not None and "No persistence expected:" in scenario.notes:
         return True
     return False
 
