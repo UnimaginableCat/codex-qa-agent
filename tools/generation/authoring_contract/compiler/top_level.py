@@ -244,11 +244,32 @@ def _declared_scope_roles(authoring_plan: AuthoringPlan) -> set[str]:
             roles.update(_metadata_role_list(coverage_contract.get("required_roles")))
 
     for include_item in authoring_plan.scope.include:
-        normalized = str(include_item or "").lower()
-        if not any(token in normalized for token in ("role", "roles", "actor", "actors", "persona", "personas")):
-            continue
-        roles.update(_role_tokens_from_text(normalized))
+        roles.update(_explicit_scope_role_list(include_item))
     return roles - _ROLE_COVERAGE_STOPWORDS
+
+
+def _explicit_scope_role_list(value: object) -> set[str]:
+    text = str(value or "").strip().lower()
+    if not text:
+        return set()
+
+    prefix_match = re.match(r"^(?:roles?|actors?|personas?)\s*:\s*(?P<roles>.+)$", text)
+    if prefix_match is not None:
+        return _role_tokens_from_text(prefix_match.group("roles"))
+
+    matrix_match = re.match(
+        r"^(?P<roles>[a-z0-9_-]+(?:\s*[/,;&]\s*[a-z0-9_-]+)+)\s+"
+        r"(?:roles?|actors?|personas?)\s+(?:matrix|coverage|set)\b",
+        text,
+    )
+    if matrix_match is not None:
+        return _role_tokens_from_text(matrix_match.group("roles"))
+
+    bracket_match = re.search(r"\[(?P<roles>[a-z0-9_/\-,;&\s]+)\]\s*(?:roles?|actors?|personas?)\b", text)
+    if bracket_match is not None:
+        return _role_tokens_from_text(bracket_match.group("roles"))
+
+    return set()
 
 
 def _covered_case_roles(authoring_plan: AuthoringPlan) -> set[str]:
@@ -269,21 +290,7 @@ def _covered_case_roles(authoring_plan: AuthoringPlan) -> set[str]:
                 if isinstance(claim, dict):
                     covered.update(_metadata_role_list(claim.get("actor")))
                     covered.update(_metadata_role_list(claim.get("role")))
-        covered.update(_case_text_role_mentions(case))
     return covered - _ROLE_COVERAGE_STOPWORDS
-
-
-def _case_text_role_mentions(case: object) -> set[str]:
-    text = " ".join(
-        str(part or "")
-        for part in (
-            getattr(case, "id", ""),
-            getattr(case, "title", ""),
-            getattr(case, "objective", ""),
-            " ".join(getattr(case, "tags", []) or []),
-        )
-    ).lower()
-    return _role_tokens_from_text(text)
 
 
 def _coverage_waived_roles(authoring_plan: AuthoringPlan) -> set[str]:

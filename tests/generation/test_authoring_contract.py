@@ -933,6 +933,111 @@ cases:
             any(diagnostic.code == "authoring_scope_role_coverage_missing" for diagnostic in result.diagnostics)
         )
 
+    def test_scope_role_matrix_does_not_count_role_mentions_as_coverage(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            metadata={"required_roles": ["partner", "customer"]},
+            cases=[
+                AuthoringCase(
+                    id="customer-cannot-access-partner-resources",
+                    kind="api",
+                    title="Customer cannot access partner resources",
+                    objective="Customer cannot access partner resources.",
+                    state_change="read_only",
+                    tags=["partner", "negative"],
+                    metadata={"default_actor": "customer"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=403),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_scope_role_coverage_missing"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].details["missing_roles"], ["partner"])
+
+    def test_scope_role_matrix_ignores_generic_scope_prose(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(
+                surface="price-list-permissions",
+                include=["role-based access control", "actor permission flow"],
+            ),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            cases=[
+                AuthoringCase(
+                    id="founder-permissions",
+                    kind="api",
+                    objective="Founder reads permissions.",
+                    state_change="read_only",
+                    metadata={"default_actor": "founder"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(diagnostic.code == "authoring_scope_role_coverage_missing" for diagnostic in result.diagnostics)
+        )
+
+    def test_scope_role_matrix_can_use_metadata_required_roles_for_freeform_scope(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(
+                surface="price-list-permissions",
+                include=["role-based access control"],
+            ),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            metadata={"required_roles": ["partner", "customer"]},
+            cases=[
+                AuthoringCase(
+                    id="customer-permissions",
+                    kind="api",
+                    objective="Customer reads permissions.",
+                    state_change="read_only",
+                    metadata={"default_actor": "customer"},
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/permissions/")),
+                    oracle=AuthoringOracle(status_code=200),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostics = [
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_scope_role_coverage_missing"
+        ]
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].details["missing_roles"], ["partner"])
+
     def test_scope_role_matrix_allows_explicit_coverage_waiver(self) -> None:
         plan = AuthoringPlan(
             version=1,
