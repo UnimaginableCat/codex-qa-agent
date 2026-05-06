@@ -26,6 +26,32 @@ class WorkspaceVenvGuardTests(unittest.TestCase):
 
             ensure_workspace_venv(workspace_root=root, executable=str(executable))
 
+    def test_accepts_uv_symlinked_workspace_venv_by_runtime_prefix(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            external_executable = root.parent / "uv" / "python" / "cpython-3.14" / "bin" / "python3.14"
+            workspace_prefix = root / ".venv"
+
+            ensure_workspace_venv(
+                workspace_root=root,
+                executable=str(external_executable),
+                sys_prefix=str(workspace_prefix),
+            )
+
+    def test_rejects_external_prefix_even_when_virtual_env_env_var_points_to_workspace(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            external_executable = root.parent / "bin" / "python3"
+            external_prefix = root.parent / "system-python"
+
+            with self.assertRaises(WorkspaceVenvError):
+                ensure_workspace_venv(
+                    workspace_root=root,
+                    executable=str(external_executable),
+                    sys_prefix=str(external_prefix),
+                    virtual_env=str(root / ".venv"),
+                )
+
     def test_rejects_project_venv_under_code(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -50,6 +76,7 @@ class WorkspaceVenvGuardTests(unittest.TestCase):
             root = Path(tmp)
             exc = WorkspaceVenvError(
                 current_executable=root.parent / "bin" / "python3",
+                current_prefix=root.parent / "system-python",
                 workspace_root=root,
                 expected_prefixes=(root / ".venv314", root / ".venv"),
             )
@@ -63,6 +90,7 @@ class WorkspaceVenvGuardTests(unittest.TestCase):
         self.assertIsInstance(diagnostic, dict)
         self.assertEqual(diagnostic["code"], "workspace_venv_required")
         self.assertEqual(diagnostic["details"]["workspace_root"], str(root))
+        self.assertEqual(diagnostic["details"]["current_prefix"], str(root.parent / "system-python"))
 
     def test_execution_payload_reports_blocked_workspace_venv_error(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -38,6 +38,8 @@ def workspace_venv_error_payload(exc: WorkspaceVenvError, *, payload_kind: Paylo
     details = {
         "code": "workspace_venv_required",
         "current_executable": str(exc.current_executable),
+        "current_prefix": str(exc.current_prefix) if exc.current_prefix is not None else None,
+        "virtual_env": str(exc.virtual_env) if exc.virtual_env is not None else None,
         "workspace_root": str(exc.workspace_root),
         "expected_prefixes": [str(path) for path in exc.expected_prefixes],
     }
