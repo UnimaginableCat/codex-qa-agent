@@ -153,6 +153,7 @@ def _scenario_step_from_mapping(payload: dict[str, Any]) -> ScenarioStep:
         step_number=int(payload.get("step_number", 0)),
         title=str(payload.get("title", "")).strip(),
         step_type=ScenarioStepType(str(payload.get("step_type", ScenarioStepType.API.value))),
+        actor=str(payload.get("actor", "")).strip(),
         api=(
             None
             if not isinstance(api_payload, dict)

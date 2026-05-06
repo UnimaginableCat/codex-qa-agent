@@ -353,6 +353,12 @@ class _BaseStepExecutor:
             return candidate
         return workspace_root / candidate
 
+    def _resolve_step_actor(self, step: ScenarioStep, run_context: RunContext) -> Any:
+        step_actor = step.actor.strip()
+        if step_actor:
+            return self._interpolator.interpolate(step_actor, run_context.variables)
+        return run_context.variables.get("actor")
+
     @staticmethod
     def _coerce_status(raw_status: Any) -> StepStatus:
         try:
@@ -401,7 +407,7 @@ class ApiStepExecutor(_BaseStepExecutor):
             "headers": self._interpolator.interpolate(step.api.headers, run_context.variables),
             "query_params": self._interpolator.interpolate(step.api.params, run_context.variables),
             "body": self._interpolator.interpolate(step.api.body, run_context.variables),
-            "actor": run_context.variables.get("actor"),
+            "actor": self._resolve_step_actor(step, run_context),
             "retry": self._interpolator.interpolate(step.api.retry, run_context.variables),
         }
 
@@ -421,7 +427,7 @@ class DbStepExecutor(_BaseStepExecutor):
         return {
             "sql": self._interpolator.interpolate(step.db.sql, run_context.variables),
             "params": self._interpolator.interpolate(step.db.params, run_context.variables),
-            "actor": run_context.variables.get("actor"),
+            "actor": self._resolve_step_actor(step, run_context),
         }
 
     def _capture_rules(self, step: ScenarioStep) -> list[str]:

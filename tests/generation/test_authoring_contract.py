@@ -121,6 +121,79 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(workflow_case.workflow_steps[0].auth_strategy, ["bearer"])
         self.assertEqual(workflow_case.workflow_steps[0].metadata["default_actor"], "api-client")
 
+    def test_compile_propagates_setup_and_execute_step_actors(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover multi-actor grant then act workflow.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="founder"),
+            entities={
+                "permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/permissions"),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                        ),
+                        "verify_price_list": AuthoringEntityOperation(
+                            sql="SELECT id FROM price_lists WHERE id = :price_list_id",
+                            params={"price_list_id": "{{price_list_id}}"},
+                            expected_outcomes=["one row exists"],
+                        ),
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-updates-after-founder-grant",
+                    kind="workflow",
+                    objective="Founder grants edit and partner updates the price list.",
+                    state_change="update",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="permission",
+                            operation="grant_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="PUT", path="/price-lists/{{price_list_id}}"),
+                        actor="partner",
+                        body={"name": "{{price_list_name}}"},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="permission",
+                            operation="verify_price_list",
+                        ),
+                    ),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "partner_company_member_guid = env:PARTNER_COMPANY_MEMBER_GUID",
+                        "price_list_name = literal:Updated",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        assert result.compiled_plan is not None
+        workflow_case = result.compiled_plan.planned_test_cases[0]
+        self.assertEqual(workflow_case.workflow_steps[0].actor, "founder")
+        self.assertEqual(workflow_case.workflow_steps[1].actor, "partner")
+
     def test_compile_allows_case_actor_to_override_default_actor_for_basic_auth(self) -> None:
         plan = AuthoringPlan(
             version=1,

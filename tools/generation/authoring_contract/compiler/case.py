@@ -313,6 +313,7 @@ def _build_case_input(
                 PlannedWorkflowStep(
                     step_type="api",
                     title=title,
+                    actor=_execute_actor(authoring_plan, case),
                     route=route_intent,
                     request_headers=_merge_default_headers(authoring_plan, case.execute.headers),
                     request_params=dict(case.execute.params),
@@ -379,3 +380,12 @@ def _build_case_input(
         db_verification=persisted_verification,
         metadata=metadata,
     )
+
+
+def _execute_actor(authoring_plan: AuthoringPlan, case: AuthoringCase) -> str:
+    if case.execute is not None and case.execute.actor.strip():
+        return case.execute.actor.strip()
+    default_actor = case.metadata.get("default_actor")
+    if isinstance(default_actor, str) and default_actor.strip():
+        return default_actor.strip()
+    return authoring_plan.defaults.actor.strip()

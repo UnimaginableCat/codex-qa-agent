@@ -51,6 +51,9 @@ When scaffolded through the CLI, `authoring-plan.yaml` lives inside the generati
 `defaults.actor` in `authoring-plan.yaml` is not just descriptive metadata. It compiles into a
 rendered scenario variable `actor = literal:<value>` and acts as an execution profile selector for
 actor-scoped API/DB env keys such as `API_BASE_URL__API_CLIENT` or `DATABASE_URL__API_CLIENT`.
+Workflow setup or execute steps may also set their own `actor`; rendered markdown preserves this as
+step-level `Actor: <value>`, and runtime uses the step actor before falling back to the scenario
+actor variable.
 
 `defaults.headers` in `authoring-plan.yaml` is the preferred way to apply shared custom request
 headers across authored API and workflow requests. It is especially useful for env-backed headers
@@ -326,6 +329,8 @@ workflow is triggered.
 
 When rendered drafts include `actor = literal:<value>`, downstream execution uses that value to
 select actor-scoped env profiles before falling back to base `API_*` or `DATABASE_*` keys.
+When a workflow step includes `Actor: <value>`, that step uses the matching actor-scoped profile and
+preflight checks that the profile is resolvable before execution.
 
 Review and promotion:
 

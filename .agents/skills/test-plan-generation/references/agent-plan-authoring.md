@@ -111,6 +111,9 @@ Each case should contain:
 - Do not author `defaults.actor` as prose-only business commentary; if it is present, downstream
   runtime will use it to select actor-scoped `API_*` and `DATABASE_*` keys before falling back to
   base env values.
+- Workflow steps may set `actor` when a single scenario must switch roles, for example founder
+  performs a permission grant and partner performs the gated action. Rendered markdown preserves
+  this as step-level `Actor: <role>`, and runtime uses it before the scenario-level actor variable.
 - For shared custom headers in authoring DSL, prefer `defaults.headers` with env-backed variables,
   for example `X-Leadflow-Internal-Token: "{{internal_api_token}}"`.
 - Do not model custom header auth schemes as invented `defaults.auth` values; keep them as explicit

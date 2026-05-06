@@ -323,6 +323,7 @@ def _apply_transform(variable_name: str, value: Any, transform: str) -> Any:
 
 def _collect_step_placeholder_names(step) -> set[str]:
     names: set[str] = set()
+    names.update(_collect_placeholder_names(getattr(step, "actor", "")))
     if step.api is not None:
         names.update(_collect_placeholder_names(step.api.method))
         names.update(_collect_placeholder_names(step.api.path))

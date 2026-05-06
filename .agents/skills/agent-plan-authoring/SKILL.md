@@ -83,6 +83,8 @@ Default completion point:
 - `--validate-authoring-bundle --path artifacts/agent/generation/<run_id>` was run for managed bundles
 - `--validate-authoring-plan` may still be used as a local authoring check, but it is not the final staged handoff gate for managed bundles
 - authoring-level diagnostics were resolved or explicitly reported
+- the final bundle gate must have explicit evidence: stdout must show `Status: PASS` or JSON must contain `status=PASS`
+- if any validation command returns no stdout or an unreadable/truncated payload, do not infer success from command completion; rerun with `--output-format json` or read the persisted result artifact before reporting PASS
 - downstream compile/render/promote work is left to `test-plan-generation`
 - final responses for this skill must explicitly say that the result is an authoring bundle only:
   no runnable scenario drafts were rendered, no scenarios were promoted, and downstream generation
@@ -109,6 +111,7 @@ start inside the authoring branch rather than being classified first.
 - Use `defaults.headers` for shared request headers that should be applied across authored API and workflow requests.
 - For basic auth, use `defaults.auth: basic` plus actor-scoped env profiles such as `API_AUTH_TYPE__FOUNDER=basic`, `API_USERNAME__FOUNDER`, and `API_PASSWORD__FOUNDER`. Do not author `Authorization: Bearer {{...}}` headers or `*_token` variables for projects that authenticate with basic auth.
 - When cases need different role credentials, set `metadata.default_actor` per case, for example `founder`, `manager`, or `partner`; this renders a case-specific `actor = literal:<role>` variable and selects matching actor-scoped env keys.
+- For true multi-actor workflows, use `setup[].actor` for setup operations that must run under a different role and `execute.actor` for the main action when needed. Rendered workflow steps include `Actor: <role>`, parser/preflight/runtime preserve it, and runtime uses the step actor before falling back to the scenario-level `actor` variable.
 - For PDF, Excel, export, or other binary endpoints, use `response body exists` rather than `response JSON exists`; binary responses are not JSON assertions. Do not claim leak prevention or masking for a binary endpoint unless the plan includes an executable content inspection or a narrower smoke-test objective.
 - Never infer the HTTP method for PDF, Excel, export, download, report, calculate, search, or other action-like endpoints from the route name. Record the method from router/controller evidence. Operation inventories require structured `method_evidence` for action-like paths even when `metadata.contracts.routes.method_evidence_required` is not enabled; broad method evidence can still be required for all routes with that contract switch. Use `source_ref: code/<project>/.../urls.py` plus `evidence: <controller method/action proving POST>`. Free-form strings such as `search view is POST` or dictionaries that only repeat `method: POST` are not evidence. If the method cannot be proven, keep the case deferred/open rather than guessing `GET` or `POST` for an action-like path.
 - Do not require operators to hand-populate role identity GUIDs such as `PRICE_LIST_PARTNER_MEMBER_GUID`, `PRICE_LIST_CUSTOMER_MEMBER_GUID`, or `*_USER_GUID` when the scenario already has actor credentials. Prefer a workflow setup step that discovers the GUID through a permissions API response or read-only DB lookup and captures it into `company_member_guid` or `user_guid`. Env should hold credentials and stable fixture roots such as `company_guid` or `price_list_id`, not every user's internal GUID.
@@ -143,6 +146,10 @@ one edit:
 3. Run `--sync-authoring-plan` to hydrate repeated `authoring-plan.yaml` structure from the two inventories.
 4. Edit only authored cases in `authoring-plan.yaml`, then run `--validate-authoring-plan`.
 5. Run `--validate-authoring-bundle`.
+
+For every validation gate, inspect an explicit status before continuing. A command that emits no
+stdout is not a PASS signal. Rerun with `--output-format json` or read the corresponding generated
+artifact before claiming the gate passed.
 
 Do not fill or substantially rewrite `entity-inventory.yaml`, `operation-inventory.yaml`, and
 `authoring-plan.yaml` in the same editing pass. If a later stage reveals an earlier inventory
@@ -224,9 +231,7 @@ Open questions or `metadata.non_blocking_notes` that say something must be confi
 
 Do not author independently promoted scenarios that depend on another scenario having run first. Phrases such as "before this case runs", "grant must already be present", or "requires previous scenario" mean the case needs self-contained setup, a dedicated fixture, or an intentional deferred/open question; they are not acceptable runnable preconditions for batch execution.
 
-For permissions coverage, do not model positive permission-gated behavior with preconfigured actors such as `editor_with_publish`, `user_with_export`, `partner_with_create`, or prose like "actor already has can_create" unless that actor is explicitly documented as a stable fixture and the limitation is recorded. Prefer a self-contained workflow: discover or create the target subject, reset or update the relevant permission/right/access state, verify the persisted state, execute the gated action, and cover revoke/denial separately. For executable positive permission-gated cases, declare `required_permission_state[]` on the case and add matching setup operation `permission_state_effects[]`; validation will block a declared required state that is not established by setup. If the current runner cannot switch actors inside one scenario, mark the positive state-change-and-act case deferred or split it with an explicit open question instead of pretending the permission was already present.
-
-Do not add `actor` to individual setup steps as a workaround for multi-actor workflows. The current authoring/runner contract is scenario-actor scoped; setup-step actor overrides are blocked until multi-actor workflow support exists end to end in authoring, rendering, parsing, preflight, and runtime.
+For permissions coverage, do not model positive permission-gated behavior with preconfigured actors such as `editor_with_publish`, `user_with_export`, `partner_with_create`, or prose like "actor already has can_create" unless that actor is explicitly documented as a stable fixture and the limitation is recorded. Prefer a self-contained workflow: discover or create the target subject, reset or update the relevant permission/right/access state under the managing actor, verify the persisted state, execute the gated action under the affected actor, and cover revoke/denial separately. For executable positive permission-gated cases, declare `required_permission_state[]` on the case and add matching setup operation `permission_state_effects[]`; validation will block a declared required state that is not established by setup.
 
 For lifecycle routes, do not author same-state negative or idempotency cases until `operation-inventory.yaml` records:
 
@@ -327,6 +332,8 @@ Treat step 5 as the required final handoff gate.
 When step 5 passes, do not describe the result as runnable coverage or completed scenario
 generation. Report the bundle path, stage statuses, authored/compiled case count from the
 validation output, and the next handoff command when the user wants promoted scenarios.
+If the bundle validation command produced no visible `Status: PASS`/JSON `status=PASS`, report the
+handoff as tooling `BLOCKED` or rerun the validation instead of stating "Final bundle: PASS".
 
 If validation fails on expectation syntax, rewrite the authoring DSL itself. Do not keep unsupported phrasing and hope downstream render/review will compensate.
 

@@ -69,6 +69,7 @@ Keep reporting status separate from lifecycle labels such as `active`, `paused`,
 
 - Prefer the project/workspace venv before falling back to other interpreters. If tooling/env readiness is missing and blocks execution, classify that as `BLOCKED`.
 - For all workspace CLIs, including `tools.generation` and `tools.scenario_runner`, resolve the workspace/project venv before the first command. Check local candidates such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, and `.venv/bin/python`. Do not probe `python -m ...` with the system interpreter before checking the venv. Use `uv run`, system `python`, or `py` only as an explicitly stated fallback after venv readiness fails or when the user authorizes it.
+- For CLI gates, require explicit machine-readable or text status evidence before continuing. Empty stdout, truncated output without `Status: ...`, or an unreadable JSON payload is not a successful gate; rerun with JSON/text output or read the persisted artifact before reporting `PASS`.
 - For runnable scenarios, do not start with broad code analysis by default. Use the runner first, then inspect code only if the result or the user requires it.
 - Manual API or DB execution is fallback work unless the user explicitly asked for that path or the runner cannot execute the required check.
 - Scenario variable definitions must stay machine-readable. Do not treat prose descriptions as valid variable values when the DSL requires `env:`, `generated:`, `template:`, `derived:`, or `literal:`.

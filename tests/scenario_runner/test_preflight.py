@@ -123,6 +123,49 @@ class ScenarioRunnerPreflightTests(unittest.TestCase):
         self.assertEqual(summary.steps, [])
         self.assertEqual(summary.message, "Scenario preflight failed with status BLOCKED.")
 
+    def test_step_actor_profile_is_checked_before_execution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_workspace(root, create_env=True, create_project=True, create_api_tool=True)
+            (root / "env" / "demo.env").write_text(
+                "\n".join(
+                    [
+                        "API_BASE_URL=http://localhost",
+                        "API_AUTH_TYPE__PARTNER=none",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            scenario = self._scenario(root, ScenarioStepType.API)
+            scenario.steps[0].actor = "partner"
+            executor = _CountingStepExecutorFactory()
+            service = ScenarioRunnerService(step_executor_factory=executor)
+
+            with self._dependencies_available():
+                summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.execute_count, 1)
+        self.assertTrue(
+            any(check["name"] == "step_actor_profiles_resolvable" for check in summary.details["preflight_checks"])
+        )
+
+    def test_missing_role_actor_profile_blocks_before_execution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_workspace(root, create_env=True, create_project=True, create_api_tool=True)
+            scenario = self._scenario(root, ScenarioStepType.API)
+            scenario.steps[0].actor = "partner"
+            executor = _CountingStepExecutorFactory()
+            service = ScenarioRunnerService(step_executor_factory=executor)
+
+            with self._dependencies_available():
+                summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.BLOCKED)
+        self.assertEqual(executor.execute_count, 0)
+        self.assertTrue(any("step_actor_profiles_resolvable" in issue for issue in summary.tooling_issues))
+
     def test_invalid_variables_section_blocks_before_step_execution(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

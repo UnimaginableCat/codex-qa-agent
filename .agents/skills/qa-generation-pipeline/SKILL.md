@@ -124,7 +124,7 @@ Stop conditions:
 - Render has deferred execution-critical cases: repair source authoring before promotion.
 - Review says drafts are not promotable: repair source authoring or selected draft source.
 - Review reports stateful preconditions such as "before this case runs": repair authoring so the setup is self-contained, uses a dedicated fixture, or remains deferred.
-- Review or compile reports unsupported step fields such as step-level `Actor:`: repair source authoring or rendering support; do not patch runner semantics during scenario execution.
+- Review or compile reports unsupported step fields: repair source authoring or rendering support; do not patch runner semantics during scenario execution. Step-level `Actor:` is supported and should be preserved for multi-actor workflows.
 - Promotion detects placeholder or mismatched `context.json` metadata: rerun/fix the managed generation step; do not edit `context.json` or `manifest.json` by hand.
 - Promotion writes zero scenarios: stop and report `FAIL` or `BLOCKED` depending on diagnostics.
 - Promoted scenario validation fails: repair source authoring or promoted scenario only if explicitly asked.

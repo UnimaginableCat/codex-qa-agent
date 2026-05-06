@@ -108,6 +108,7 @@ class PlannedWorkflowStep:
 
     step_type: str = "api"
     title: str = ""
+    actor: str = ""
     route: PlannedRouteIntent | None = None
     request_headers: dict[str, Any] = field(default_factory=dict)
     request_params: dict[str, Any] = field(default_factory=dict)
@@ -129,6 +130,7 @@ class PlannedWorkflowStep:
         return cls(
             step_type=str(payload.get("step_type", "api")),
             title=str(payload.get("title", "")),
+            actor=str(payload.get("actor", "")),
             route=(
                 None
                 if payload.get("route") is None

@@ -230,6 +230,7 @@ class ScenarioConversionTests(unittest.TestCase):
                         "step_number": 1,
                         "title": "create item",
                         "step_type": "api",
+                        "actor": "",
                         "api": {
                             "name": "create item",
                             "method": "POST",
@@ -253,6 +254,7 @@ class ScenarioConversionTests(unittest.TestCase):
                         "step_number": 2,
                         "title": "verify item",
                         "step_type": "db",
+                        "actor": "",
                         "api": None,
                         "db": {
                             "name": "verify item",

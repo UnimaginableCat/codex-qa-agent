@@ -2119,7 +2119,7 @@ cases:
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
         self.assertIn("adapter_operation_inventory_unknown_entity", codes)
 
-    def test_validate_authoring_plan_blocks_setup_step_actor_override(self) -> None:
+    def test_validate_authoring_plan_allows_setup_step_actor_override(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             authoring_plan_path = root / "authoring-plan.yaml"
@@ -2141,10 +2141,16 @@ entities:
           path: /users
         captures:
           - response.json.0.id -> user_id
+      verify_exists:
+        sql: SELECT id FROM users WHERE id = :user_id
+        params:
+          user_id: "{{user_id}}"
+        expected_outcomes:
+          - one row exists
 cases:
   - id: update-user
     kind: workflow
-    objective: Setup with unsupported actor override.
+    objective: Setup uses admin actor before the editor update step.
     state_change: update
     setup:
       - use_entity: user
@@ -2162,7 +2168,7 @@ cases:
         - HTTP 200
       persisted_state:
         entity: user
-        operation: discover
+        operation: verify_exists
 """,
                 encoding="utf-8",
             )
@@ -2178,10 +2184,10 @@ cases:
                 )
             payload = json.loads(stdout.getvalue())
 
-        self.assertNotEqual(exit_code, 0)
-        self.assertEqual(payload["status"], "BLOCKED")
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
-        self.assertIn("authoring_setup_step_actor_unsupported", codes)
+        self.assertNotIn("authoring_setup_step_actor_unsupported", codes)
 
     def test_plan_only_mode_generates_plan_and_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
