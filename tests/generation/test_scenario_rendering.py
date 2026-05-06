@@ -414,6 +414,80 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertFalse(draft.metadata["db_verification_required"])
         self.assertTrue(draft.metadata["no_persistence_expected"])
 
+    def test_renderer_preserves_explicit_db_requirement_for_read_only_workflow(self) -> None:
+        render_result = DraftScenarioRenderer().render(
+            _plan(
+                [
+                    PlannedTestCase(
+                        case_id="tc-read-only-db-001",
+                        title="Calculate template",
+                        objective="Verify read-only calculate endpoint and fixture state.",
+                        metadata={"state_change": "read_only"},
+                        requires_db_verification=True,
+                        db_verification=PlannedDbVerification(
+                            name="Verify template fixture",
+                            sql="SELECT id FROM templates WHERE id = :template_id",
+                            params={"template_id": "{{template_id}}"},
+                            expected_outcomes=["one row exists"],
+                        ),
+                        workflow_steps=[
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Calculate template",
+                                route=PlannedRouteIntent(
+                                    http_method="POST",
+                                    endpoint_path="/price-lists/{{price_list_id}}/templates/calculate",
+                                ),
+                                request_body={"templates": ["{{template_id}}"], "quantity": "1.0000"},
+                                expected_outcomes=["HTTP 200"],
+                            ),
+                        ],
+                    )
+                ]
+            )
+        )
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("DB verification required: yes.", draft.markdown)
+        self.assertIn("Type: db", draft.markdown)
+        self.assertNotIn("No persistence expected: case is explicitly authored as read-only.", draft.markdown)
+        self.assertTrue(draft.metadata["db_verification_required"])
+        self.assertTrue(draft.metadata["db_verification_present"])
+        self.assertFalse(draft.metadata["no_persistence_expected"])
+
+    def test_renderer_preserves_missing_explicit_db_requirement_for_read_only_workflow(self) -> None:
+        render_result = DraftScenarioRenderer().render(
+            _plan(
+                [
+                    PlannedTestCase(
+                        case_id="tc-read-only-missing-db-001",
+                        title="Read and verify stored projection",
+                        objective="Verify read-only endpoint against persisted projection.",
+                        metadata={"state_change": "read_only"},
+                        requires_db_verification=True,
+                        workflow_steps=[
+                            PlannedWorkflowStep(
+                                step_type="api",
+                                title="Read projection",
+                                route=PlannedRouteIntent(http_method="GET", endpoint_path="/projection/{{projection_id}}"),
+                                expected_outcomes=["HTTP 200"],
+                            ),
+                        ],
+                    )
+                ]
+            )
+        )
+
+        self.assertEqual(len(render_result.draft_set.drafts), 1)
+        draft = render_result.draft_set.drafts[0]
+        self.assertIn("DB verification required: yes.", draft.markdown)
+        self.assertIn("Persisted-state verification is required for this workflow but is not authored yet.", draft.markdown)
+        self.assertNotIn("No persistence expected: case is explicitly authored as read-only.", draft.markdown)
+        self.assertTrue(draft.metadata["db_verification_required"])
+        self.assertFalse(draft.metadata["db_verification_present"])
+        self.assertFalse(draft.metadata["no_persistence_expected"])
+
     def test_authoring_multi_actor_workflow_renders_parser_valid_step_actors(self) -> None:
         authoring_plan = AuthoringPlan(
             version=1,

@@ -337,7 +337,7 @@ class DraftScenarioRenderer:
         requires_request_body = test_case.requires_request_body
         capture_rules = list(test_case.capture)
         db_verification = test_case.db_verification
-        requires_db_verification = test_case.requires_db_verification
+        requires_db_verification = _test_case_requires_db_verification(test_case)
         expected_results = test_case.expected_results or [
             "HTTP response is received and must be reviewed before execution."
         ]
@@ -812,9 +812,7 @@ def _db_only_workflow_binding(test_case: PlannedTestCase) -> dict[str, Any] | No
 
 
 def _test_case_requires_db_verification(test_case: PlannedTestCase) -> bool:
-    if _test_case_declares_no_persistence_expected(test_case):
-        return False
-    if test_case.requires_db_verification:
+    if test_case.requires_db_verification or test_case.db_verification is not None:
         return True
     return _workflow_requires_persisted_state_verification(test_case)
 
@@ -862,6 +860,8 @@ def _workflow_requires_persisted_state_verification(test_case: PlannedTestCase) 
 
 
 def _test_case_declares_no_persistence_expected(test_case: PlannedTestCase) -> bool:
+    if test_case.requires_db_verification or test_case.db_verification is not None:
+        return False
     if test_case.metadata.get("no_persistence_expected") is True:
         return True
     state_change = str(test_case.metadata.get("state_change") or "").strip().lower()
