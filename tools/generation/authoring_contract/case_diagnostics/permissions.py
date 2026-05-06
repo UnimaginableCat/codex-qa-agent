@@ -132,6 +132,7 @@ def _operation_permission_effects(operation: AuthoringEntityOperation) -> list[d
         effect = {
             "key": key,
             "state": str(item.get("state") or item.get("value") or "").strip().lower(),
+            "actor": str(item.get("actor") or "").strip(),
             "subject": str(item.get("subject") or "").strip(),
             "resource": str(item.get("resource") or "").strip(),
             "mode": str(item.get("mode") or item.get("action") or "").strip().lower(),
@@ -423,7 +424,10 @@ def _identity_binding_value_is_strong(value: Any, actor: str) -> bool:
                 "capture_source",
                 "env_var",
             )
-        ) or _identity_binding_text_is_strong(text, actor)
+        )
+        evidence_is_strong = _identity_binding_text_is_strong(text, actor)
+        if has_evidence and not evidence_is_strong:
+            return False
         return has_actor and has_subject and has_evidence
     if isinstance(value, (list, tuple, set)):
         return any(_identity_binding_value_is_strong(item, actor) for item in value)
@@ -471,11 +475,16 @@ def _identity_binding_text_is_strong(text: str, actor: str) -> bool:
             "current_user.id",
         )
     )
-    actor_owned_env = any(
-        re.search(pattern, normalized)
-        for pattern in (
-            rf"\benv:{re.escape(actor)}_[a-z0-9_]*(?:member|user|principal|actor)_(?:id|guid|uuid)\b",
-            rf"\b[a-z0-9_]+__{re.escape(actor)}\b",
+    actor_owned_env_context = "env" in normalized
+    actor_owned_env = bool(
+        re.search(rf"\benv:{re.escape(actor)}_[a-z0-9_]*(?:member|user|principal|actor)_(?:id|guid|uuid)\b", normalized)
+        or re.search(rf"\b[a-z0-9_]+__{re.escape(actor)}\b", normalized)
+        or (
+            actor_owned_env_context
+            and re.search(
+                rf"\b{re.escape(actor)}_[a-z0-9_]*(?:member|user|principal|actor)_(?:id|guid|uuid)\b",
+                normalized,
+            )
         )
     )
     explicit_binding_token = any(
@@ -515,10 +524,18 @@ def _operation_requires_actor_identity_binding(
     if not identity_fields:
         return False, []
     for effect in _operation_permission_effects(operation):
+        effect_actor = effect.get("actor", "").lower()
         subject = effect.get("subject", "").lower()
-        if _permission_subject_targets_execute_actor(subject, actor):
+        if _permission_effect_targets_execute_actor(effect_actor, subject, actor):
             return True, identity_fields
     return False, []
+
+
+def _permission_effect_targets_execute_actor(effect_actor: str, subject: str, actor: str) -> bool:
+    normalized_actor = effect_actor.strip().lower()
+    if normalized_actor and normalized_actor in {actor, "execute_actor", "current_actor", "actor_under_test"}:
+        return True
+    return _permission_subject_targets_execute_actor(subject, actor)
 
 
 def _permission_subject_targets_execute_actor(subject: str, actor: str) -> bool:
@@ -666,6 +683,8 @@ def _looks_like_permission_negative_or_default_case(authoring_plan: AuthoringPla
     checks = [] if case.oracle is None else [str(item) for item in case.oracle.business_checks]
     structured_claim = _permission_coverage_claim(case)
     text = _permission_case_text(case, checks)
+    if _looks_like_payload_validation_case(case, text):
+        return False
     actor_text = _case_actor_text(authoring_plan, case).lower()
     claim_text = _flatten_metadata_text(structured_claim).lower() if structured_claim is not None else ""
     has_actor_context = bool(actor_text.strip())
@@ -682,6 +701,24 @@ def _looks_like_permission_negative_or_default_case(authoring_plan: AuthoringPla
     if has_actor_context and has_denial_or_default_text:
         return True
     return has_actor_context and has_false_permission_assertion
+
+
+def _looks_like_payload_validation_case(case: AuthoringCase, text: str) -> bool:
+    if case.oracle is None or case.oracle.status_code != 400:
+        return False
+    return any(
+        token in text
+        for token in (
+            "duplicate",
+            "validation",
+            "payload",
+            "serializer",
+            "bad request",
+            "invalid request",
+            "malformed",
+            "schema",
+        )
+    )
 
 
 def _permission_case_text(case: AuthoringCase, checks: list[str]) -> str:

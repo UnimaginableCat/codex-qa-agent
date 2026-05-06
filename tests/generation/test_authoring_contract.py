@@ -892,6 +892,248 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
             )
         )
 
+    def test_permission_setup_rejects_effect_actor_with_unbound_discovered_identity(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="bearer",
+                actor="founder",
+                scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-lists/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "permission": "can_edit",
+                                    "actor": "partner",
+                                    "state": "true",
+                                    "scope": "price_list",
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-updates-after-grant",
+                    kind="workflow",
+                    objective="Partner updates after founder grants edit.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-lists/{{price_list_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_setup_rejects_weak_structured_actor_identity_binding(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="bearer",
+                actor="founder",
+                scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-lists/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "permission": "can_edit",
+                                    "actor": "partner",
+                                    "state": "true",
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-updates-after-grant",
+                    kind="workflow",
+                    objective="Partner updates after founder grants edit.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-lists/{{price_list_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    metadata={
+                        "identity_resolution": {
+                            "actor_binding": {
+                                "actor": "partner",
+                                "subject_variable": "partner_company_member_guid",
+                                "evidence": "Captured from the same company partner permissions row.",
+                            }
+                        }
+                    },
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_setup_allows_effect_actor_with_actor_owned_env_binding(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="bearer",
+                actor="founder",
+                scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-lists/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "permission": "can_edit",
+                                    "actor": "partner",
+                                    "state": "true",
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-updates-after-grant",
+                    kind="workflow",
+                    objective="Partner updates after founder grants edit.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-lists/{{price_list_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    metadata={
+                        "identity_resolution": {
+                            "actor_binding": {
+                                "actor": "partner",
+                                "subject_variable": "partner_company_member_guid",
+                                "env_var": "PARTNER_COMPANY_MEMBER_GUID",
+                                "evidence": (
+                                    "actor-scoped env PARTNER_COMPANY_MEMBER_GUID is the company_member_guid "
+                                    "for the partner actor profile."
+                                ),
+                            }
+                        }
+                    },
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_compile_file_blocks_invalid_required_permission_state_shape(self) -> None:
         with TemporaryDirectory() as tmp:
             authoring_plan_path = Path(tmp) / "authoring-plan.yaml"
@@ -1678,6 +1920,46 @@ cases:
 
         self.assertEqual(result.status, StepStatus.BLOCKED)
         self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_payload_validation_400_does_not_require_negative_state_setup(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(actor="founder"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="duplicate-permission-payload-validation",
+                    kind="workflow",
+                    objective="Verify duplicate company_member_guid values return a serializer validation response.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/1/permissions/update/"),
+                        body={
+                            "partners": [
+                                {"company_member_guid": "{{partner_company_member_guid}}", "can_edit": True},
+                                {"company_member_guid": "{{partner_company_member_guid}}", "can_edit": False},
+                            ]
+                        },
+                    ),
+                    oracle=AuthoringOracle(status_code=400, business_checks=["response JSON exists"]),
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
             any(
                 diagnostic.code == "authoring_permission_negative_case_state_setup_required"
                 for diagnostic in result.diagnostics
@@ -3626,7 +3908,7 @@ cases:
                     id="grant-partner-edit",
                     kind="api",
                     objective="Grant partner edit access.",
-                    state_change="update",
+                    state_change="read_only",
                     execute=AuthoringExecute(
                         route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/permissions")
                     ),
@@ -3676,7 +3958,7 @@ cases:
                     id="grant-partner-edit",
                     kind="api",
                     objective="Grant partner edit access.",
-                    state_change="update",
+                    state_change="read_only",
                     execute=AuthoringExecute(
                         route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/permissions")
                     ),

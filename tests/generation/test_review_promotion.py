@@ -67,6 +67,18 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         self.assertEqual(review_set.items[0].route_status, "resolved_from_planned_route")
         self.assertEqual(review_set.items[0].readiness_category.value, "parser_valid_strongly_supported")
 
+    def test_review_service_does_not_add_non_route_gap_to_complete_route_resolved_api_case(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_complete_route_resolved_api_draft_run(root)
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
+        self.assertEqual(item.parse_status.value, "valid")
+        self.assertEqual(item.readiness_category.value, "parser_valid_strongly_supported")
+        self.assertNotIn("non_route_requirements_remaining", item.gap_summary.gap_codes)
+        self.assertEqual(item.edit_targets.targets, [])
+
     def test_review_service_marks_invalid_draft_as_invalid_review_item(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -205,6 +217,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             payload = _generate_draft_run(root)
+            _mark_first_draft_auth_unresolved(payload)
 
             result = ScenarioDraftPromotionService().promote(
                 ScenarioPromotionRequest(run_id=payload["run_id"], draft_id="draft-tc-001", workspace_root=root)
@@ -581,6 +594,46 @@ def _generate_draft_run(root: Path) -> dict[str, object]:
     return payload
 
 
+def _generate_complete_route_resolved_api_draft_run(root: Path) -> dict[str, object]:
+    agent_plan_path = root / "agent-plan.json"
+    agent_plan_path.write_text(
+        json.dumps(
+            {
+                "source_id": "users",
+                "project": "code/demo",
+                "title": "Users API",
+                "planned_test_cases": [
+                    {
+                        "case_id": "tc-001",
+                        "title": "Get user",
+                        "objective": "Verify get user.",
+                        "route": {"http_method": "GET", "endpoint_path": "/users/{{user_id}}"},
+                        "expected_outcomes": ["HTTP 200", "response JSON exists"],
+                        "scenario_variables": ["user_id = env:USER_ID"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = cli.main(
+            [
+                "--agent-plan-file",
+                str(agent_plan_path),
+                "--workspace-root",
+                str(root),
+                "--render-drafts",
+            ]
+        )
+    payload = json.loads(stdout.getvalue())
+    if exit_code != 0:
+        raise AssertionError(payload)
+    return payload
+
+
 def _generate_workflow_draft_run(root: Path) -> dict[str, object]:
     agent_plan_path = root / "agent-plan.json"
     agent_plan_path.write_text(
@@ -799,6 +852,14 @@ def _mark_first_draft_auth_required(payload: dict[str, object]) -> None:
     draft_path = next(Path(payload["artifact_paths"]["scenario_drafts_dir"]).glob("*.md"))
     draft_text = draft_path.read_text(encoding="utf-8")
     draft_path.write_text(draft_text + "\nAuth strategy: Bearer token\n", encoding="utf-8")
+
+
+def _mark_first_draft_auth_unresolved(payload: dict[str, object]) -> None:
+    render_result_path = Path(payload["artifact_paths"]["scenario_render_result"])
+    render_payload = json.loads(render_result_path.read_text(encoding="utf-8"))
+    render_payload["draft_set"]["drafts"][0]["metadata"]["auth_strategy_required"] = True
+    render_payload["draft_set"]["drafts"][0]["metadata"]["auth_strategy_present"] = False
+    render_result_path.write_text(json.dumps(render_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _make_first_draft_expectation_unsupported(payload: dict[str, object]) -> None:
