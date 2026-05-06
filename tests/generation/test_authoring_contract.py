@@ -1344,6 +1344,96 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
             )
         )
 
+    def test_permission_setup_rejects_strong_binding_for_different_granted_subject(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="bearer",
+                actor="founder",
+                scenario_variables=[
+                    "price_list_id = env:PRICE_LIST_ID",
+                    "partner_company_member_guid = env:PARTNER_COMPANY_MEMBER_GUID",
+                    "alternate_company_member_guid = env:ALTERNATE_COMPANY_MEMBER_GUID",
+                ],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_alternate_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-lists/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{alternate_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "permission": "can_edit",
+                                    "subject_variable": "alternate_company_member_guid",
+                                    "value": True,
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-updates-after-alternate-grant",
+                    kind="workflow",
+                    objective="Partner update must not rely on a grant to a different principal.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_alternate_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-lists/{{price_list_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+            metadata={
+                "identity_resolution": {
+                    "actor_binding": {
+                        "actor": "partner",
+                        "subject_variable": "partner_company_member_guid",
+                        "env_var": "PARTNER_COMPANY_MEMBER_GUID",
+                        "evidence": (
+                            "actor-scoped env PARTNER_COMPANY_MEMBER_GUID is the company_member_guid "
+                            "for the partner actor profile."
+                        ),
+                    }
+                }
+            },
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_permission_actor_identity_binding_required"
+        )
+        self.assertEqual(diagnostic.details["subject_fields"], ["alternate_company_member_guid"])
+
     def test_required_permission_state_matches_boolean_false_permission_effect_value(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -2152,7 +2242,17 @@ cases:
                     state_change="read_only",
                     execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/price-lists")),
                     oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
-                    metadata={"default_actor": "partner"},
+                    metadata={
+                        "default_actor": "partner",
+                        "coverage_claims": {
+                            "permissions": {
+                                "actor": "partner",
+                                "permission": "can_create",
+                                "expected_state": "false",
+                                "expected_result": "denied",
+                            }
+                        },
+                    },
                 ),
             ],
         )
@@ -2184,7 +2284,17 @@ cases:
                     state_change="read_only",
                     execute=AuthoringExecute(route=AuthoringRoute(method="PUT", path="/price-lists/1")),
                     oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
-                    metadata={"default_actor": "partner"},
+                    metadata={
+                        "default_actor": "partner",
+                        "coverage_claims": {
+                            "permissions": {
+                                "actor": "partner",
+                                "permission": "can_edit",
+                                "expected_state": "false",
+                                "expected_result": "denied",
+                            }
+                        },
+                    },
                 ),
             ],
         )
@@ -2239,7 +2349,7 @@ cases:
             )
         )
 
-    def test_permission_negative_case_uses_default_actor_metadata_for_detection(self) -> None:
+    def test_permission_negative_case_does_not_infer_from_default_actor_metadata(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="document-plan",
@@ -2263,15 +2373,15 @@ cases:
 
         result = AuthoringPlanCompiler().validate(plan)
 
-        self.assertEqual(result.status, StepStatus.BLOCKED)
-        self.assertTrue(
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
             any(
                 diagnostic.code == "authoring_permission_negative_case_state_setup_required"
                 for diagnostic in result.diagnostics
             )
         )
 
-    def test_permission_negative_case_uses_plan_default_actor_for_detection(self) -> None:
+    def test_permission_negative_case_does_not_infer_from_plan_default_actor(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="document-plan",
@@ -2295,8 +2405,8 @@ cases:
 
         result = AuthoringPlanCompiler().validate(plan)
 
-        self.assertEqual(result.status, StepStatus.BLOCKED)
-        self.assertTrue(
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
             any(
                 diagnostic.code == "authoring_permission_negative_case_state_setup_required"
                 for diagnostic in result.diagnostics
@@ -2448,7 +2558,12 @@ cases:
                     metadata={
                         "default_actor": "partner",
                         "stable_permission_fixture": "PRICE_LIST_ID has no partner can_edit override.",
-                        "permission_baseline_checked": "Preflight setup verifies can_edit=false before execution.",
+                        "permission_baseline_checked": {
+                            "verified": True,
+                            "setup_operation": "read_effective_permissions",
+                            "expected_state": {"can_edit": False},
+                            "assertions": ["can_edit = false before execution"],
+                        },
                     },
                 ),
             ],
