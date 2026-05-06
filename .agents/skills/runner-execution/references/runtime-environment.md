@@ -12,7 +12,7 @@ Resolution order:
    - `.venv314/bin/python`
    - `.venv/bin/python`
    Do not check or use `code/<project>/.venv*` for workspace runner/tooling commands.
-2. Verify interpreter version before using it.
+2. Verify interpreter version before using it. A workspace venv may use a symlinked executable whose resolved path is outside the workspace; do not reject it from that path alone if the runner CLI guard accepts the active venv prefix.
 3. Use the workspace-root venv only if it satisfies Python 3.14+ and has required dependencies.
 4. If the workspace-root venv is missing, older than Python 3.14, or lacks dependencies, stop and report environment/tooling `BLOCKED`.
 5. Use project venvs, system `python`, `python3`, `py`, or `uv run` only if the user explicitly authorizes a non-workspace fallback for this run.
