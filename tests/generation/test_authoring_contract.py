@@ -2454,6 +2454,53 @@ cases:
             )
         )
 
+    def test_permission_negative_case_uses_structured_permission_claim_list_for_detection(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"permissions": {"negative_cases_require_state_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="partner-manage-permissions-denied",
+                    kind="api",
+                    objective="Partner management request follows the authored permission claim.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="POST", path="/price-lists/1/permissions/update/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response body exists"]),
+                    metadata={
+                        "default_actor": "partner",
+                        "coverage_claims": {
+                            "permissions": [
+                                {
+                                    "actor": "partner",
+                                    "permission": "can_manage_permissions",
+                                    "expected_state": False,
+                                    "expected_result": "403",
+                                }
+                            ]
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_state_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_permission_negative_case_warns_when_stable_fixture_lacks_baseline_check(self) -> None:
         plan = AuthoringPlan(
             version=1,

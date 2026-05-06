@@ -201,9 +201,10 @@ def _has_permission_baseline_setup(authoring_plan: AuthoringPlan, case: Authorin
 
 
 def _has_structured_negative_permission_claim(case: AuthoringCase) -> bool:
-    claim = _permission_coverage_claim(case)
-    if claim is None:
-        return False
+    return any(_claim_is_negative_or_default(claim) for claim in _permission_coverage_claims(case))
+
+
+def _claim_is_negative_or_default(claim: dict[str, Any]) -> bool:
     if any(
         policy_bool(claim.get(key))
         for key in ("requires_state_setup", "requires_baseline", "requires_permission_state_setup")
@@ -216,18 +217,20 @@ def _has_structured_negative_permission_claim(case: AuthoringCase) -> bool:
     ).lower()
     return any(
         token in expected_result
-        for token in ("denied", "deny", "forbidden", "blocked", "rejected", "hidden", "not_allowed")
+        for token in ("403", "denied", "deny", "forbidden", "blocked", "rejected", "hidden", "not_allowed")
     ) or any(token in expected_state for token in ("false", "absent", "none", "default_denied", "denied"))
 
 
-def _permission_coverage_claim(case: AuthoringCase) -> dict[str, Any] | None:
+def _permission_coverage_claims(case: AuthoringCase) -> list[dict[str, Any]]:
     coverage_claims = case.metadata.get("coverage_claims")
     if not isinstance(coverage_claims, dict):
-        return None
+        return []
     permission_claim = coverage_claims.get("permissions") or coverage_claims.get("permission")
-    if not isinstance(permission_claim, dict) or not permission_claim:
-        return None
-    return dict(permission_claim)
+    if isinstance(permission_claim, dict) and permission_claim:
+        return [dict(permission_claim)]
+    if isinstance(permission_claim, list):
+        return [dict(item) for item in permission_claim if isinstance(item, dict) and item]
+    return []
 
 
 def _flatten_metadata_text(value: Any) -> str:

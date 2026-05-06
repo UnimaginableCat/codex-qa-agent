@@ -257,14 +257,14 @@ Do not author independently promoted scenarios that depend on another scenario h
 
 For permissions coverage, do not model positive permission-gated behavior with preconfigured actors such as `editor_with_publish`, `user_with_export`, `partner_with_create`, or prose like "actor already has can_create" unless that actor is explicitly documented as a stable fixture and the limitation is recorded. Prefer a self-contained workflow: discover or create the target subject, reset or update the relevant permission/right/access state under the managing actor, verify the persisted state, execute the gated action under the affected actor, and cover revoke/denial separately. For executable positive permission-gated cases, declare `required_permission_state[]` on the case and add matching setup operation `permission_state_effects[]`; validation will block a declared required state that is not established by setup.
 
-For permissions negative/default cases, do not assume a role fixture currently lacks overrides just because the role normally defaults to denied. Batch runs can mutate shared permission fixtures, and QA envs may already have `can_edit=true` or `can_create=true`. Declare the denied/default permission as structured data; prose in `id`, `title`, `objective`, `tags`, `oracle.business_checks`, `metadata.default_actor`, or a bare `403` status is not a permission contract. Use `metadata.coverage_claims.permissions` with `actor`, `permission`, `expected_state`, and `expected_result`, for example:
+For permissions negative/default cases, do not assume a role fixture currently lacks overrides just because the role normally defaults to denied. Batch runs can mutate shared permission fixtures, and QA envs may already have `can_edit=true` or `can_create=true`. Declare the denied/default permission as structured data; prose in `id`, `title`, `objective`, `tags`, `oracle.business_checks`, `metadata.default_actor`, or a bare `403` status is not a permission contract. Use `metadata.coverage_claims.permissions` as either one mapping or a list of mappings with `actor`, `permission`, `expected_state`, and `expected_result`, for example:
 
 ```yaml
 metadata:
   default_actor: partner
   coverage_claims:
     permissions:
-      actor: partner
+    - actor: partner
       permission: can_create
       expected_state: false
       expected_result: denied
