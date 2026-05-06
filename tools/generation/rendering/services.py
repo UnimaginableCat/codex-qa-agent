@@ -209,6 +209,7 @@ class DraftScenarioRenderer:
                             "workflow_route_bindings": _workflow_route_bindings(test_case),
                             "workflow_step_count": len(test_case.workflow_steps),
                             "case_support": _draft_case_support(test_case, draft_route_binding),
+                            "data_contract": _draft_data_contract(test_case),
                             "expected_assertions_present": _test_case_has_authored_expectations(test_case),
                             "capture_rules_present": _test_case_has_capture_rules(test_case),
                             "auth_strategy_required": any(
@@ -278,21 +279,22 @@ class DraftScenarioRenderer:
                     markdown=self._render_markdown(plan, test_case, support, title),
                     relative_path=relative_path,
                     source_refs=list(test_case.source_refs),
-                    metadata={
-                        "renderer": "draft-scenario-renderer-v1",
-                        "preview_only": True,
-                        "route_binding": support,
-                        "environment": _resolved_environment_path(
+                        metadata={
+                            "renderer": "draft-scenario-renderer-v1",
+                            "preview_only": True,
+                            "route_binding": support,
+                            "environment": _resolved_environment_path(
                             plan,
                             test_case,
                             self.environment_template,
                             Path(plan.project).name or _slugify(plan.project),
                         ),
-                        "actor": _resolved_actor(plan, test_case),
-                        "case_support": _draft_case_support(test_case, support),
-                        "expected_assertions_present": _test_case_has_authored_expectations(test_case),
-                        "capture_rules_present": _test_case_has_capture_rules(test_case),
-                        "auth_strategy_required": test_case.requires_auth_strategy,
+                            "actor": _resolved_actor(plan, test_case),
+                            "case_support": _draft_case_support(test_case, support),
+                            "data_contract": _draft_data_contract(test_case),
+                            "expected_assertions_present": _test_case_has_authored_expectations(test_case),
+                            "capture_rules_present": _test_case_has_capture_rules(test_case),
+                            "auth_strategy_required": test_case.requires_auth_strategy,
                         "auth_strategy_present": bool(test_case.auth_strategy) or _has_auth_header_signal(test_case.request_headers),
                         "request_body_required": test_case.requires_request_body,
                         "request_body_present": test_case.request_body is not None,
@@ -1021,6 +1023,17 @@ def _draft_case_support(test_case: PlannedTestCase, support: dict[str, Any]) -> 
         "readiness": str(support.get("readiness") or ""),
         "route_hints": [route_hint.to_dict()],
     }
+
+def _draft_data_contract(test_case: PlannedTestCase) -> dict[str, Any]:
+    contract: dict[str, Any] = {}
+    for key in ("data_contract", "fixture_contract", "response_data_contract", "readiness_contract"):
+        value = test_case.metadata.get(key)
+        if value:
+            contract[key] = value
+    coverage_claims = test_case.metadata.get("coverage_claims")
+    if isinstance(coverage_claims, dict) and coverage_claims.get("visibility"):
+        contract["visibility"] = coverage_claims.get("visibility")
+    return contract
 
 
 def _json_block(value: Any) -> str:

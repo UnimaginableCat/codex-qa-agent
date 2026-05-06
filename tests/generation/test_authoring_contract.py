@@ -388,6 +388,107 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
             )
         )
 
+    def test_validate_blocks_generic_request_body_evidence_that_does_not_name_fields(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover template calculation.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="contractor"),
+            entities={
+                "price_list_template": AuthoringEntitySpec(
+                    operations={
+                        "calculate": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                            request_body_evidence={
+                                "source_ref": "views/price_list_template_views.py",
+                                "evidence": "PriceListTemplateCalculateView uses its request serializer.",
+                            },
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="contractor-template-calculate",
+                    kind="api",
+                    objective="Verify calculate masks totals.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                        body={"template_id": "{{template_id}}", "count": 1},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "template_id = literal:123",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_request_body_field_evidence_required"
+        )
+        self.assertEqual(diagnostic.details["missing_fields"], ["count", "template_id"])
+
+    def test_validate_allows_request_body_evidence_text_that_names_authored_fields(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover template calculation.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="contractor"),
+            entities={
+                "price_list_template": AuthoringEntitySpec(
+                    operations={
+                        "calculate": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                            request_body_evidence=(
+                                "TemplateCalculateSerializer accepts template_id and count for calculation."
+                            ),
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="contractor-template-calculate",
+                    kind="api",
+                    objective="Verify calculate masks totals.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                        body={"template_id": "{{template_id}}", "count": 1},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "template_id = literal:123",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_request_body_field_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_required_permission_state_blocks_api_case_without_setup(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -1342,6 +1443,113 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
                 diagnostic.code == "authoring_permission_actor_identity_binding_required"
                 for diagnostic in result.diagnostics
             )
+        )
+
+    def test_permission_setup_rejects_subject_variable_overwritten_by_weak_prior_capture(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="bearer",
+                actor="founder",
+                scenario_variables=[
+                    "price_list_id = env:PRICE_LIST_ID",
+                    "partner_company_member_guid = env:PARTNER_COMPANY_MEMBER_GUID",
+                ],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "read_price_list_permissions": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="GET",
+                                path="/api/price-lists/{{price_list_id}}/permissions/",
+                            ),
+                            captures=[
+                                "response.json.partner_permissions.0.company_member_guid -> partner_company_member_guid"
+                            ],
+                        ),
+                        "grant_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-lists/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "permission": "can_edit",
+                                    "subject_variable": "partner_company_member_guid",
+                                    "value": True,
+                                }
+                            ],
+                        ),
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-updates-after-grant",
+                    kind="workflow",
+                    objective="Partner updates after founder grants edit.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="read_price_list_permissions",
+                            actor="founder",
+                        ),
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_partner_edit",
+                            actor="founder",
+                        ),
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-lists/{{price_list_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+            metadata={
+                "identity_resolution": {
+                    "actor_binding": {
+                        "actor": "partner",
+                        "subject_variable": "partner_company_member_guid",
+                        "env_var": "PARTNER_COMPANY_MEMBER_GUID",
+                        "evidence": (
+                            "actor-scoped env PARTNER_COMPANY_MEMBER_GUID is the company_member_guid "
+                            "for the partner actor profile."
+                        ),
+                    }
+                }
+            },
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_permission_actor_identity_binding_required"
+        )
+        self.assertEqual(diagnostic.details["subject_fields"], ["partner_company_member_guid"])
+        self.assertEqual(
+            diagnostic.details["weak_prior_captures"],
+            ["response.json.partner_permissions.0.company_member_guid -> partner_company_member_guid"],
         )
 
     def test_permission_setup_rejects_strong_binding_for_different_granted_subject(self) -> None:

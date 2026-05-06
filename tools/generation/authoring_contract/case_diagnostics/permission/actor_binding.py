@@ -23,7 +23,7 @@ def _actor_bound_permission_setup_diagnostics(
     if not execute_actor:
         return []
 
-    for setup_step in case.setup:
+    for setup_index, setup_step in enumerate(case.setup):
         entity = authoring_plan.entities.get(setup_step.use_entity.strip())
         if entity is None:
             continue
@@ -33,6 +33,34 @@ def _actor_bound_permission_setup_diagnostics(
         needs_binding, identity_fields, subject_fields = _operation_requires_actor_identity_binding(operation, execute_actor)
         if not needs_binding:
             continue
+        weak_prior_captures = _weak_prior_subject_capture_sources(authoring_plan, case, setup_index, subject_fields)
+        if weak_prior_captures:
+            return [
+                authoring_diagnostic(
+                    "authoring_permission_actor_identity_binding_required",
+                    (
+                        "Workflow grants or revokes a permission for the execute actor, but a prior setup "
+                        "step captures the same subject identity variable from a weak list/index source. "
+                        "That capture can overwrite an actor-owned fixture binding and grant a different "
+                        "principal before the actor under test executes."
+                    ),
+                    source_ref=case_ref,
+                    details={
+                        "case_index": index,
+                        "actor": execute_actor,
+                        "identity_fields": identity_fields,
+                        "subject_fields": subject_fields,
+                        "setup_entity": setup_step.use_entity,
+                        "setup_operation": setup_step.operation,
+                        "weak_prior_captures": weak_prior_captures,
+                        "suggestion": (
+                            "Do not capture the actor-bound subject variable from a first-row/list response. "
+                            "Use a distinct discovered variable, capture a current_actor/current_user identity, "
+                            "or keep the actor-owned env variable as the setup subject."
+                        ),
+                    },
+                )
+            ]
         if _has_actor_identity_binding_contract(authoring_plan, case, execute_actor, subject_fields):
             continue
         return [
@@ -220,6 +248,71 @@ def _identity_binding_value_matches_subject(value: dict[str, Any], text: str, su
         if key in value:
             binding_subjects.update(_identity_fields_from_text(str(value.get(key) or "")))
     return bool(binding_subjects & subject_fields) or _identity_binding_text_matches_subject(text, subject_fields)
+
+
+def _weak_prior_subject_capture_sources(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    setup_index: int,
+    subject_fields: list[str],
+) -> list[str]:
+    normalized_subjects = _normalize_identity_field_set(subject_fields)
+    if not normalized_subjects:
+        return []
+    weak_sources: list[str] = []
+    for prior_step in case.setup[:setup_index]:
+        entity = authoring_plan.entities.get(prior_step.use_entity.strip())
+        if entity is None:
+            continue
+        operation = entity.operations.get(prior_step.operation.strip())
+        if operation is None:
+            continue
+        capture_rules = list(operation.captures)
+        if operation.oracle is not None:
+            capture_rules.extend(operation.oracle.captures)
+        for rule in capture_rules:
+            source, target = _capture_rule_parts(rule)
+            if not target or _normalize_identity_field(target) not in normalized_subjects:
+                continue
+            if _capture_source_is_weak_list_identity(source):
+                weak_sources.append(rule)
+    return weak_sources
+
+
+def _capture_rule_parts(rule: str) -> tuple[str, str]:
+    if "->" not in str(rule):
+        return "", ""
+    source, target = str(rule).split("->", 1)
+    return source.strip(), target.strip()
+
+
+def _capture_source_is_weak_list_identity(source: str) -> bool:
+    normalized = str(source or "").strip().lower()
+    if not normalized:
+        return False
+    if any(
+        token in normalized
+        for token in (
+            "current_user",
+            "current_actor",
+            "execute_actor",
+            "actor_under_test",
+            "actor_profile",
+        )
+    ):
+        return False
+    return any(
+        token in normalized
+        for token in (
+            ".0.",
+            "[0]",
+            "partner_permissions",
+            "permissions.0",
+            "members.0",
+            "principals.0",
+            "users.0",
+        )
+    )
 
 
 def _identity_binding_text_matches_subject(text: str, subject_fields: set[str]) -> bool:

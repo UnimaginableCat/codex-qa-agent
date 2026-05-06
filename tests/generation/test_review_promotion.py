@@ -166,7 +166,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             )
         )
 
-    def test_review_service_allows_indexed_collection_assertion_with_presence_check(self) -> None:
+    def test_review_service_blocks_nested_indexed_collection_assertion_with_partial_presence_check(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             payload = _generate_indexed_collection_draft_run(
@@ -182,14 +182,46 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
 
         item = review_set.items[0]
+        self.assertIn("data_setup_unresolved", item.gap_summary.gap_codes)
+
+    def test_review_service_allows_nested_indexed_collection_assertion_with_all_presence_checks(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_indexed_collection_draft_run(
+                root,
+                expected_outcomes=[
+                    "HTTP 200",
+                    "response JSON exists",
+                    "response categories length >= 1",
+                    "response categories.0.positions length >= 1",
+                    "response `categories.0.positions.0.price` = `null`",
+                ],
+            )
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
         self.assertNotIn("data_setup_unresolved", item.gap_summary.gap_codes)
+
+    def test_review_service_blocks_nested_indexed_collection_assertion_with_partial_fixture_contract(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_indexed_collection_draft_run(
+                root,
+                preconditions=["Stable fixture response contains at least one categories item."],
+            )
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
+        self.assertIn("data_setup_unresolved", item.gap_summary.gap_codes)
 
     def test_review_service_allows_indexed_collection_assertion_with_fixture_contract(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             payload = _generate_indexed_collection_draft_run(
                 root,
-                preconditions=["Stable fixture response contains at least one categories item."],
+                metadata={"fixture_contract": {"non_empty_paths": ["categories.0.positions.0.id"]}},
             )
 
             review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
@@ -741,6 +773,7 @@ def _generate_indexed_collection_draft_run(
     *,
     expected_outcomes: list[str] | None = None,
     preconditions: list[str] | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> dict[str, object]:
     agent_plan_path = root / "agent-plan.json"
     agent_plan_path.write_text(
@@ -771,6 +804,7 @@ def _generate_indexed_collection_draft_run(
                         "metadata": {
                             "default_actor": "contractor",
                             "readiness": "evidence_supported",
+                            **dict(metadata or {}),
                         },
                     }
                 ],

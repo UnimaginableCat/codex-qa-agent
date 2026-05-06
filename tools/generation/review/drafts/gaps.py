@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from tools.generation.domain.models import GenerationDiagnostic
 from tools.generation.rendering.models import ScenarioDraft, ScenarioDraftValidationResult
@@ -260,13 +261,19 @@ def _has_execution_blocking_gaps(gap_summary: DraftGapSummary) -> bool:
     }
     return any(code in blocking_codes for code in gap_summary.gap_codes)
 
-def _expectation_contract_gap_summary_from_file(file_path: Path) -> DraftGapSummary:
+def _expectation_contract_gap_summary_from_file(
+    file_path: Path,
+    draft_metadata: dict[str, Any] | None = None,
+) -> DraftGapSummary:
     parse_result = MarkdownScenarioParser().parse_result(file_path)
     if parse_result.has_errors or parse_result.scenario is None:
         return DraftGapSummary(gap_codes=[], gap_messages=[])
-    return _expectation_contract_gap_summary_from_scenario(parse_result.scenario)
+    return _expectation_contract_gap_summary_from_scenario(parse_result.scenario, draft_metadata or {})
 
-def _expectation_contract_gap_summary_from_scenario(scenario: ScenarioDefinition) -> DraftGapSummary:
+def _expectation_contract_gap_summary_from_scenario(
+    scenario: ScenarioDefinition,
+    draft_metadata: dict[str, Any] | None = None,
+) -> DraftGapSummary:
     validator = ScenarioStepValidator()
     unsupported_messages: list[str] = []
     stateful_precondition_messages: list[str] = []
@@ -276,7 +283,7 @@ def _expectation_contract_gap_summary_from_scenario(scenario: ScenarioDefinition
         for diagnostic in validator.inspect_contract(step):
             if not diagnostic.supported:
                 unsupported_messages.append(diagnostic.detail)
-        data_setup_messages.extend(_indexed_collection_data_setup_messages(scenario, step))
+        data_setup_messages.extend(_indexed_collection_data_setup_messages(scenario, step, draft_metadata or {}))
     for precondition in scenario.preconditions:
         normalized = str(precondition).strip()
         if _looks_like_intercase_precondition(normalized):
@@ -305,6 +312,7 @@ def _expectation_contract_gap_summary_from_scenario(scenario: ScenarioDefinition
 def _indexed_collection_data_setup_messages(
     scenario: ScenarioDefinition,
     step: ScenarioStep,
+    draft_metadata: dict[str, Any],
 ) -> list[str]:
     if step.step_type != ScenarioStepType.API or step.api is None:
         return []
@@ -315,7 +323,7 @@ def _indexed_collection_data_setup_messages(
         return []
     if _has_collection_presence_assertion(step.api.expected, indexed_paths):
         return []
-    if _has_explicit_fixture_contract(scenario, indexed_paths):
+    if _has_structured_fixture_contract(draft_metadata, indexed_paths):
         return []
     indexed_path_summary = ", ".join(indexed_paths[:3])
     return [
@@ -339,34 +347,60 @@ def _indexed_collection_paths(expectations: list[str]) -> list[str]:
     return _dedupe_preserve_order(paths)
 
 def _has_collection_presence_assertion(expectations: list[str], indexed_paths: list[str]) -> bool:
-    collection_roots = {_collection_root_for_indexed_path(path) for path in indexed_paths}
+    collection_roots = _collection_roots_for_indexed_paths(indexed_paths)
+    covered_roots: set[str] = set()
     for expectation in expectations:
         normalized = str(expectation).replace("`", "").strip().lower()
         for root in collection_roots:
             if re.search(rf"response\s+{re.escape(root)}\s+length\s*(?:>|>=)\s*[1-9]\d*", normalized):
-                return True
+                covered_roots.add(root)
             if re.search(rf"response\s+{re.escape(root)}\s+is\s+not\s+empty", normalized):
-                return True
-    return False
+                covered_roots.add(root)
+    return collection_roots <= covered_roots
 
-def _has_explicit_fixture_contract(scenario: ScenarioDefinition, indexed_paths: list[str]) -> bool:
-    contract_text = " ".join([*scenario.preconditions, scenario.notes]).lower()
-    if not contract_text:
-        return False
-    if not re.search(r"\b(fixture|seeded|stable|known|pre-existing|preexisting)\b", contract_text):
-        return False
-    if not re.search(r"\b(at least one|non-empty|not empty|contains?|with .+ item|has .+ item)\b", contract_text):
-        return False
-    collection_roots = {_collection_root_for_indexed_path(path).lower() for path in indexed_paths}
-    return any(root and root in contract_text for root in collection_roots)
+def _has_structured_fixture_contract(draft_metadata: dict[str, Any], indexed_paths: list[str]) -> bool:
+    collection_roots = _collection_roots_for_indexed_paths(indexed_paths)
+    non_empty_paths = _structured_non_empty_paths(draft_metadata)
+    return bool(collection_roots) and any(
+        collection_roots <= set(_collection_roots_for_indexed_path(path)) for path in non_empty_paths
+    )
 
-def _collection_root_for_indexed_path(path: str) -> str:
+def _structured_non_empty_paths(draft_metadata: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for value in _walk_metadata_values(draft_metadata):
+        if isinstance(value, dict):
+            for key in ("non_empty_paths", "non_empty_response_paths", "required_non_empty_paths"):
+                raw_paths = value.get(key)
+                if isinstance(raw_paths, str):
+                    paths.append(raw_paths)
+                elif isinstance(raw_paths, (list, tuple, set)):
+                    paths.extend(str(item) for item in raw_paths)
+    return _dedupe_preserve_order([path for path in paths if path.strip()])
+
+def _walk_metadata_values(value: Any) -> list[Any]:
+    values = [value]
+    if isinstance(value, dict):
+        for nested in value.values():
+            values.extend(_walk_metadata_values(nested))
+    elif isinstance(value, (list, tuple, set)):
+        for nested in value:
+            values.extend(_walk_metadata_values(nested))
+    return values
+
+def _collection_roots_for_indexed_paths(indexed_paths: list[str]) -> set[str]:
+    roots: set[str] = set()
+    for path in indexed_paths:
+        roots.update(_collection_roots_for_indexed_path(path))
+    return roots
+
+def _collection_roots_for_indexed_path(path: str) -> list[str]:
     normalized = path.replace("[", ".").replace("]", "")
     parts = [part for part in normalized.split(".") if part]
+    roots: list[str] = []
     for index, part in enumerate(parts):
         if part == "0" and index > 0:
-            return parts[index - 1]
-    return parts[0] if parts else ""
+            roots.append(".".join(parts[:index]).lower())
+    return _dedupe_preserve_order(roots)
 
 def _looks_like_intercase_precondition(value: str) -> bool:
     normalized = value.lower()
