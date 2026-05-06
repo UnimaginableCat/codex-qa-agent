@@ -8,6 +8,7 @@ description: Use this skill to execute scenario API steps against a target envir
 This skill handles HTTP-based scenario steps.
 
 Apply the shared workspace instructions from `qa-entrypoint` first. This skill adds API-step execution rules.
+Run the API tool with the workspace-root venv interpreter only; do not use target project venvs, system `python`, `python3`, `py`, or `uv run` unless the user explicitly authorizes a non-workspace fallback.
 
 Use this skill when:
 - a scenario step is of type API

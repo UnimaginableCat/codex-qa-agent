@@ -12,6 +12,11 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.common.cli_guard import bootstrap_workspace_cli
+
+
+_WORKSPACE_ROOT = bootstrap_workspace_cli(__file__, payload_kind="generation")
+
 from tools.common.statuses import StepStatus
 from tools.generation.cli_authoring import (
     run_compile_authoring_plan,

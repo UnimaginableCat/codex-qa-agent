@@ -35,7 +35,7 @@ The goal is not only to execute steps, but to verify the intended functionality 
 
 1. Read the selected scenario carefully.
 2. Identify the target project under `code/<project-name>`.
-3. Resolve the project/workspace venv and runner readiness.
+3. Resolve the workspace-root venv and runner readiness.
 4. Execute the scenario through `scenario_runner` before broad code analysis when the scenario is runnable.
 5. Read runner artifacts such as `summary.json`, `report.md`, `journal.jsonl`, and `pause-state.json` when present.
 6. If runner output exposes a real pause/decision point, show the operator state and wait for an explicit action.
@@ -45,7 +45,7 @@ The goal is not only to execute steps, but to verify the intended functionality 
 
 ## Workspace interpreter rule
 
-All workspace tooling must run through the project/workspace venv by default. Before the first `tools.generation`, `tools.scenario_runner`, API, DB, or helper CLI command, resolve a local venv interpreter such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, or `.venv/bin/python`. Do not probe `python -m ...` with the system interpreter before checking the venv. If no venv can run the requested workspace CLI, report tooling readiness as `BLOCKED`; use `uv run`, system `python`, or `py` only as an explicitly stated fallback after venv readiness fails or when the user authorizes it.
+All workspace tooling must run through the workspace-root venv, not a target project venv under `code/`. Before the first `tools.generation`, `tools.scenario_runner`, `tools/api`, `tools/db`, or helper CLI command, resolve an interpreter located directly under the workspace root, such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, or `.venv/bin/python`. Do not probe `python -m ...`, `python3 -m ...`, `py -m ...`, `uv run`, or `code/<project>/.venv*/...` before checking the workspace venv. If no workspace-root venv can run the requested workspace CLI, report tooling readiness as `BLOCKED`; use a project venv, `uv run`, system `python`, `python3`, or `py` only after explicit user authorization for that fallback.
 
 ## Scenario Variables DSL
 

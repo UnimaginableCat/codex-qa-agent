@@ -1,6 +1,6 @@
 # Pipeline Commands
 
-Use these commands through the project/workspace venv interpreter.
+Use these commands through the workspace-root venv interpreter. Do not use target project venvs under `code/<project>` for workspace generation, runner, API, or DB tools.
 
 ## Authoring Handoff
 

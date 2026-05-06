@@ -11,6 +11,11 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.common.cli_guard import bootstrap_workspace_cli
+
+
+_WORKSPACE_ROOT = bootstrap_workspace_cli(__file__, payload_kind="execution_result")
+
 from tools.common.errors import ValidationError
 from tools.common.result import ExecutionResult
 from tools.common.runtime import UnsupportedPythonVersionError, ensure_supported_python_version
@@ -83,4 +88,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

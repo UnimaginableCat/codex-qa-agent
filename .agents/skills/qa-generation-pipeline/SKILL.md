@@ -135,9 +135,9 @@ Stop conditions:
 
 # Environment Rules
 
-Use the project/workspace venv interpreter for CLI stages. For runner execution, follow `runner-execution` strictly: the venv must exist, satisfy Python 3.14+, and have required dependencies. Do not silently fall back to system `python` or `py` for scenario execution.
+Use the workspace-root venv interpreter for CLI stages. For runner execution, follow `runner-execution` strictly: the workspace venv must exist, satisfy Python 3.14+, and have required dependencies. Do not use target project venvs under `code/<project>` for workspace tooling, and do not silently fall back to system `python`, `python3`, `py`, or `uv run` for scenario execution.
 
-For generation-only stages, if the venv is missing or cannot run the generation CLI, report tooling readiness as `BLOCKED` instead of inventing output.
+For generation-only stages, if the workspace-root venv is missing or cannot run the generation CLI, report tooling readiness as `BLOCKED` instead of inventing output.
 
 Never print secrets. Preserve env-backed variables as references such as `env:INTERNAL_API_TOKEN`; do not reveal resolved token values.
 

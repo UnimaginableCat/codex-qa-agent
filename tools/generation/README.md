@@ -125,7 +125,7 @@ Preferred CLI flow
 Authoring-plan scaffold:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --init-authoring-plan `
   --output artifacts/agent/generation `
   --source-id users-api `
@@ -168,39 +168,39 @@ Recommended managed-bundle walkthrough:
 
 ```powershell
 # stage 1
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --init-entity-inventory `
   --output artifacts/agent/generation/<run_id>
 
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --validate-entity-inventory `
   --entity-inventory-file artifacts/agent/generation/<run_id>/entity-inventory.yaml `
   --output-format text
 
 # stage 2
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --init-operation-inventory `
   --output artifacts/agent/generation/<run_id>
 
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --validate-operation-inventory `
   --operation-inventory-file artifacts/agent/generation/<run_id>/operation-inventory.yaml `
   --output-format text
 
 # stage 3
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --sync-authoring-plan `
   --path artifacts/agent/generation/<run_id> `
   --output-format text
 
 # stage 4
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --validate-authoring-plan `
   --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --output-format text
 
 # final gate before compile/generate
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --validate-authoring-bundle `
   --path artifacts/agent/generation/<run_id> `
   --output-format text
@@ -267,7 +267,7 @@ db_verifications:
 Authoring-plan validate-only:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --validate-authoring-plan `
   --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --output-format text
@@ -276,7 +276,7 @@ Authoring-plan validate-only:
 Authoring-plan compile:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --compile-authoring-plan `
   --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --output artifacts/agent/generation `
@@ -289,7 +289,7 @@ passes.
 Direct generation from authoring-plan:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --authoring-plan-file artifacts/agent/generation/<run_id>/authoring-plan.yaml `
   --workspace-root .
 ```
@@ -299,7 +299,7 @@ Compiled bundle flow
 Validate compiled bundle:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --validate-agent-plan `
   --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --output-format text
@@ -308,7 +308,7 @@ Validate compiled bundle:
 Generate from compiled bundle:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --workspace-root .
 ```
@@ -316,7 +316,7 @@ Generate from compiled bundle:
 Draft scenario rendering preview:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --agent-plan-file artifacts/agent/generation/<run_id>/agent-plan.json `
   --workspace-root . `
   --render-drafts
@@ -335,32 +335,32 @@ preflight checks that the profile is resolvable before execution.
 Review and promotion:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --review-drafts `
   --run-id <generation-run-id> `
   --workspace-root .
 
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --promote-draft `
   --run-id <generation-run-id> `
   --draft-id draft-tc-001 `
   --workspace-root . `
   --target-dir scenarios/generated
 
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --promote-all-drafts `
   --run-id <generation-run-id> `
   --workspace-root . `
   --target-dir scenarios/generated
 
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --promote-all-drafts `
   --run-id <generation-run-id> `
   --workspace-root . `
   --target-dir scenarios/generated `
   --purge-target-dir
 
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --validate-scenario-dir `
   --path scenarios/generated/<source>-<run_id> `
   --mode compile `
@@ -384,7 +384,7 @@ skill-routed path.
 CLI scaffold:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --init-agent-plan `
   --output artifacts/agent/generation `
   --source-id users-api `
@@ -396,7 +396,7 @@ CLI scaffold:
 Fallback prose generation:
 
 ```powershell
-<project-venv-python> -m tools.generation.cli `
+<workspace-venv-python> -m tools.generation.cli `
   --source-id users-api `
   --project code/demo `
   --prose "Verify create user" `

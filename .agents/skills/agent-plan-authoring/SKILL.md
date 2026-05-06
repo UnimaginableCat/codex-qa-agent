@@ -72,7 +72,7 @@ Supported case kinds in MVP:
 understand scope -> inventory entities/states -> inventory operations/status contracts -> author cases -> validate staged bundle -> stop
 ```
 
-Before running any `tools.generation` CLI command, resolve and use the workspace/project venv interpreter. Check local venv candidates first, such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, and `.venv/bin/python`, and use the first one that can import the generation CLI dependencies. Do not probe `python -m tools.generation.cli` with the system interpreter before checking the venv. If no venv interpreter can run the generation CLI, report authoring tooling readiness as `BLOCKED`; use `uv run` or system `python` only as an explicitly explained fallback after the venv check fails or when the user authorizes it.
+Before running any `tools.generation` CLI command, resolve and use the workspace-root venv interpreter. Check only root-level venv candidates such as `.venv314/Scripts/python.exe`, `.venv/Scripts/python.exe`, `.venv314/bin/python`, and `.venv/bin/python`. Do not use `code/<project>/.venv*`, `python`, `python3`, `py`, or `uv run` as probes before checking the workspace venv. If no workspace-root venv interpreter can run the generation CLI, report authoring tooling readiness as `BLOCKED`; use any non-workspace interpreter only after explicit user authorization.
 
 Default completion point:
 
