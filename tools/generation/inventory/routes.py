@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from tools.generation.domain.models import GenerationDiagnostic
 from tools.generation.inventory.common import (
@@ -32,6 +33,7 @@ def _route_inventory_diagnostics(
     *,
     path: Path,
     require_method_evidence: bool = False,
+    require_runtime_path_evidence: bool = False,
     require_action_like_method_evidence: bool = True,
 ) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
@@ -60,6 +62,14 @@ def _route_inventory_diagnostics(
                         and _is_action_like_route_path(str(item.get("path") or ""))
                     )
                 ),
+            )
+        )
+        diagnostics.extend(
+            _route_runtime_path_evidence_diagnostics(
+                item,
+                path=path,
+                route_index=index,
+                required=require_runtime_path_evidence,
             )
         )
         diagnostics.extend(_route_state_contract_diagnostics(item, path=path, route_index=index))
@@ -134,6 +144,30 @@ def _route_method_evidence_diagnostics(
                 "or because the path is an action-like endpoint. "
                 "Record the router/controller/source line that proves the HTTP method; do not infer methods "
                 "from endpoint names such as search, export, or download."
+            ),
+            path=path,
+            details={"route_index": route_index, "method": item.get("method"), "path": item.get("path")},
+        )
+    ]
+
+
+def _route_runtime_path_evidence_diagnostics(
+    item: dict[str, Any],
+    *,
+    path: Path,
+    route_index: int,
+    required: bool,
+) -> list[GenerationDiagnostic]:
+    if not required or _has_runtime_path_evidence(item.get("runtime_path_evidence"), route_path=item.get("path")):
+        return []
+    return [
+        _diagnostic(
+            code="adapter_operation_inventory_route_runtime_path_evidence_missing",
+            message=(
+                "Runtime path evidence is required by metadata.contracts.routes.runtime_path_evidence_required. "
+                "Record structured evidence for the final request path after API_BASE_URL, using root URLConf, "
+                "API gateway/deployment routing, OpenAPI/schema, or a runtime smoke check. App-local urls.py "
+                "evidence alone is not sufficient."
             ),
             path=path,
             details={"route_index": route_index, "method": item.get("method"), "path": item.get("path")},
@@ -331,6 +365,61 @@ def _method_evidence_mentions_declared_method(evidence_text: str, method: Any) -
         rf"\b{re.escape(normalized_method)}\s*\(",
     )
     return any(re.search(pattern, normalized_evidence) for pattern in handler_patterns)
+
+
+def _has_runtime_path_evidence(value: Any, *, route_path: Any) -> bool:
+    if isinstance(value, str):
+        return False
+    if isinstance(value, list):
+        return any(_has_runtime_path_evidence(item, route_path=route_path) for item in value)
+    if not isinstance(value, dict):
+        return False
+
+    source_ref = str(value.get("source_ref") or value.get("source") or "").strip()
+    evidence_text = str(value.get("evidence") or value.get("runtime_evidence") or "").strip()
+    if not source_ref or not evidence_text:
+        return False
+    if _is_app_local_urlconf_source(source_ref):
+        return False
+
+    runtime_path = _runtime_evidence_path(value)
+    if not runtime_path:
+        return False
+    return _route_path_shape(runtime_path) == _route_path_shape(str(route_path or "").strip())
+
+
+def _runtime_evidence_path(value: dict[str, Any]) -> str:
+    for key in ("runtime_path", "mounted_path", "external_path", "path_after_base_url"):
+        candidate = str(value.get(key) or "").strip()
+        if candidate:
+            return _path_part(candidate)
+    verified_url = str(value.get("verified_url") or value.get("full_url") or "").strip()
+    if verified_url:
+        return _path_part(verified_url)
+    return ""
+
+
+def _path_part(value: str) -> str:
+    if "://" not in value:
+        return value
+    parsed = urlsplit(value)
+    return parsed.path or "/"
+
+
+def _route_path_shape(path: str) -> str:
+    return re.sub(r"{{\s*[^{}]+?\s*}}", "{{*}}", path.strip())
+
+
+def _is_app_local_urlconf_source(source_ref: str) -> bool:
+    normalized = _strip_source_location_suffix(source_ref).replace("\\", "/").lower()
+    return "/apps/" in normalized and normalized.endswith("/urls.py")
+
+
+def _strip_source_location_suffix(source_ref: str) -> str:
+    stripped = source_ref.strip()
+    stripped = re.sub(r"#l\d+$", "", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r":\d+(?::\d+)?$", "", stripped)
+    return stripped
 
 
 def _is_action_like_route_path(route_path: str) -> bool:

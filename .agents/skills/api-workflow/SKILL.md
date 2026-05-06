@@ -47,6 +47,8 @@ Do not treat prose variable descriptions as values. A variable definition such a
 8. Evaluate the result against expectations.
 9. Record the outcome and important evidence.
 
+Do not hand-roll HTTP checks with inline Python `requests` or custom dotenv parsing. The API tool owns actor-scoped env overlay, auth selection, URL diagnostics, retries, and structured runtime signals.
+
 # Auth policy
 
 Prefer environment-driven authentication as the source of truth.
@@ -143,6 +145,7 @@ Save or reference:
 - Do not invent auth flows, endpoints, or response fields without saying so explicitly.
 - If auth mode came from env/config, say so briefly in the report.
 - If scenario and env/config auth definitions conflicted, say so clearly in the report.
+- If the response is `404` HTML/text for an API scenario that expected JSON, do not guess alternate prefixes manually. Treat the result as route evidence for a possible authored path defect and route the fix back to authoring/generation unless the user explicitly asks for exploratory endpoint discovery.
 
 # Completion criteria
 

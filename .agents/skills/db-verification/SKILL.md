@@ -43,6 +43,8 @@ Do not treat prose variable descriptions as values. Invalid variable definitions
 8. Compare returned rows to expected outcomes.
 9. Record the result and supporting evidence.
 
+Do not hand-roll DB checks with inline `psycopg`, direct connection strings, or custom dotenv parsing. The DB tool owns actor-scoped env overlay, read-only guarding, named parameter adaptation, JSON-safe output, and structured runtime signals.
+
 # SQL parameter style policy
 
 Scenario SQL may use a human-friendly named style such as:
@@ -99,6 +101,7 @@ Do not inspect the codebase by default when the scenario already provides:
 - If the SQL is ambiguous or not aligned with the scenario, say so clearly.
 - If execution is blocked by a tooling limitation, say so clearly.
 - Do not silently rewrite business expectations just to fit tool limitations.
+- Do not append connection options such as SSL flags by mutating raw `DATABASE_URL` in ad hoc snippets. If DB connectivity is blocked, report the structured `tools/db/query_check.py` result or route the issue to env/tooling repair.
 
 # Reporting expectations
 

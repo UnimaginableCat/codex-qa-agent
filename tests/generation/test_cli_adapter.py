@@ -870,6 +870,255 @@ metadata:
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
 
+    def test_validate_operation_inventory_blocks_missing_runtime_path_evidence_when_required(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: GET
+    path: /price-list/{{price_list_id}}/permissions/
+    success_status: 200
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      runtime_path_evidence_required: true
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_route_runtime_path_evidence_missing", codes)
+
+    def test_validate_operation_inventory_allows_runtime_path_evidence_when_required(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: GET
+    path: /api/v1/price-list/{{price_list_id}}/permissions/
+    success_status: 200
+    runtime_path_evidence:
+      source_ref: code/demo/project/urls.py
+      runtime_path: /api/v1/price-list/{{price_list_id}}/permissions/
+      evidence: Root URLConf mounts price-list URLs under /api/v1/ after API_BASE_URL.
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      runtime_path_evidence_required: true
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+
+    def test_validate_operation_inventory_rejects_app_local_runtime_path_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: GET
+    path: /price-list/{{price_list_id}}/permissions/
+    success_status: 200
+    runtime_path_evidence:
+      source_ref: code/demo/project/apps/price_list/urls.py
+      runtime_path: /price-list/{{price_list_id}}/permissions/
+      evidence: App-local urlpatterns include this route.
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      runtime_path_evidence_required: true
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_route_runtime_path_evidence_missing", codes)
+
+    def test_validate_operation_inventory_rejects_app_local_runtime_path_evidence_with_line_suffix(self) -> None:
+        for source_ref in (
+            "code/demo/project/apps/price_list/urls.py:23",
+            "code/demo/project/apps/price_list/urls.py#L23",
+            "code/demo/project/apps/price_list/urls.py:23:5",
+        ):
+            with self.subTest(source_ref=source_ref), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "entity-inventory.yaml").write_text(
+                    """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                    encoding="utf-8",
+                )
+                operation_inventory_path = root / "operation-inventory.yaml"
+                operation_inventory_path.write_text(
+                    f"""version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: GET
+    path: /price-list/{{{{price_list_id}}}}/permissions/
+    success_status: 200
+    runtime_path_evidence:
+      source_ref: {source_ref}
+      runtime_path: /price-list/{{{{price_list_id}}}}/permissions/
+      evidence: App-local urlpatterns include this route.
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      runtime_path_evidence_required: true
+""",
+                    encoding="utf-8",
+                )
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = cli.main(
+                        ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                    )
+                payload = json.loads(stdout.getvalue())
+
+            self.assertNotEqual(exit_code, 0)
+            self.assertEqual(payload["status"], "BLOCKED")
+            codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+            self.assertIn("adapter_operation_inventory_route_runtime_path_evidence_missing", codes)
+
+    def test_validate_operation_inventory_rejects_mismatched_runtime_path_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: GET
+    path: /price-list/{{price_list_id}}/permissions/
+    success_status: 200
+    runtime_path_evidence:
+      source_ref: code/demo/project/urls.py
+      runtime_path: /api/v1/price-list/{{price_list_id}}/permissions/
+      evidence: Root URLConf mounts price-list URLs under /api/v1/ after API_BASE_URL.
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      runtime_path_evidence_required: true
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_route_runtime_path_evidence_missing", codes)
+
     def test_validate_operation_inventory_rejects_unstructured_route_method_evidence_string(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
