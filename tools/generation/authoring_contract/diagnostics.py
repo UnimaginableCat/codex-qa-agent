@@ -57,6 +57,7 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_permission_state_setup_required",
     "authoring_permission_state_contract_invalid",
     "authoring_permission_prerequisite_requires_required_state",
+    "authoring_permission_actor_identity_binding_required",
     "authoring_case_readiness_evidence_missing",
     "authoring_open_question_blocks_promotion",
     "authoring_non_blocking_note_blocks_promotion",

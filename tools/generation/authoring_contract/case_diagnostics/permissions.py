@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
 
 from .policy import case_contract_section, plan_contract_section, policy_bool
 from ..diagnostics import authoring_diagnostic
+from ..helpers import _declared_variable_names
 from ..models import AuthoringCase, AuthoringEntityOperation, AuthoringPlan
 
 
@@ -34,6 +36,14 @@ def _permission_state_contract_diagnostics(
             case_ref,
             index=index,
             has_required_states=bool(required_states),
+        )
+    )
+    prerequisite_diagnostics.extend(
+        _actor_bound_permission_setup_diagnostics(
+            authoring_plan,
+            case,
+            case_ref,
+            index=index,
         )
     )
     if not required_states:
@@ -290,6 +300,201 @@ def _negative_permission_state_setup_required(authoring_plan: AuthoringPlan, cas
         return policy_bool(plan_contract.get("negative_cases_require_state_setup"))
     case_contract = case_contract_section(case, "permissions")
     return policy_bool(case_contract.get("negative_cases_require_state_setup"))
+
+
+def _actor_bound_permission_setup_diagnostics(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    *,
+    index: int,
+) -> list[GenerationDiagnostic]:
+    execute_actor = _effective_execute_actor(authoring_plan, case).lower()
+    if not execute_actor:
+        return []
+    if _has_actor_identity_binding_contract(case, execute_actor):
+        return []
+
+    for setup_step in case.setup:
+        entity = authoring_plan.entities.get(setup_step.use_entity.strip())
+        if entity is None:
+            continue
+        operation = entity.operations.get(setup_step.operation.strip())
+        if operation is None:
+            continue
+        needs_binding, identity_fields = _operation_requires_actor_identity_binding(
+            operation,
+            execute_actor,
+            declared_variable_names=_declared_variable_names(authoring_plan, case),
+        )
+        if not needs_binding:
+            continue
+        return [
+            authoring_diagnostic(
+                "authoring_permission_actor_identity_binding_required",
+                (
+                    "Workflow grants or revokes a permission for a discovered principal identity and then "
+                    f"executes as actor `{execute_actor}`, but it does not prove that the discovered identity "
+                    "belongs to that actor profile. Capturing the first principal from a list can grant a "
+                    "different account and make the gated action fail for the actor under test."
+                ),
+                source_ref=case_ref,
+                details={
+                    "case_index": index,
+                    "actor": execute_actor,
+                    "identity_fields": identity_fields,
+                    "setup_entity": setup_step.use_entity,
+                    "setup_operation": setup_step.operation,
+                    "suggestion": (
+                        "Bind the identity explicitly, for example capture the current actor principal id/guid, "
+                        "use an env-backed actor-owned identity with identity_resolution justification, or add "
+                        "metadata.identity_binding proving the setup subject matches the execute actor."
+                    ),
+                },
+            )
+        ]
+    return []
+
+
+def _effective_execute_actor(authoring_plan: AuthoringPlan, case: AuthoringCase) -> str:
+    if case.execute is not None and case.execute.actor:
+        return case.execute.actor
+    default_actor = case.metadata.get("default_actor")
+    if default_actor is not None:
+        return str(default_actor)
+    return authoring_plan.defaults.actor
+
+
+def _has_actor_identity_binding_contract(case: AuthoringCase, actor: str) -> bool:
+    if _has_structured_identity_binding_contract(case.metadata):
+        return True
+    metadata_text = _flatten_metadata_text(case.metadata).lower()
+    actor = actor.lower()
+    return any(
+        token in metadata_text
+        for token in (
+            "actor_identity_binding",
+            "identity_binding",
+            "subject_identity_binding",
+            "principal_identity_binding",
+            "actor_principal_binding",
+            "actor-bound identity",
+            "actor_bound_identity",
+            f"{actor}_member_guid_matches_actor",
+            f"{actor} member guid matches actor",
+            f"{actor}_user_guid_matches_actor",
+            f"{actor} user guid matches actor",
+            "execute_actor_member_guid",
+            "execute_actor_user_guid",
+            "current_actor.guid",
+            "current_actor.id",
+            "current_user.company_member_guid",
+            "current_user.guid",
+            "current_user.id",
+        )
+    )
+
+
+def _has_structured_identity_binding_contract(metadata: dict[str, Any]) -> bool:
+    for key in (
+        "actor_identity_binding",
+        "identity_binding",
+        "subject_identity_binding",
+        "principal_identity_binding",
+        "actor_principal_binding",
+    ):
+        value = metadata.get(key)
+        if value not in (None, False, "", [], {}):
+            return True
+    identity_resolution = metadata.get("identity_resolution")
+    if isinstance(identity_resolution, dict):
+        for key in ("actor_binding", "subject_binding", "principal_binding", "actor_identity_binding"):
+            value = identity_resolution.get(key)
+            if value not in (None, False, "", [], {}):
+                return True
+    return False
+
+
+def _operation_requires_actor_identity_binding(
+    operation: AuthoringEntityOperation,
+    actor: str,
+    *,
+    declared_variable_names: set[str],
+) -> tuple[bool, list[str]]:
+    actor = actor.lower()
+    identity_fields = [
+        field
+        for field in _discovered_identity_fields(operation.to_dict())
+        if field not in declared_variable_names
+    ]
+    if not identity_fields:
+        return False, []
+    for effect in _operation_permission_effects(operation):
+        subject = effect.get("subject", "").lower()
+        if _permission_subject_targets_execute_actor(subject, actor):
+            return True, identity_fields
+    return False, []
+
+
+def _permission_subject_targets_execute_actor(subject: str, actor: str) -> bool:
+    normalized_subject = subject.strip().lower()
+    if not normalized_subject:
+        return False
+    if normalized_subject == actor:
+        return True
+    if normalized_subject in {"execute_actor", "current_actor", "current_user", "actor_under_test"}:
+        return True
+    if _permission_subject_is_identity_placeholder(normalized_subject):
+        return True
+    return normalized_subject in {f"{{{{{actor}}}}}", f"${{{actor}}}", f"env:{actor.upper()}"}
+
+
+def _permission_subject_is_identity_placeholder(subject: str) -> bool:
+    placeholder_match = re.fullmatch(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}", subject)
+    if placeholder_match is None:
+        placeholder_match = re.fullmatch(r"\$\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}", subject)
+    if placeholder_match is None:
+        return False
+    return _is_principal_identity_field(placeholder_match.group(1))
+
+
+def _discovered_identity_fields(value: Any) -> list[str]:
+    fields: set[str] = set()
+    _collect_discovered_identity_fields(value, fields)
+    return sorted(fields)
+
+
+def _collect_discovered_identity_fields(value: Any, fields: set[str]) -> None:
+    if value is None:
+        return
+    if isinstance(value, dict):
+        for nested in value.values():
+            _collect_discovered_identity_fields(nested, fields)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            _collect_discovered_identity_fields(item, fields)
+        return
+
+    text = str(value)
+    if "env:" in text.lower():
+        return
+    for match in re.finditer(
+        _PRINCIPAL_IDENTITY_FIELD_PATTERN,
+        text,
+        re.IGNORECASE,
+    ):
+        fields.add(match.group(0))
+
+
+_PRINCIPAL_IDENTITY_FIELD_PATTERN = (
+    r"\b(?:(?:[a-z0-9]+)_)?(?:company_)?"
+    r"(?:member|user|actor|principal|subject|account|employee|contact)_(?:id|guid|uuid)\b"
+)
+
+
+def _is_principal_identity_field(value: str) -> bool:
+    return bool(re.fullmatch(_PRINCIPAL_IDENTITY_FIELD_PATTERN, value, flags=re.IGNORECASE))
 
 
 def _negative_permission_baseline_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:

@@ -804,9 +804,162 @@ routes:
     path: /api/price_list/{{price_list_id}}/search/
     success_status: 200
     method_evidence:
-      source_ref: code/demo/urls.py
+      source_ref: code/demo/views.py
       evidence: Search route is handled by PriceListSearchView.get
 db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "PASS")
+
+    def test_validate_operation_inventory_rejects_route_mapping_source_as_method_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: GET
+    path: /api/price_list/{{price_list_id}}/export/
+    success_status: 200
+    method_evidence:
+      source_ref: code/demo/project/apps/price_list/urls.py:23
+      evidence: PriceListPdfExportView handles GET export requests.
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      method_evidence_required: true
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_route_method_evidence_missing", codes)
+
+    def test_validate_operation_inventory_rejects_route_mapping_source_even_with_method_capability(self) -> None:
+        for source_ref in ("code/demo/urls.py", "code/demo/project/router.ts#L12"):
+            with self.subTest(source_ref=source_ref):
+                with TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    (root / "entity-inventory.yaml").write_text(
+                        """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                        encoding="utf-8",
+                    )
+                    operation_inventory_path = root / "operation-inventory.yaml"
+                    operation_inventory_path.write_text(
+                        f"""version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: GET
+    path: /api/price_list/{{{{price_list_id}}}}/export/
+    success_status: 200
+    method_evidence:
+      source_ref: {source_ref}
+      source_role: method_handler
+      evidence: PriceListPdfExportView.get handles GET export requests.
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      method_evidence_required: true
+""",
+                        encoding="utf-8",
+                    )
+
+                    stdout = io.StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = cli.main(
+                            [
+                                "--validate-operation-inventory",
+                                "--operation-inventory-file",
+                                str(operation_inventory_path),
+                            ]
+                        )
+                    payload = json.loads(stdout.getvalue())
+
+                self.assertNotEqual(exit_code, 0)
+                self.assertEqual(payload["status"], "BLOCKED")
+                codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+                self.assertIn("adapter_operation_inventory_route_method_evidence_missing", codes)
+
+    def test_validate_operation_inventory_allows_method_capable_source_role_when_required(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: document-api
+project: code/demo
+surface: documents
+entities:
+  - name: document
+    id_field: document_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: document-api
+project: code/demo
+surface: documents
+entity_operations: []
+routes:
+  - method: PATCH
+    path: /api/documents/{{document_id}}/publish/
+    success_status: 200
+    method_evidence:
+      source_ref: code/demo/http_endpoints
+      source_role: method_handler
+      evidence: publish endpoint is implemented by DocumentPublishHandler.patch
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      method_evidence_required: true
 """,
                 encoding="utf-8",
             )

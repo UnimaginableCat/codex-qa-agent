@@ -26,6 +26,39 @@ _ACTION_LIKE_ROUTE_SEGMENTS = {
     "search",
     "upload",
 }
+_ROUTE_MAPPING_SOURCE_SUFFIXES = (
+    "/urls.py",
+    "/routes.py",
+    "/router.py",
+    "/routing.py",
+    "/urls.ts",
+    "/routes.ts",
+    "/router.ts",
+    "/routing.ts",
+    "/urls.js",
+    "/routes.js",
+    "/router.js",
+    "/routing.js",
+)
+_METHOD_CAPABILITY_TOKENS = (
+    "method_handler",
+    "handler",
+    "controller",
+    "view",
+    "action",
+    "implementation",
+    "request_handler",
+    "http_method",
+    "method source",
+)
+_ROUTE_MAPPING_CAPABILITY_TOKENS = (
+    "route_mapping",
+    "urlconf",
+    "url_conf",
+    "router",
+    "routing",
+    "mount",
+)
 
 
 def _route_inventory_diagnostics(
@@ -142,8 +175,9 @@ def _route_method_evidence_diagnostics(
             message=(
                 "Route method evidence is required by metadata.contracts.routes.method_evidence_required "
                 "or because the path is an action-like endpoint. "
-                "Record the router/controller/source line that proves the HTTP method; do not infer methods "
-                "from endpoint names such as search, export, or download."
+                "Record method-capable evidence from a handler/controller/view/action implementation or test. "
+                "Route mapping sources such as URLConf/router files prove mounting, not the implemented HTTP "
+                "method, and endpoint names such as search, export, or download are not method evidence."
             ),
             path=path,
             details={"route_index": route_index, "method": item.get("method"), "path": item.get("path")},
@@ -345,11 +379,42 @@ def _has_method_evidence(value: Any, *, method: Any) -> bool:
     if isinstance(value, list):
         return any(_has_method_evidence(item, method=method) for item in value)
     if isinstance(value, dict):
-        has_source = bool(str(value.get("source_ref") or value.get("source") or "").strip())
+        source_ref = str(value.get("source_ref") or value.get("source") or "").strip()
+        has_source = bool(source_ref)
+        if not _method_evidence_source_can_prove_method(value, source_ref):
+            return False
         evidence_text = str(value.get("method_source") or value.get("evidence") or "").strip()
         has_evidence = bool(evidence_text)
         return has_source and has_evidence and _method_evidence_mentions_declared_method(evidence_text, method)
     return False
+
+
+def _method_evidence_source_can_prove_method(value: dict[str, Any], source_ref: str) -> bool:
+    if _is_route_mapping_source(source_ref):
+        return False
+    capability_text = _evidence_capability_text(value)
+    if any(token in capability_text for token in _ROUTE_MAPPING_CAPABILITY_TOKENS):
+        return False
+    if any(token in capability_text for token in _METHOD_CAPABILITY_TOKENS):
+        return True
+    return True
+
+
+def _evidence_capability_text(value: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in (
+        "source_role",
+        "source_type",
+        "evidence_role",
+        "evidence_type",
+        "capability",
+        "capabilities",
+        "proves",
+        "proof_type",
+    ):
+        if key in value:
+            parts.append(_flatten_evidence_text(value.get(key)))
+    return " ".join(parts).replace("-", "_").lower()
 
 
 def _method_evidence_mentions_declared_method(evidence_text: str, method: Any) -> bool:
@@ -415,11 +480,29 @@ def _is_app_local_urlconf_source(source_ref: str) -> bool:
     return "/apps/" in normalized and normalized.endswith("/urls.py")
 
 
+def _is_route_mapping_source(source_ref: str) -> bool:
+    normalized = _strip_source_location_suffix(source_ref).replace("\\", "/").lower()
+    return any(
+        normalized.endswith(suffix) or normalized.endswith(suffix.lstrip("/"))
+        for suffix in _ROUTE_MAPPING_SOURCE_SUFFIXES
+    )
+
+
 def _strip_source_location_suffix(source_ref: str) -> str:
     stripped = source_ref.strip()
     stripped = re.sub(r"#l\d+$", "", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r":\d+(?::\d+)?$", "", stripped)
     return stripped
+
+
+def _flatten_evidence_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return " ".join(f"{key} {_flatten_evidence_text(nested)}" for key, nested in value.items())
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_flatten_evidence_text(item) for item in value)
+    return str(value)
 
 
 def _is_action_like_route_path(route_path: str) -> bool:

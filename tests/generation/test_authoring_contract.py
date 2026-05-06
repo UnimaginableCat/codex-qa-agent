@@ -499,6 +499,155 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(result.status, StepStatus.BLOCKED)
         self.assertEqual(len(setup_required_diagnostics), 2)
 
+    def test_permission_setup_requires_actor_bound_identity_for_discovered_principal(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="documents-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="basic",
+                actor="admin",
+                scenario_variables=["document_id = env:DOCUMENT_ID"],
+            ),
+            entities={
+                "document_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_editor_access": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/api/documents/{{document_id}}/permissions/"),
+                            request_body={
+                                "grants": [
+                                    {
+                                        "user_guid": "{{editor_user_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "key": "can_read",
+                                    "subject": "editor",
+                                    "resource": "document",
+                                    "state": "true",
+                                    "mode": "set",
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="editor-edit-after-grant",
+                    kind="workflow",
+                    objective="Editor with can_read can open a protected document.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="document_permission",
+                            operation="grant_editor_access",
+                            actor="admin",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="editor",
+                        route=AuthoringRoute(method="GET", path="/api/documents/{{document_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_setup_allows_structured_actor_identity_binding(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="documents-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="basic",
+                actor="admin",
+                scenario_variables=["document_id = env:DOCUMENT_ID"],
+            ),
+            entities={
+                "document_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_editor_access": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/api/documents/{{document_id}}/permissions/"),
+                            request_body={
+                                "grants": [
+                                    {
+                                        "user_guid": "{{editor_user_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "key": "can_read",
+                                    "subject": "editor",
+                                    "resource": "document",
+                                    "state": "true",
+                                    "mode": "set",
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="editor-edit-after-grant",
+                    kind="workflow",
+                    objective="Editor with can_read can open a protected document.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="document_permission",
+                            operation="grant_editor_access",
+                            actor="admin",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="editor",
+                        route=AuthoringRoute(method="GET", path="/api/documents/{{document_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    metadata={
+                        "identity_resolution": {
+                            "actor_binding": "editor_user_guid is the user_guid for the editor actor profile."
+                        }
+                    },
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_compile_file_blocks_invalid_required_permission_state_shape(self) -> None:
         with TemporaryDirectory() as tmp:
             authoring_plan_path = Path(tmp) / "authoring-plan.yaml"
@@ -600,6 +749,82 @@ cases:
         self.assertTrue(
             any(
                 diagnostic.code == "authoring_case_readiness_evidence_missing"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_setup_requires_binding_for_placeholder_grant_subject(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="basic",
+                actor="founder",
+                scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+            ),
+            entities={
+                "price_list_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_captured_partner_edit": AuthoringEntityOperation(
+                            route=AuthoringRoute(
+                                method="POST",
+                                path="/api/price-list/{{price_list_id}}/permissions/update/",
+                            ),
+                            request_body={
+                                "partners": [
+                                    {
+                                        "company_member_guid": "{{partner_company_member_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "key": "can_edit",
+                                    "subject": "{{partner_company_member_guid}}",
+                                    "resource": "price_list",
+                                    "state": "true",
+                                    "mode": "set",
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-edit-after-placeholder-grant",
+                    kind="workflow",
+                    objective="Partner can edit after granting the captured partner principal.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="price_list_permission",
+                            operation="grant_captured_partner_edit",
+                            actor="founder",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="partner",
+                        route=AuthoringRoute(method="PUT", path="/api/price-list/{{price_list_id}}/update/"),
+                        body={"name": "Updated"},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
                 for diagnostic in result.diagnostics
             )
         )
@@ -1779,7 +2004,7 @@ cases:
             )
         )
 
-    def test_strict_search_visibility_data_setup_accepts_non_empty_oracle_check(self) -> None:
+    def test_strict_search_visibility_data_setup_rejects_non_empty_oracle_without_fixture_contract(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="price-list-plan",
@@ -1818,15 +2043,15 @@ cases:
 
         result = AuthoringPlanCompiler().validate(plan)
 
-        self.assertEqual(result.status, StepStatus.PASS)
-        self.assertFalse(
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
             any(
                 diagnostic.code == "authoring_collection_visibility_data_setup_required"
                 for diagnostic in result.diagnostics
             )
         )
 
-    def test_strict_search_visibility_data_setup_accepts_indexed_result_oracle_check(self) -> None:
+    def test_strict_search_visibility_data_setup_rejects_indexed_result_oracle_without_fixture_contract(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="price-list-plan",
@@ -1858,6 +2083,57 @@ cases:
                                 "requires_non_empty_result": True,
                             }
                         }
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_strict_search_visibility_data_setup_accepts_structured_data_contract(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="catalog-plan",
+            project="code/demo",
+            title="Catalog visibility",
+            goal="Cover catalog visibility.",
+            scope=AuthoringScope(surface="catalog-search"),
+            metadata={"contracts": {"coverage": {"collection_visibility_requires_data_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="buyer-search-masks-cost-price",
+                    kind="api",
+                    objective="Buyer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/api/catalog/search")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=[
+                            "response JSON exists",
+                            "response items length >= 1",
+                            "response `items.0.cost_price` = `null`",
+                        ],
+                    ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["items.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        },
+                        "data_contract": {
+                            "non_empty_paths": ["items"],
+                            "source": "env fixture CATALOG_SEARCH_QUERY returns at least one indexed item.",
+                        },
                     },
                 ),
             ],

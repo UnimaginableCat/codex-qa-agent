@@ -50,6 +50,10 @@ For guided batch execution, stop at the first real paused scenario returned by `
 
 If an API step returns `404` with an HTML/text body while `API_BASE_URL` and the actor profile are resolvable, treat this as likely wrong authored route path after the base URL. Do not guess prefixes such as `/api` or `/api/v1`, do not edit promoted markdown, and do not replay raw `requests` outside the runner to find a working path. Report the paused run and route defect, then route the fix back to the source generation bundle so `operation-inventory.yaml` records `runtime_path_evidence` for the final path after `API_BASE_URL`.
 
+If an action-like API step such as export/download/search/calculate returns `405 Method Not Allowed`, treat it as a likely authored method-evidence defect. Report the runner artifact and route the fix back to the source generation bundle; do not edit promoted markdown or retry with another method outside the runner.
+
+If a permission setup step succeeds but the later actor action is denied, treat this as a likely actor/principal identity binding defect when the setup subject came from a generic list capture such as the first user/member/principal id in a management response. Report that the generated source must prove the granted identity belongs to the actor profile executing the gated step.
+
 # Default Guided Request
 
 When the user asks to run a scenario without specifying mode, treat this as the preferred guided workflow.
