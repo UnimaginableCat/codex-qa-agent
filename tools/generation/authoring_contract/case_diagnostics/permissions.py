@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.generation.domain.models import GenerationDiagnostic
+from tools.generation.domain.models import DiagnosticSeverity, GenerationDiagnostic
 
+from .policy import case_contract_section, plan_contract_section, policy_bool
 from ..diagnostics import authoring_diagnostic
 from ..models import AuthoringCase, AuthoringEntityOperation, AuthoringPlan
 
@@ -25,6 +26,15 @@ def _permission_state_contract_diagnostics(
         case_ref,
         index=index,
         has_required_states=bool(required_states),
+    )
+    prerequisite_diagnostics.extend(
+        _negative_permission_case_state_setup_diagnostics(
+            authoring_plan,
+            case,
+            case_ref,
+            index=index,
+            has_required_states=bool(required_states),
+        )
     )
     if not required_states:
         return prerequisite_diagnostics
@@ -188,3 +198,177 @@ def _permission_prerequisite_metadata_diagnostics(
             },
         )
     ]
+
+
+def _negative_permission_case_state_setup_diagnostics(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    *,
+    index: int,
+    has_required_states: bool,
+) -> list[GenerationDiagnostic]:
+    if not _looks_like_permission_negative_or_default_case(case):
+        return []
+    if has_required_states:
+        return []
+    if _has_permission_fixture_contract(case):
+        return _negative_permission_fixture_baseline_diagnostics(
+            authoring_plan,
+            case,
+            case_ref,
+            index=index,
+        )
+    if _has_permission_baseline_setup(authoring_plan, case):
+        return []
+
+    strict = _negative_permission_state_setup_required(authoring_plan, case)
+    return [
+        authoring_diagnostic(
+            (
+                "authoring_permission_negative_case_state_setup_required"
+                if strict
+                else "authoring_permission_negative_case_state_setup_unresolved"
+            ),
+            (
+                "Permission negative/default case assumes an actor lacks can_edit/can_create or receives a denial, "
+                "but it does not establish that permission state through setup or a typed required_permission_state. "
+                "Stable QA fixtures can drift and turn the expected denial into a granted action."
+            ),
+            severity=DiagnosticSeverity.ERROR if strict else DiagnosticSeverity.WARNING,
+            source_ref=case_ref,
+            details={
+                "case_index": index,
+                "suggestion": (
+                    "Use a self-contained workflow that revokes/resets the relevant permission before the negative "
+                    "action, or document a stable fixture contract in metadata and keep required_permission_state "
+                    "aligned with setup permission_state_effects."
+                ),
+            },
+        )
+    ]
+
+
+def _negative_permission_fixture_baseline_diagnostics(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    *,
+    index: int,
+) -> list[GenerationDiagnostic]:
+    if _has_permission_baseline_contract(case) or _has_permission_baseline_setup(authoring_plan, case):
+        return []
+    strict = _negative_permission_baseline_required(authoring_plan, case)
+    return [
+        authoring_diagnostic(
+            (
+                "authoring_permission_negative_case_baseline_check_required"
+                if strict
+                else "authoring_permission_negative_case_baseline_check_unresolved"
+            ),
+            (
+                "Permission negative/default case documents a stable permission fixture, but does not verify the "
+                "current effective permission baseline before executing the denial/default assertion. Previous "
+                "runs may have already granted can_edit or can_create on the shared fixture."
+            ),
+            severity=DiagnosticSeverity.ERROR if strict else DiagnosticSeverity.WARNING,
+            source_ref=case_ref,
+            details={
+                "case_index": index,
+                "suggestion": (
+                    "Add a setup step that reads effective permissions or the override row and asserts the expected "
+                    "false/absent state, or reset/revoke the permission in setup before the negative action."
+                ),
+            },
+        )
+    ]
+
+
+def _negative_permission_state_setup_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+    plan_contract = plan_contract_section(authoring_plan, "permissions")
+    if plan_contract.get("negative_cases_require_state_setup") is not None:
+        return policy_bool(plan_contract.get("negative_cases_require_state_setup"))
+    case_contract = case_contract_section(case, "permissions")
+    return policy_bool(case_contract.get("negative_cases_require_state_setup"))
+
+
+def _negative_permission_baseline_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+    plan_contract = plan_contract_section(authoring_plan, "permissions")
+    if plan_contract.get("negative_cases_require_baseline_check") is not None:
+        return policy_bool(plan_contract.get("negative_cases_require_baseline_check"))
+    case_contract = case_contract_section(case, "permissions")
+    return policy_bool(case_contract.get("negative_cases_require_baseline_check"))
+
+
+def _has_permission_fixture_contract(case: AuthoringCase) -> bool:
+    metadata_text = " ".join(
+        f"{key} {value}" for key, value in case.metadata.items()
+    ).lower()
+    return any(
+        token in metadata_text
+        for token in (
+            "stable_permission_fixture",
+            "permission_fixture_contract",
+            "known_no_override_fixture",
+            "fixture_has_can_edit_false",
+            "fixture_has_can_create_false",
+        )
+    )
+
+
+def _has_permission_baseline_contract(case: AuthoringCase) -> bool:
+    metadata_text = " ".join(
+        f"{key} {value}" for key, value in case.metadata.items()
+    ).lower()
+    return any(
+        token in metadata_text
+        for token in (
+            "baseline_checked",
+            "permission_baseline_checked",
+            "effective_permissions_checked",
+            "current_permissions_checked",
+            "preflight_permission_check",
+        )
+    )
+
+
+def _has_permission_baseline_setup(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+    for effect in _setup_permission_state_effects(authoring_plan, case):
+        mode = effect.get("mode", "")
+        state = effect.get("state", "")
+        if mode in {"verify", "baseline", "assert", "read", "check"} and state in {"false", "absent", "none"}:
+            return True
+    for setup_step in case.setup:
+        operation_name = setup_step.operation.strip().lower()
+        if any(token in operation_name for token in ("verify", "baseline", "check", "read", "get")) and any(
+            token in operation_name for token in ("permission", "can_edit", "can_create", "override")
+        ):
+            return True
+    return False
+
+
+def _looks_like_permission_negative_or_default_case(case: AuthoringCase) -> bool:
+    checks = [] if case.oracle is None else [str(item) for item in case.oracle.business_checks]
+    text = " ".join(
+        [
+            case.id,
+            case.title,
+            case.objective,
+            " ".join(case.tags),
+            " ".join(checks),
+        ]
+    ).lower()
+    if not any(token in text for token in ("partner", "member", "customer", "contractor", "actor")):
+        return False
+    if any(token in text for token in ("without", "default", "denied", "cannot", "lacks", "no override")):
+        return True
+    if case.oracle is not None and case.oracle.status_code == 403:
+        return True
+    return any(
+        token in text
+        for token in (
+            "can_edit` = `false",
+            "can_create` = `false",
+            "can_manage_permissions` = `false",
+        )
+    )

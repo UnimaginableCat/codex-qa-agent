@@ -12,7 +12,7 @@ from ..diagnostics import authoring_diagnostic
 from ..models import AuthoringCase, AuthoringPlan
 
 _VISIBILITY_CLAIM_PATTERN = re.compile(
-    r"\b(?:mask|masked|masking|leak|leaks|visibility|visible|can_view_price|can_view_cost|cost_price|selling price)\b",
+    r"\b(?:mask|masks|masked|masking|leak|leaks|visibility|visible|can_view_price|can_view_cost|price|cost_price|selling price)\b",
     re.IGNORECASE,
 )
 _VISIBILITY_ASSERTION_PATTERN = re.compile(
@@ -66,6 +66,16 @@ def _visibility_claim_diagnostics(
         )
     diagnostics.extend(
         _collection_visibility_data_setup_diagnostics(
+            authoring_plan=authoring_plan,
+            case=case,
+            case_ref=case_ref,
+            index=index,
+            checks=checks,
+            has_visibility_assertion=has_visibility_assertion,
+        )
+    )
+    diagnostics.extend(
+        _root_visibility_field_assertion_diagnostics(
             authoring_plan=authoring_plan,
             case=case,
             case_ref=case_ref,
@@ -140,6 +150,82 @@ def _collection_visibility_data_setup_required(authoring_plan: AuthoringPlan, ca
         return policy_bool(plan_coverage_contract.get("collection_visibility_requires_data_setup"))
     coverage_contract = case_contract_section(case, "coverage")
     return policy_bool(coverage_contract.get("collection_visibility_requires_data_setup"))
+
+
+def _root_visibility_field_assertion_diagnostics(
+    *,
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    index: int,
+    checks: list[str],
+    has_visibility_assertion: bool,
+) -> list[GenerationDiagnostic]:
+    if not has_visibility_assertion:
+        return []
+    root_assertions = [check for check in checks if _asserts_root_price_or_cost_field(check)]
+    if not root_assertions:
+        return []
+    if _has_root_visibility_path_evidence(case):
+        return []
+
+    strict = _root_visibility_path_evidence_required(authoring_plan, case)
+    return [
+        authoring_diagnostic(
+            (
+                "authoring_visibility_root_field_assertion_requires_path_evidence"
+                if strict
+                else "authoring_visibility_root_field_assertion_without_path_evidence"
+            ),
+            (
+                "Visibility case asserts root-level price/cost_price. Nested price-list responses often expose "
+                "these fields under positions, categories, templates, or items, so root-level assertions need "
+                "explicit response-shape evidence."
+            ),
+            severity=DiagnosticSeverity.ERROR if strict else DiagnosticSeverity.WARNING,
+            source_ref=case_ref,
+            details={
+                "case_index": index,
+                "root_assertions": root_assertions,
+                "suggestion": (
+                    "Use an exact nested response path such as response `categories.0.positions.0.cost_price` = "
+                    "`null`, or add metadata.root_visibility_fields_confirmed with source evidence proving the "
+                    "field really exists at response root."
+                ),
+            },
+        )
+    ]
+
+
+def _asserts_root_price_or_cost_field(check: str) -> bool:
+    normalized = str(check or "").strip()
+    root_patterns = (
+        r"^response\s+`?(?:price|cost_price)`?\s*(?:=|!=|is null|is not null)(?:\s|$)",
+        r"^response\s+contains\s+field\s+`(?:price|cost_price)`\s*$",
+    )
+    return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in root_patterns)
+
+
+def _root_visibility_path_evidence_required(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+    plan_coverage_contract = plan_contract_section(authoring_plan, "coverage")
+    if plan_coverage_contract.get("root_visibility_assertions_require_path_evidence") is not None:
+        return policy_bool(plan_coverage_contract.get("root_visibility_assertions_require_path_evidence"))
+    coverage_contract = case_contract_section(case, "coverage")
+    return policy_bool(coverage_contract.get("root_visibility_assertions_require_path_evidence"))
+
+
+def _has_root_visibility_path_evidence(case: AuthoringCase) -> bool:
+    metadata_text = _flatten_metadata_text(case.metadata).lower()
+    return any(
+        token in metadata_text
+        for token in (
+            "root_visibility_fields_confirmed",
+            "response_shape_evidence",
+            "exact_response_path_evidence",
+            "root price field",
+            "root cost_price field",
+        )
+    )
 
 
 def _is_search_or_collection_route(route_path: str, case: AuthoringCase) -> bool:
