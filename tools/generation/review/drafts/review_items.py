@@ -60,7 +60,10 @@ def _build_review_item(
         has_unsupported_items=bool(unsupported_checks),
         has_deferred_items=deferred_item is not None,
     )
-    gap_summary = _merge_gap_summaries(gap_summary, _expectation_contract_gap_summary_from_file(source_path))
+    gap_summary = _merge_gap_summaries(
+        gap_summary,
+        _expectation_contract_gap_summary_from_file(source_path, draft.metadata),
+    )
     diagnostics_details = DraftReviewDiagnosticsSummary(
         parse_diagnostics_count=0 if validation is None else len(validation.diagnostics),
         render_diagnostics_count=len(render_diagnostics),
