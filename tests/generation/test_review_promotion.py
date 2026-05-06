@@ -137,6 +137,54 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             )
         )
 
+    def test_review_service_blocks_indexed_collection_assertion_without_data_setup(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_indexed_collection_draft_run(root)
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
+        self.assertIn("data_setup_unresolved", item.gap_summary.gap_codes)
+        self.assertEqual(item.promotion_advisory.value, "not_recommended_for_promotion")
+        self.assertTrue(
+            any(
+                target.section_name == "Preconditions" and target.priority == "normal"
+                for target in item.edit_targets.targets
+            )
+        )
+
+    def test_review_service_allows_indexed_collection_assertion_with_presence_check(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_indexed_collection_draft_run(
+                root,
+                expected_outcomes=[
+                    "HTTP 200",
+                    "response JSON exists",
+                    "response categories length >= 1",
+                    "response `categories.0.positions.0.price` = `null`",
+                ],
+            )
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
+        self.assertNotIn("data_setup_unresolved", item.gap_summary.gap_codes)
+
+    def test_review_service_allows_indexed_collection_assertion_with_fixture_contract(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _generate_indexed_collection_draft_run(
+                root,
+                preconditions=["Stable fixture response contains at least one categories item."],
+            )
+
+            review_set = ScenarioDraftReviewService().review(payload["run_id"], workspace_root=root)
+
+        item = review_set.items[0]
+        self.assertNotIn("data_setup_unresolved", item.gap_summary.gap_codes)
+
     def test_promotion_blocks_draft_with_high_priority_review_target(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -611,6 +659,66 @@ def _generate_seeded_id_gap_run(root: Path) -> dict[str, object]:
                         "route": {"http_method": "GET", "endpoint_path": "/users/{{user_id}}"},
                         "expected_outcomes": ["HTTP 200", "response JSON exists"],
                         "unresolved_items": ["A seeded or previously created user_id must be supplied."],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        exit_code = cli.main(
+            [
+                "--agent-plan-file",
+                str(agent_plan_path),
+                "--workspace-root",
+                str(root),
+                "--render-drafts",
+            ]
+        )
+    payload = json.loads(stdout.getvalue())
+    if exit_code != 0:
+        raise AssertionError(payload)
+    return payload
+
+
+def _generate_indexed_collection_draft_run(
+    root: Path,
+    *,
+    expected_outcomes: list[str] | None = None,
+    preconditions: list[str] | None = None,
+) -> dict[str, object]:
+    agent_plan_path = root / "agent-plan.json"
+    agent_plan_path.write_text(
+        json.dumps(
+            {
+                "source_id": "price-list-permissions-full",
+                "project": "code/demo",
+                "title": "Price list permissions",
+                "scenario_variables": [
+                    "price_list_id = env:PRICE_LIST_ID",
+                    "search_query = literal:test",
+                ],
+                "planned_test_cases": [
+                    {
+                        "case_id": "contractor-detail-masks-price",
+                        "title": "Contractor detail masks price",
+                        "objective": "Detail results apply contractor visibility and mask price.",
+                        "preconditions": preconditions or [],
+                        "route": {
+                            "http_method": "GET",
+                            "endpoint_path": "/api/price_list/{{price_list_id}}/",
+                        },
+                        "expected_outcomes": expected_outcomes or [
+                            "HTTP 200",
+                            "response JSON exists",
+                            "response `categories.0.positions.0.price` = `null`",
+                        ],
+                        "metadata": {
+                            "default_actor": "contractor",
+                            "readiness": "evidence_supported",
+                        },
                     }
                 ],
             },

@@ -270,11 +270,13 @@ def _expectation_contract_gap_summary_from_scenario(scenario: ScenarioDefinition
     validator = ScenarioStepValidator()
     unsupported_messages: list[str] = []
     stateful_precondition_messages: list[str] = []
+    data_setup_messages: list[str] = []
 
     for step in scenario.steps:
         for diagnostic in validator.inspect_contract(step):
             if not diagnostic.supported:
                 unsupported_messages.append(diagnostic.detail)
+        data_setup_messages.extend(_indexed_collection_data_setup_messages(scenario, step))
     for precondition in scenario.preconditions:
         normalized = str(precondition).strip()
         if _looks_like_intercase_precondition(normalized):
@@ -290,12 +292,81 @@ def _expectation_contract_gap_summary_from_scenario(scenario: ScenarioDefinition
     if stateful_precondition_messages:
         gap_codes.append("stateful_intercase_precondition")
         gap_messages.extend(stateful_precondition_messages)
+    if data_setup_messages:
+        gap_codes.append("data_setup_unresolved")
+        gap_messages.extend(data_setup_messages)
     if not gap_codes:
         return DraftGapSummary(gap_codes=[], gap_messages=[])
     return DraftGapSummary(
         gap_codes=gap_codes,
         gap_messages=_dedupe_preserve_order(gap_messages),
     )
+
+def _indexed_collection_data_setup_messages(
+    scenario: ScenarioDefinition,
+    step: ScenarioStep,
+) -> list[str]:
+    if step.step_type != ScenarioStepType.API or step.api is None:
+        return []
+    indexed_paths = _indexed_collection_paths(step.api.expected)
+    if not indexed_paths:
+        return []
+    if _has_prior_executable_setup_step(scenario, step):
+        return []
+    if _has_collection_presence_assertion(step.api.expected, indexed_paths):
+        return []
+    if _has_explicit_fixture_contract(scenario, indexed_paths):
+        return []
+    indexed_path_summary = ", ".join(indexed_paths[:3])
+    return [
+        (
+            "Scenario asserts a specific indexed response collection item "
+            f"({indexed_path_summary}), but no prior setup step, collection-size assertion, "
+            "or explicit fixture contract guarantees that the response contains that item."
+        )
+    ]
+
+def _has_prior_executable_setup_step(scenario: ScenarioDefinition, current_step: ScenarioStep) -> bool:
+    return any(step.step_number < current_step.step_number for step in scenario.steps)
+
+def _indexed_collection_paths(expectations: list[str]) -> list[str]:
+    paths: list[str] = []
+    for expectation in expectations:
+        normalized = str(expectation).replace("`", "")
+        match = re.search(r"\bresponse\s+([A-Za-z_][A-Za-z0-9_.\[\]]*(?:\.|\[)0(?:\.|\])[A-Za-z0-9_.\[\]]*)", normalized)
+        if match:
+            paths.append(match.group(1))
+    return _dedupe_preserve_order(paths)
+
+def _has_collection_presence_assertion(expectations: list[str], indexed_paths: list[str]) -> bool:
+    collection_roots = {_collection_root_for_indexed_path(path) for path in indexed_paths}
+    for expectation in expectations:
+        normalized = str(expectation).replace("`", "").strip().lower()
+        for root in collection_roots:
+            if re.search(rf"response\s+{re.escape(root)}\s+length\s*(?:>|>=)\s*[1-9]\d*", normalized):
+                return True
+            if re.search(rf"response\s+{re.escape(root)}\s+is\s+not\s+empty", normalized):
+                return True
+    return False
+
+def _has_explicit_fixture_contract(scenario: ScenarioDefinition, indexed_paths: list[str]) -> bool:
+    contract_text = " ".join([*scenario.preconditions, scenario.notes]).lower()
+    if not contract_text:
+        return False
+    if not re.search(r"\b(fixture|seeded|stable|known|pre-existing|preexisting)\b", contract_text):
+        return False
+    if not re.search(r"\b(at least one|non-empty|not empty|contains?|with .+ item|has .+ item)\b", contract_text):
+        return False
+    collection_roots = {_collection_root_for_indexed_path(path).lower() for path in indexed_paths}
+    return any(root and root in contract_text for root in collection_roots)
+
+def _collection_root_for_indexed_path(path: str) -> str:
+    normalized = path.replace("[", ".").replace("]", "")
+    parts = [part for part in normalized.split(".") if part]
+    for index, part in enumerate(parts):
+        if part == "0" and index > 0:
+            return parts[index - 1]
+    return parts[0] if parts else ""
 
 def _looks_like_intercase_precondition(value: str) -> bool:
     normalized = value.lower()
