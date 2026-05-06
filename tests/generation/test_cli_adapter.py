@@ -1196,6 +1196,7 @@ metadata:
             output_text = validate_stdout.getvalue()
 
         self.assertEqual(validate_exit_code, 0)
+        self.assertIn("Status: PASS", output_text)
         self.assertIn("No runnable scenario drafts were rendered or promoted", output_text)
         self.assertIn("authoring_plan: PASS (1/1 cases compile)", output_text)
         self.assertIn("scenario_drafts_rendered: False", output_text)
