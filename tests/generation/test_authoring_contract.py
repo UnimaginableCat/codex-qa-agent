@@ -631,7 +631,12 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
                     oracle=AuthoringOracle(status_code=200),
                     metadata={
                         "identity_resolution": {
-                            "actor_binding": "editor_user_guid is the user_guid for the editor actor profile."
+                            "actor_binding": {
+                                "actor": "editor",
+                                "subject_variable": "editor_user_guid",
+                                "env_var": "EDITOR_USER_GUID",
+                                "evidence": "actor-scoped env EDITOR_USER_GUID belongs to the editor actor profile.",
+                            }
                         }
                     },
                 )
@@ -642,6 +647,83 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
 
         self.assertEqual(result.status, StepStatus.PASS)
         self.assertFalse(
+            any(
+                diagnostic.code == "authoring_permission_actor_identity_binding_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_setup_rejects_weak_actor_identity_binding_prose(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="documents-plan",
+            project="code/demo",
+            title="Document permissions",
+            goal="Cover document permissions.",
+            scope=AuthoringScope(surface="document-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                auth="basic",
+                actor="admin",
+                scenario_variables=["document_id = env:DOCUMENT_ID"],
+            ),
+            entities={
+                "document_permission": AuthoringEntitySpec(
+                    operations={
+                        "grant_editor_access": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/api/documents/{{document_id}}/permissions/"),
+                            request_body={
+                                "grants": [
+                                    {
+                                        "user_guid": "{{editor_user_guid}}",
+                                        "can_edit": True,
+                                    }
+                                ]
+                            },
+                            permission_state_effects=[
+                                {
+                                    "key": "can_read",
+                                    "subject": "{{editor_user_guid}}",
+                                    "resource": "document",
+                                    "state": "true",
+                                    "mode": "set",
+                                }
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="editor-edit-after-grant",
+                    kind="workflow",
+                    objective="Editor with can_read can open a protected document.",
+                    state_change="read_only",
+                    setup=[
+                        AuthoringSetupStep(
+                            use_entity="document_permission",
+                            operation="grant_editor_access",
+                            actor="admin",
+                        )
+                    ],
+                    execute=AuthoringExecute(
+                        actor="editor",
+                        route=AuthoringRoute(method="GET", path="/api/documents/{{document_id}}/"),
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    metadata={
+                        "identity_resolution": {
+                            "actor_binding": "editor_user_guid is the user_guid for the editor actor profile."
+                        }
+                    },
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
             any(
                 diagnostic.code == "authoring_permission_actor_identity_binding_required"
                 for diagnostic in result.diagnostics
@@ -1665,6 +1747,63 @@ cases:
             )
         )
 
+    def test_permission_negative_case_rejects_baseline_covered_by_another_case(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={
+                "contracts": {
+                    "permissions": {
+                        "negative_cases_require_state_setup": True,
+                        "negative_cases_require_baseline_check": True,
+                    }
+                }
+            },
+            cases=[
+                AuthoringCase(
+                    id="role-baseline-case",
+                    kind="api",
+                    objective="Check partner baseline.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/1/permissions")),
+                    oracle=AuthoringOracle(status_code=200, business_checks=["response JSON exists"]),
+                    metadata={"default_actor": "partner"},
+                ),
+                AuthoringCase(
+                    id="partner-manage-permissions-denied",
+                    kind="api",
+                    objective="Partner cannot manage price-list permissions.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/1/permissions/update")
+                    ),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={
+                        "default_actor": "partner",
+                        "stable_permission_fixture": "partner cannot manage permissions by role matrix.",
+                        "permission_baseline_checked": (
+                            "GET permissions under partner is covered by role-baseline-case and asserts "
+                            "can_manage_permissions false."
+                        ),
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_baseline_check_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_identity_resolution_allow_requires_justification(self) -> None:
         plan = AuthoringPlan(
             version=1,
@@ -2331,6 +2470,106 @@ cases:
                                 "requires_non_empty_result": True,
                             }
                         }
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_strict_search_visibility_data_setup_rejects_contract_without_provenance(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"collection_visibility_requires_data_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="customer-search-masks-cost-price",
+                    kind="api",
+                    objective="Customer search results apply cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/search")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=[
+                            "response JSON exists",
+                            "response contains field `categories.0.positions.0.id`",
+                            "response `categories.0.positions.0.cost_price` = `null`",
+                        ],
+                    ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["categories.0.positions.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        },
+                        "fixture_contract": {
+                            "non_empty_paths": ["categories.0.positions.0.id"],
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_collection_visibility_data_setup_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_strict_indexed_detail_visibility_requires_data_setup_or_provenance(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={"contracts": {"coverage": {"collection_visibility_requires_data_setup": True}}},
+            cases=[
+                AuthoringCase(
+                    id="customer-detail-masks-cost-price",
+                    kind="api",
+                    objective="Customer detail response applies cost_price masking.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="GET", path="/price-lists/{{id}}")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=[
+                            "response JSON exists",
+                            "response contains field `positions_flat.0.id`",
+                            "response `positions_flat.0.cost_price` = `null`",
+                        ],
+                    ),
+                    metadata={
+                        "coverage_claims": {
+                            "visibility": {
+                                "fields": ["cost_price"],
+                                "response_paths": ["positions_flat.0.cost_price"],
+                                "requires_non_empty_result": True,
+                            }
+                        },
+                        "fixture_contract": {
+                            "non_empty_paths": ["positions_flat.0.id"],
+                        },
                     },
                 ),
             ],
@@ -3404,6 +3643,109 @@ cases:
         self.assertEqual(result.status, StepStatus.PASS)
         codes = {diagnostic.code for diagnostic in result.diagnostics}
         self.assertNotIn("authoring_created_entity_persistence_uses_fixture_id", codes)
+
+    def test_compile_blocks_created_entity_capture_overwriting_env_fixture_id(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list create permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                scenario_variables=["price_list_id = env:PRICE_LIST_ID"],
+            ),
+            entities={
+                "price_list": AuthoringEntitySpec(
+                    id_field="price_list_id",
+                    operations={
+                        "verify_created": AuthoringEntityOperation(
+                            sql="SELECT id FROM price_lists WHERE id = :price_list_id",
+                            params={"price_list_id": "{{price_list_id}}"},
+                            expected_outcomes=["one row exists"],
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-create-price-list",
+                    kind="api",
+                    objective="Partner creates a price list.",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/price-lists")),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> price_list_id"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="price_list",
+                            operation="verify_created",
+                        ),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_created_entity_capture_overwrites_fixture_variable"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_compile_blocks_created_entity_capture_overwriting_literal_fixture_guid(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="orders-plan",
+            project="code/demo",
+            title="Orders",
+            goal="Cover order create.",
+            scope=AuthoringScope(surface="orders"),
+            defaults=AuthoringDefaults(
+                environment="env/demo.env",
+                scenario_variables=["order_guid = literal:fixture-order-guid"],
+            ),
+            entities={
+                "order": AuthoringEntitySpec(
+                    id_field="order_guid",
+                    operations={
+                        "verify_created": AuthoringEntityOperation(
+                            sql="SELECT guid FROM orders WHERE guid = :order_guid",
+                            params={"order_guid": "{{order_guid}}"},
+                            expected_outcomes=["one row exists"],
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="create-order",
+                    kind="api",
+                    objective="Create an order.",
+                    state_change="create",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/orders")),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.guid -> order_guid"],
+                        persisted_state=AuthoringPersistedStateRef(entity="order", operation="verify_created"),
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().compile(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_created_entity_capture_overwrites_fixture_variable"
+                for diagnostic in result.diagnostics
+            )
+        )
 
     def test_compile_allows_db_check_persisted_state_placeholders_from_declared_variables(self) -> None:
         plan = AuthoringPlan(

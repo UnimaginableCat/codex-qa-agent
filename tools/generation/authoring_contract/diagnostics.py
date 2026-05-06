@@ -35,6 +35,7 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_persisted_state_id_field_missing",
     "authoring_persisted_state_id_field_semantic_mismatch",
     "authoring_created_entity_persistence_uses_fixture_id",
+    "authoring_created_entity_capture_overwrites_fixture_variable",
     "authoring_case_boundary_contract_mismatch",
     "authoring_db_string_placeholder_requires_quotes",
     "authoring_request_constraint_unsatisfied",

@@ -121,6 +121,8 @@ Stop conditions:
 
 - Authoring validation fails: return to `agent-plan-authoring` and repair the staged bundle.
 - Authoring validation reports `authoring_scope_role_coverage_missing`: return to `agent-plan-authoring` and add a real structured case for the missing role, add a structured coverage claim, or add an explicit role waiver. Do not remove roles from scope or add role words to titles/objectives merely to pass validation.
+- Authoring validation reports `authoring_permission_actor_identity_binding_required`: return to `agent-plan-authoring` and bind the granted subject to the executing actor through current-actor capture, actor-scoped env fixture evidence, or structured `metadata.identity_resolution.actor_binding`. Do not accept first-row management-list captures as proof.
+- Authoring validation reports `authoring_created_entity_capture_overwrites_fixture_variable` or `authoring_created_entity_persistence_uses_fixture_id`: return to `agent-plan-authoring` and keep created ids in `created_*` captures with matching persisted-state checks.
 - Authoring validation emits `authoring_workflow_setup_state_mismatch`: stop and repair authoring unless a same-state lifecycle contract in `operation-inventory.yaml` explicitly proves that the mismatch is the intended behavior.
 - Render has deferred execution-critical cases: repair source authoring before promotion.
 - Review says drafts are not promotable: repair source authoring or selected draft source.

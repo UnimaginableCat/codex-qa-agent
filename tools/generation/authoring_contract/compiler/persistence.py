@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from tools.generation.domain.models import GenerationDiagnostic, PlannedDbVerification
+from tools.scenario_runner.domain.models import ScenarioVariableSource
 
 from ..diagnostics import authoring_diagnostic
 from ..helpers import (
@@ -13,6 +14,7 @@ from ..helpers import (
     _requires_persistence,
 )
 from ..models import AuthoringCase, AuthoringPlan
+from ..case_diagnostics.variables import _scenario_variable_definitions
 
 
 def build_db_verification(
@@ -70,6 +72,14 @@ def build_db_verification(
                 details={"entity": entity_name, "operation": operation_name},
             )
         )
+        return None, diagnostics, set()
+    created_capture_diagnostic = _created_entity_capture_overwrites_fixture_variable_diagnostic(
+        authoring_plan=authoring_plan,
+        case=case,
+        case_ref=case_ref,
+    )
+    if created_capture_diagnostic is not None:
+        diagnostics.append(created_capture_diagnostic)
         return None, diagnostics, set()
     placeholders = set(_extract_placeholders(operation.sql))
     placeholders.update(_extract_placeholders_from_value(operation.params))
@@ -191,3 +201,60 @@ def _created_entity_persistence_uses_fixture_id_diagnostic(
             ),
         },
     )
+
+
+def _created_entity_capture_overwrites_fixture_variable_diagnostic(
+    *,
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+) -> GenerationDiagnostic | None:
+    if str(case.state_change or "").strip().lower() != "create":
+        return None
+    if case.oracle is None:
+        return None
+
+    variable_definitions = _scenario_variable_definitions(authoring_plan, case)
+    overwritten_targets: list[dict[str, str]] = []
+    for target in sorted(_capture_targets(case.oracle.captures)):
+        if target.startswith("created_"):
+            continue
+        if not _looks_like_entity_identifier(target):
+            continue
+        definition = variable_definitions.get(target)
+        if definition is None or definition.source in {ScenarioVariableSource.RUNTIME, ScenarioVariableSource.GENERATED}:
+            continue
+        overwritten_targets.append(
+            {
+                "capture_target": target,
+                "source": str(definition.source.value),
+                "source_name": definition.env_name or definition.source_name or "",
+            }
+        )
+
+    if not overwritten_targets:
+        return None
+
+    return authoring_diagnostic(
+        "authoring_created_entity_capture_overwrites_fixture_variable",
+        (
+            "Create-case captures a newly created entity id into a predeclared fixture/input variable. This can "
+            "overwrite the stable value used by routes or DB verification and hide whether the check validated "
+            "the created entity or the original fixture."
+        ),
+        source_ref=case_ref,
+        details={
+            "captures": overwritten_targets,
+            "suggestion": (
+                "Capture created ids into a distinct created_* variable and model DB verification against that "
+                "captured id, or use a separate created-resource entity with matching key fields."
+            ),
+        },
+    )
+
+
+def _looks_like_entity_identifier(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return False
+    return normalized.endswith("_id") or normalized.endswith("_guid") or normalized.endswith("_uuid")

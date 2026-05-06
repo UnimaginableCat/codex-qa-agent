@@ -125,13 +125,17 @@ def _collection_visibility_data_setup_diagnostics(
     if not has_visibility_assertion:
         return []
     route_path = "" if case.execute is None or case.execute.route is None else case.execute.route.path
-    if not _is_search_or_collection_route(route_path, case):
+    strict = _collection_visibility_data_setup_required(authoring_plan, case, structured_claim)
+    if not _is_search_or_collection_route(route_path, case) and not _strict_claim_uses_indexed_result(
+        structured_claim,
+        checks,
+        strict=strict,
+    ):
         return []
     if _setup_proves_collection_data(authoring_plan, case):
         return []
-    if _has_collection_data_contract(case):
+    if _has_collection_data_contract(case, require_provenance=strict):
         return []
-    strict = _collection_visibility_data_setup_required(authoring_plan, case, structured_claim)
     if strict:
         return [
             authoring_diagnostic(
@@ -201,6 +205,30 @@ def _collection_visibility_data_setup_required(
         return policy_bool(plan_coverage_contract.get("collection_visibility_requires_data_setup"))
     coverage_contract = case_contract_section(case, "coverage")
     return policy_bool(coverage_contract.get("collection_visibility_requires_data_setup"))
+
+
+def _strict_claim_uses_indexed_result(
+    structured_claim: dict[str, Any] | None,
+    checks: list[str],
+    *,
+    strict: bool,
+) -> bool:
+    if not strict:
+        return False
+    indexed_claim_paths: list[str] = []
+    if isinstance(structured_claim, dict):
+        for key in ("response_paths", "paths", "fields"):
+            raw_paths = structured_claim.get(key)
+            if isinstance(raw_paths, str):
+                indexed_claim_paths.append(raw_paths)
+            elif isinstance(raw_paths, list):
+                indexed_claim_paths.extend(str(path) for path in raw_paths)
+    combined = " ".join([*indexed_claim_paths, *checks])
+    return _contains_indexed_path(combined)
+
+
+def _contains_indexed_path(value: str) -> bool:
+    return bool(re.search(r"(?:^|[.`\s\[])(?:[A-Za-z_][A-Za-z0-9_-]*[.\[])+0(?:[.\]`]|$)", value))
 
 
 def _root_visibility_field_assertion_diagnostics(
@@ -292,9 +320,11 @@ def _is_search_or_collection_route(route_path: str, case: AuthoringCase) -> bool
     return any(token in text for token in ("/search", " search ", " search-", "results", "collection"))
 
 
-def _has_collection_data_contract(case: AuthoringCase) -> bool:
-    if _has_structured_collection_data_contract(case.metadata):
+def _has_collection_data_contract(case: AuthoringCase, *, require_provenance: bool = False) -> bool:
+    if _has_structured_collection_data_contract(case.metadata, require_provenance=require_provenance):
         return True
+    if require_provenance:
+        return False
     metadata_text = _flatten_metadata_text(case.metadata).lower()
     open_question_text = " ".join(case.open_questions).lower()
     combined = f"{metadata_text} {open_question_text}"
@@ -314,20 +344,26 @@ def _has_collection_data_contract(case: AuthoringCase) -> bool:
     return False
 
 
-def _has_structured_collection_data_contract(metadata: dict[str, Any]) -> bool:
+def _has_structured_collection_data_contract(
+    metadata: dict[str, Any],
+    *,
+    require_provenance: bool = False,
+) -> bool:
     for key in ("data_contract", "fixture_contract", "response_data_contract", "readiness_contract"):
-        if _contract_proves_non_empty_data(metadata.get(key)):
+        if _contract_proves_non_empty_data(metadata.get(key), require_provenance=require_provenance):
             return True
     coverage_claims = metadata.get("coverage_claims")
     if isinstance(coverage_claims, dict):
         for claim in coverage_claims.values():
-            if _contract_proves_non_empty_data(claim):
+            if _contract_proves_non_empty_data(claim, require_provenance=require_provenance):
                 return True
     return False
 
 
-def _contract_proves_non_empty_data(value: Any) -> bool:
+def _contract_proves_non_empty_data(value: Any, *, require_provenance: bool = False) -> bool:
     if not isinstance(value, dict):
+        return False
+    if require_provenance and not _contract_has_fixture_provenance(value):
         return False
     for key in (
         "non_empty",
@@ -350,6 +386,28 @@ def _contract_proves_non_empty_data(value: Any) -> bool:
         if isinstance(paths, str) and paths.strip():
             return True
         if isinstance(paths, list) and any(str(path).strip() for path in paths):
+            return True
+    return False
+
+
+def _contract_has_fixture_provenance(value: dict[str, Any]) -> bool:
+    for key in (
+        "source",
+        "source_ref",
+        "evidence",
+        "fixture",
+        "fixture_name",
+        "verified_by",
+        "setup",
+        "setup_operation",
+        "discovery_operation",
+        "db_verification",
+        "justification",
+    ):
+        candidate = value.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            return True
+        if isinstance(candidate, (dict, list)) and candidate:
             return True
     return False
 

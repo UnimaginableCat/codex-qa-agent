@@ -266,7 +266,7 @@ def _negative_permission_fixture_baseline_diagnostics(
     *,
     index: int,
 ) -> list[GenerationDiagnostic]:
-    if _has_permission_baseline_contract(case) or _has_permission_baseline_setup(authoring_plan, case):
+    if _has_permission_baseline_contract(authoring_plan, case) or _has_permission_baseline_setup(authoring_plan, case):
         return []
     strict = _negative_permission_baseline_required(authoring_plan, case)
     return [
@@ -366,36 +366,14 @@ def _effective_execute_actor(authoring_plan: AuthoringPlan, case: AuthoringCase)
 
 
 def _has_actor_identity_binding_contract(case: AuthoringCase, actor: str) -> bool:
-    if _has_structured_identity_binding_contract(case.metadata):
+    if _has_structured_identity_binding_contract(case.metadata, actor):
         return True
     metadata_text = _flatten_metadata_text(case.metadata).lower()
     actor = actor.lower()
-    return any(
-        token in metadata_text
-        for token in (
-            "actor_identity_binding",
-            "identity_binding",
-            "subject_identity_binding",
-            "principal_identity_binding",
-            "actor_principal_binding",
-            "actor-bound identity",
-            "actor_bound_identity",
-            f"{actor}_member_guid_matches_actor",
-            f"{actor} member guid matches actor",
-            f"{actor}_user_guid_matches_actor",
-            f"{actor} user guid matches actor",
-            "execute_actor_member_guid",
-            "execute_actor_user_guid",
-            "current_actor.guid",
-            "current_actor.id",
-            "current_user.company_member_guid",
-            "current_user.guid",
-            "current_user.id",
-        )
-    )
+    return _identity_binding_text_is_strong(metadata_text, actor)
 
 
-def _has_structured_identity_binding_contract(metadata: dict[str, Any]) -> bool:
+def _has_structured_identity_binding_contract(metadata: dict[str, Any], actor: str) -> bool:
     for key in (
         "actor_identity_binding",
         "identity_binding",
@@ -404,15 +382,122 @@ def _has_structured_identity_binding_contract(metadata: dict[str, Any]) -> bool:
         "actor_principal_binding",
     ):
         value = metadata.get(key)
-        if value not in (None, False, "", [], {}):
+        if _identity_binding_value_is_strong(value, actor):
             return True
     identity_resolution = metadata.get("identity_resolution")
     if isinstance(identity_resolution, dict):
         for key in ("actor_binding", "subject_binding", "principal_binding", "actor_identity_binding"):
             value = identity_resolution.get(key)
-            if value not in (None, False, "", [], {}):
+            if _identity_binding_value_is_strong(value, actor):
                 return True
     return False
+
+
+def _identity_binding_value_is_strong(value: Any, actor: str) -> bool:
+    if value in (None, False, "", [], {}):
+        return False
+    if isinstance(value, dict):
+        text = _flatten_metadata_text(value).lower()
+        has_actor = _metadata_value_mentions_actor(value, actor)
+        has_subject = any(
+            key in value
+            for key in (
+                "subject",
+                "subject_variable",
+                "principal",
+                "principal_variable",
+                "captured_variable",
+                "member_guid",
+                "user_guid",
+                "company_member_guid",
+            )
+        ) or _mentions_principal_identity(text)
+        has_evidence = any(
+            key in value
+            for key in (
+                "evidence",
+                "source",
+                "source_ref",
+                "verified_by",
+                "setup",
+                "capture_source",
+                "env_var",
+            )
+        ) or _identity_binding_text_is_strong(text, actor)
+        return has_actor and has_subject and has_evidence
+    if isinstance(value, (list, tuple, set)):
+        return any(_identity_binding_value_is_strong(item, actor) for item in value)
+    return _identity_binding_text_is_strong(str(value).lower(), actor)
+
+
+def _metadata_value_mentions_actor(value: dict[str, Any], actor: str) -> bool:
+    actor = actor.strip().lower()
+    if not actor:
+        return False
+    for key in ("actor", "role", "persona", "actor_profile", "execute_actor"):
+        candidate = value.get(key)
+        if candidate is not None and str(candidate).strip().lower() == actor:
+            return True
+    return actor in _flatten_metadata_text(value).lower()
+
+
+def _identity_binding_text_is_strong(text: str, actor: str) -> bool:
+    normalized = str(text or "").lower()
+    actor = actor.lower()
+    if not normalized or not actor:
+        return False
+    weak_list_capture = any(
+        token in normalized
+        for token in (
+            "first ",
+            ".0.",
+            "[0]",
+            "partner_permissions",
+            "management list",
+            "first returned",
+            "first row",
+        )
+    )
+    strong_current_actor_source = any(
+        token in normalized
+        for token in (
+            "current_actor",
+            "current actor",
+            "execute_actor",
+            "execute actor",
+            "actor_under_test",
+            "current_user.company_member_guid",
+            "current_user.guid",
+            "current_user.id",
+        )
+    )
+    actor_owned_env = any(
+        re.search(pattern, normalized)
+        for pattern in (
+            rf"\benv:{re.escape(actor)}_[a-z0-9_]*(?:member|user|principal|actor)_(?:id|guid|uuid)\b",
+            rf"\b[a-z0-9_]+__{re.escape(actor)}\b",
+        )
+    )
+    explicit_binding_token = any(
+        token in normalized
+        for token in (
+            "actor_identity_binding",
+            "subject_identity_binding",
+            "principal_identity_binding",
+            "actor_principal_binding",
+            "actor-scoped env",
+            "actor scoped env",
+        )
+    )
+    if weak_list_capture and not (strong_current_actor_source or actor_owned_env):
+        return False
+    return (strong_current_actor_source or actor_owned_env or explicit_binding_token) and _mentions_principal_identity(
+        normalized
+    )
+
+
+def _mentions_principal_identity(text: str) -> bool:
+    return bool(re.search(_PRINCIPAL_IDENTITY_FIELD_PATTERN, text, flags=re.IGNORECASE))
 
 
 def _operation_requires_actor_identity_binding(
@@ -521,18 +606,43 @@ def _has_permission_fixture_contract(case: AuthoringCase) -> bool:
     )
 
 
-def _has_permission_baseline_contract(case: AuthoringCase) -> bool:
-    metadata_text = " ".join(
-        f"{key} {value}" for key, value in case.metadata.items()
-    ).lower()
+def _has_permission_baseline_contract(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+    for key in (
+        "baseline_checked",
+        "permission_baseline_checked",
+        "effective_permissions_checked",
+        "current_permissions_checked",
+        "preflight_permission_check",
+    ):
+        if key not in case.metadata:
+            continue
+        value_text = _flatten_metadata_text(case.metadata.get(key)).lower()
+        if _baseline_contract_text_is_strong(value_text, case_ids={item.id for item in authoring_plan.cases}):
+            return True
+    return False
+
+
+def _baseline_contract_text_is_strong(text: str, *, case_ids: set[str]) -> bool:
+    normalized = str(text or "").lower()
+    if not normalized:
+        return False
+    if re.search(r"\b(?:covered by|see|from|covered in|checked in|verified in)\s+(?:case|scenario)\b", normalized):
+        return False
+    if any(case_id and case_id.lower() != normalized and case_id.lower() in normalized for case_id in case_ids):
+        return False
     return any(
-        token in metadata_text
+        token in normalized
         for token in (
-            "baseline_checked",
-            "permission_baseline_checked",
-            "effective_permissions_checked",
-            "current_permissions_checked",
-            "preflight_permission_check",
+            "setup verifies",
+            "setup checks",
+            "preflight setup",
+            "this case verifies",
+            "this case checks",
+            "current effective permissions",
+            "effective permissions checked",
+            "override row checked",
+            "baseline read step",
+            "baseline setup",
         )
     )
 
