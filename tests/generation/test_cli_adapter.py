@@ -1153,6 +1153,8 @@ metadata:
         self.assertFalse(validate_payload["handoff"]["scenario_drafts_rendered"])
         self.assertFalse(validate_payload["handoff"]["promoted_scenarios"])
         self.assertIn("--compile-authoring-plan", validate_payload["handoff"]["next_commands"][0]["command"])
+        self.assertIn("--output artifacts/agent/generation", validate_payload["handoff"]["next_commands"][0]["command"])
+        self.assertNotIn("('artifacts', 'agent', 'generation')", validate_payload["handoff"]["next_commands"][0]["command"])
         self.assertIn("--render-drafts", validate_payload["handoff"]["next_commands"][1]["command"])
 
     def test_validate_authoring_bundle_text_output_names_authoring_only_handoff(self) -> None:
@@ -1198,6 +1200,7 @@ metadata:
         self.assertIn("authoring_plan: PASS (1/1 cases compile)", output_text)
         self.assertIn("scenario_drafts_rendered: False", output_text)
         self.assertIn("--render-drafts", output_text)
+        self.assertIn("--output artifacts/agent/generation", output_text)
 
     def test_init_authoring_plan_text_output_includes_stage_policy(self) -> None:
         with TemporaryDirectory() as tmp:
