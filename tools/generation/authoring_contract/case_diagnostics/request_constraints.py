@@ -145,13 +145,7 @@ def _request_body_field_evidence_diagnostics(
     if not body_fields:
         return []
     evidence_values = _request_body_evidence_values(authoring_plan, case)
-    field_evidence = _request_body_evidence_fields(evidence_values)
-    constraints = _request_constraints_for_execute(authoring_plan, case)
-    field_evidence.update(
-        str(item.get("field") or "").split(".", 1)[0].strip().lower()
-        for item in constraints
-        if str(item.get("field") or "").strip()
-    )
+    field_evidence = _request_body_evidence_fields(_schema_backed_evidence_values(evidence_values))
     missing_fields = sorted(field for field in body_fields if field not in field_evidence)
     if not missing_fields:
         return []
@@ -217,6 +211,32 @@ def _request_body_evidence_values(authoring_plan: AuthoringPlan, case: Authoring
         values.append(operation.request_body_evidence)
         values.extend(operation.request_constraints)
     return [value for value in values if _value_has_evidence(value)]
+
+
+def _schema_backed_evidence_values(values: list[Any]) -> list[Any]:
+    schema_backed: list[Any] = []
+    for value in values:
+        schema_backed.extend(_schema_backed_evidence_items(value))
+    return schema_backed
+
+
+def _schema_backed_evidence_items(value: Any) -> list[Any]:
+    if value is None or isinstance(value, str):
+        return []
+    if isinstance(value, dict):
+        if _dict_has_schema_source(value):
+            return [value]
+        schema_backed: list[Any] = []
+        for nested in value.values():
+            if isinstance(nested, (dict, list, tuple, set)):
+                schema_backed.extend(_schema_backed_evidence_items(nested))
+        return schema_backed
+    if isinstance(value, (list, tuple, set)):
+        schema_backed: list[Any] = []
+        for item in value:
+            schema_backed.extend(_schema_backed_evidence_items(item))
+        return schema_backed
+    return []
 
 
 def _case_request_body_evidence_values(case: AuthoringCase) -> list[Any]:
@@ -337,17 +357,17 @@ def _value_is_schema_role(value: Any) -> bool:
         return False
     normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
     return normalized in {
-            "request_schema",
-            "body_schema",
-            "request_body_schema",
-            "request_body",
-            "request_serializer",
-            "input_serializer",
-            "serializer",
-            "schema",
-            "openapi",
-            "request_parser",
-            "parser",
+        "request_schema",
+        "body_schema",
+        "request_body_schema",
+        "request_body",
+        "request_serializer",
+        "input_serializer",
+        "serializer",
+        "schema",
+        "openapi",
+        "request_parser",
+        "parser",
     }
 
 
