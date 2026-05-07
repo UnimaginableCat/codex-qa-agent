@@ -353,6 +353,7 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
                             route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
                             request_body_evidence={
                                 "source_ref": "serializers/price_list_template_serializers.py",
+                                "source_role": "request_schema",
                                 "required": ["templates", "quantity"],
                             },
                         )
@@ -488,7 +489,7 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(diagnostic.details["missing_fields"], ["user"])
         self.assertEqual(diagnostic.details["evidence_fields"], [])
 
-    def test_validate_allows_request_body_evidence_text_that_names_authored_fields(self) -> None:
+    def test_validate_allows_request_body_evidence_schema_source_that_names_authored_fields(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="price-list-plan",
@@ -502,9 +503,11 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
                     operations={
                         "calculate": AuthoringEntityOperation(
                             route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
-                            request_body_evidence=(
-                                "TemplateCalculateSerializer accepts template_id and count for calculation."
-                            ),
+                            request_body_evidence={
+                                "source_ref": "serializers/price_list_template_serializers.py",
+                                "source_role": "request_schema",
+                                "fields": ["template_id", "count"],
+                            },
                         )
                     }
                 )
@@ -534,6 +537,220 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertFalse(
             any(
                 diagnostic.code == "authoring_request_body_field_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_blocks_field_evidence_from_non_schema_source(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover template calculation.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="contractor"),
+            entities={
+                "price_list_template": AuthoringEntitySpec(
+                    operations={
+                        "calculate": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                            request_body_evidence={
+                                "source_ref": "services/template/price_list_template_calculate_service.py",
+                                "fields": ["template_id", "quantity"],
+                                "evidence": "Calculation service consumes template_id and quantity.",
+                            },
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="contractor-template-calculate",
+                    kind="api",
+                    objective="Verify calculate masks totals.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                        body={"template_id": "{{template_id}}", "quantity": 1},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "template_id = literal:123",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_request_body_schema_source_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_allows_field_evidence_with_explicit_request_schema_role(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover template calculation.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="contractor"),
+            entities={
+                "price_list_template": AuthoringEntitySpec(
+                    operations={
+                        "calculate": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                            request_body_evidence={
+                                "source_ref": "services/template/price_list_template_calculate_service.py",
+                                "source_role": "request_schema",
+                                "fields": ["template_id", "quantity"],
+                            },
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="contractor-template-calculate",
+                    kind="api",
+                    objective="Verify calculate masks totals.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                        body={"template_id": "{{template_id}}", "quantity": 1},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "template_id = literal:123",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code == "authoring_request_body_schema_source_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_blocks_fields_from_non_schema_evidence_even_with_separate_schema_marker(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover template calculation.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="contractor"),
+            entities={
+                "price_list_template": AuthoringEntitySpec(
+                    operations={
+                        "calculate": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                            request_body_evidence=[
+                                {
+                                    "source_role": "request_schema",
+                                    "evidence": "Template calculate has a request schema.",
+                                },
+                                {
+                                    "source_ref": "services/template/price_list_template_calculate_service.py",
+                                    "fields": ["template_id", "quantity"],
+                                    "evidence": "Service consumes these fields after parsing.",
+                                },
+                            ],
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="contractor-template-calculate",
+                    kind="api",
+                    objective="Verify calculate masks totals.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                        body={"template_id": "{{template_id}}", "quantity": 1},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "template_id = literal:123",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_request_body_field_evidence_required"
+        )
+        self.assertEqual(diagnostic.details["missing_fields"], ["quantity", "template_id"])
+        self.assertEqual(diagnostic.details["evidence_fields"], [])
+
+    def test_validate_rejects_source_role_that_only_contains_request_schema_substring(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover template calculation.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            defaults=AuthoringDefaults(environment="env/demo.env", auth="basic", actor="contractor"),
+            entities={
+                "price_list_template": AuthoringEntitySpec(
+                    operations={
+                        "calculate": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                            request_body_evidence={
+                                "source_role": "not_request_schema",
+                                "fields": ["template_id", "quantity"],
+                            },
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="contractor-template-calculate",
+                    kind="api",
+                    objective="Verify calculate masks totals.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/price-lists/{{price_list_id}}/templates/calculate"),
+                        body={"template_id": "{{template_id}}", "quantity": 1},
+                    ),
+                    oracle=AuthoringOracle(status_code=200),
+                    scenario_variables=[
+                        "price_list_id = env:PRICE_LIST_ID",
+                        "template_id = literal:123",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_request_body_schema_source_required"
                 for diagnostic in result.diagnostics
             )
         )
@@ -2835,7 +3052,7 @@ cases:
             )
         )
 
-    def test_permission_negative_case_allows_documented_baseline_check(self) -> None:
+    def test_permission_negative_case_blocks_metadata_only_baseline_check_by_default(self) -> None:
         plan = AuthoringPlan(
             version=1,
             source_id="price-list-plan",
@@ -2848,6 +3065,55 @@ cases:
                     "permissions": {
                         "negative_cases_require_state_setup": True,
                         "negative_cases_require_baseline_check": True,
+                    }
+                }
+            },
+            cases=[
+                AuthoringCase(
+                    id="partner-update-price-list-denied-without-edit",
+                    kind="api",
+                    objective="Partner cannot update an existing price list without can_edit override.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="PUT", path="/price-lists/1")),
+                    oracle=AuthoringOracle(status_code=403, business_checks=["response JSON exists"]),
+                    metadata={
+                        "default_actor": "partner",
+                        "stable_permission_fixture": "PRICE_LIST_ID has no partner can_edit override.",
+                        "permission_baseline_checked": {
+                            "verified": True,
+                            "setup_operation": "read_effective_permissions",
+                            "expected_state": {"can_edit": False},
+                            "assertions": ["can_edit = false before execution"],
+                        },
+                    },
+                ),
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_permission_negative_case_baseline_check_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_permission_negative_case_allows_metadata_baseline_only_when_contract_allows_it(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list permissions",
+            goal="Cover price-list permissions.",
+            scope=AuthoringScope(surface="price-list-permissions"),
+            metadata={
+                "contracts": {
+                    "permissions": {
+                        "negative_cases_require_state_setup": True,
+                        "negative_cases_require_baseline_check": True,
+                        "allow_metadata_baseline_contract": True,
                     }
                 }
             },

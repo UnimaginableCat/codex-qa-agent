@@ -76,7 +76,12 @@ def _request_body_evidence_diagnostics(
     if not _request_body_evidence_required(authoring_plan, case):
         return []
     if _case_has_request_body_evidence(authoring_plan, case):
-        return _request_body_field_evidence_diagnostics(authoring_plan, case, case_ref, method)
+        return _request_body_schema_source_diagnostics(
+            authoring_plan,
+            case,
+            case_ref,
+            method,
+        ) + _request_body_field_evidence_diagnostics(authoring_plan, case, case_ref, method)
     return [
         authoring_diagnostic(
             "authoring_request_body_evidence_required",
@@ -99,6 +104,37 @@ def _request_body_evidence_diagnostics(
     ]
 
 
+def _request_body_schema_source_diagnostics(
+    authoring_plan: AuthoringPlan,
+    case: AuthoringCase,
+    case_ref: str,
+    method: str,
+) -> list[GenerationDiagnostic]:
+    evidence_values = _request_body_evidence_values(authoring_plan, case)
+    if any(_evidence_value_has_schema_source(value) for value in evidence_values):
+        return []
+    return [
+        authoring_diagnostic(
+            "authoring_request_body_schema_source_required",
+            (
+                "Case has request body evidence for an action-like request body, but the evidence is not tied "
+                "to a serializer, schema, request parser, or OpenAPI/request-body contract. Field lists from "
+                "service notes or arbitrary metadata can still describe the wrong payload shape."
+            ),
+            source_ref=case_ref,
+            details={
+                "method": method,
+                "path": "" if case.execute is None or case.execute.route is None else case.execute.route.path,
+                "suggestion": (
+                    "Use explicit schema-capable evidence such as `source_role: request_schema` or an inline "
+                    "schema-shaped `schema`/`properties`/`request_body_schema` contract. File paths and service "
+                    "names are not treated as schema proof."
+                ),
+            },
+        )
+    ]
+
+
 def _request_body_field_evidence_diagnostics(
     authoring_plan: AuthoringPlan,
     case: AuthoringCase,
@@ -109,13 +145,7 @@ def _request_body_field_evidence_diagnostics(
     if not body_fields:
         return []
     evidence_values = _request_body_evidence_values(authoring_plan, case)
-    field_evidence = _request_body_evidence_fields(evidence_values)
-    constraints = _request_constraints_for_execute(authoring_plan, case)
-    field_evidence.update(
-        str(item.get("field") or "").split(".", 1)[0].strip().lower()
-        for item in constraints
-        if str(item.get("field") or "").strip()
-    )
+    field_evidence = _request_body_evidence_fields(_schema_backed_evidence_values(evidence_values))
     missing_fields = sorted(field for field in body_fields if field not in field_evidence)
     if not missing_fields:
         return []
@@ -181,6 +211,32 @@ def _request_body_evidence_values(authoring_plan: AuthoringPlan, case: Authoring
         values.append(operation.request_body_evidence)
         values.extend(operation.request_constraints)
     return [value for value in values if _value_has_evidence(value)]
+
+
+def _schema_backed_evidence_values(values: list[Any]) -> list[Any]:
+    schema_backed: list[Any] = []
+    for value in values:
+        schema_backed.extend(_schema_backed_evidence_items(value))
+    return schema_backed
+
+
+def _schema_backed_evidence_items(value: Any) -> list[Any]:
+    if value is None or isinstance(value, str):
+        return []
+    if isinstance(value, dict):
+        if _dict_has_schema_source(value):
+            return [value]
+        schema_backed: list[Any] = []
+        for nested in value.values():
+            if isinstance(nested, (dict, list, tuple, set)):
+                schema_backed.extend(_schema_backed_evidence_items(nested))
+        return schema_backed
+    if isinstance(value, (list, tuple, set)):
+        schema_backed: list[Any] = []
+        for item in value:
+            schema_backed.extend(_schema_backed_evidence_items(item))
+        return schema_backed
+    return []
 
 
 def _case_request_body_evidence_values(case: AuthoringCase) -> list[Any]:
@@ -257,6 +313,62 @@ def _fields_from_evidence_value(value: Any) -> set[str]:
             fields.update(_fields_from_evidence_value(item))
         return fields
     return set()
+
+
+def _evidence_value_has_schema_source(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return False
+    if isinstance(value, dict):
+        if _dict_has_schema_source(value):
+            return True
+        return any(
+            _evidence_value_has_schema_source(nested)
+            for nested in value.values()
+            if isinstance(nested, (dict, list, tuple, set))
+        )
+    if isinstance(value, (list, tuple, set)):
+        return any(_evidence_value_has_schema_source(item) for item in value)
+    return False
+
+
+def _dict_has_schema_source(value: dict[Any, Any]) -> bool:
+    normalized_keys = {str(key).strip().lower() for key in value}
+    if normalized_keys.intersection({"properties", "request_body_schema", "body_schema", "schema"}):
+        return True
+    for key, nested in value.items():
+        normalized_key = str(key).strip().lower()
+        if normalized_key in {
+            "source_role",
+            "role",
+            "source_type",
+            "evidence_role",
+            "kind",
+        } and _value_is_schema_role(nested):
+            return True
+    return False
+
+
+def _value_is_schema_role(value: Any) -> bool:
+    if isinstance(value, (list, tuple, set)):
+        return any(_value_is_schema_role(item) for item in value)
+    if isinstance(value, dict):
+        return False
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized in {
+        "request_schema",
+        "body_schema",
+        "request_body_schema",
+        "request_body",
+        "request_serializer",
+        "input_serializer",
+        "serializer",
+        "schema",
+        "openapi",
+        "request_parser",
+        "parser",
+    }
 
 
 def _field_names_from_declared_value(value: Any) -> set[str]:
