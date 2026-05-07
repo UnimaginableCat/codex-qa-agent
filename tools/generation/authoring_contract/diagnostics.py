@@ -40,6 +40,7 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_db_string_placeholder_requires_quotes",
     "authoring_request_constraint_unsatisfied",
     "authoring_request_body_evidence_required",
+    "authoring_request_body_schema_source_required",
     "authoring_request_body_field_evidence_required",
     "authoring_env_id_equality_type_ambiguous",
     "authoring_stage_inventory_missing",

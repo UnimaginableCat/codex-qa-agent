@@ -68,7 +68,10 @@ def _negative_permission_fixture_baseline_diagnostics(
     *,
     index: int,
 ) -> list[GenerationDiagnostic]:
-    if _has_permission_baseline_contract(authoring_plan, case) or _has_permission_baseline_setup(authoring_plan, case):
+    if _has_permission_baseline_setup(authoring_plan, case):
+        return []
+    metadata_baseline_present = _has_permission_baseline_contract(authoring_plan, case)
+    if metadata_baseline_present and _metadata_permission_baseline_contract_allowed(authoring_plan, case):
         return []
     strict = _negative_permission_baseline_required(authoring_plan, case)
     return [
@@ -87,9 +90,12 @@ def _negative_permission_fixture_baseline_diagnostics(
             source_ref=case_ref,
             details={
                 "case_index": index,
+                "metadata_baseline_present": metadata_baseline_present,
                 "suggestion": (
                     "Add a setup step that reads effective permissions or the override row and asserts the expected "
-                    "false/absent state, or reset/revoke the permission in setup before the negative action."
+                    "false/absent state, or reset/revoke the permission in setup before the negative action. "
+                    "Metadata-only baseline notes are not executable proof for runnable scenarios unless an explicit "
+                    "permissions contract opts into accepting metadata baselines."
                 ),
             },
         )
@@ -110,6 +116,18 @@ def _negative_permission_baseline_required(authoring_plan: AuthoringPlan, case: 
         return policy_bool(plan_contract.get("negative_cases_require_baseline_check"))
     case_contract = case_contract_section(case, "permissions")
     return policy_bool(case_contract.get("negative_cases_require_baseline_check"), default=True)
+
+
+def _metadata_permission_baseline_contract_allowed(authoring_plan: AuthoringPlan, case: AuthoringCase) -> bool:
+    plan_contract = plan_contract_section(authoring_plan, "permissions")
+    if plan_contract.get("allow_metadata_baseline_contract") is not None:
+        return policy_bool(plan_contract.get("allow_metadata_baseline_contract"))
+    if plan_contract.get("metadata_baseline_contract_counts") is not None:
+        return policy_bool(plan_contract.get("metadata_baseline_contract_counts"))
+    case_contract = case_contract_section(case, "permissions")
+    if case_contract.get("allow_metadata_baseline_contract") is not None:
+        return policy_bool(case_contract.get("allow_metadata_baseline_contract"))
+    return policy_bool(case_contract.get("metadata_baseline_contract_counts"), default=False)
 
 
 def _has_permission_fixture_contract(case: AuthoringCase) -> bool:
