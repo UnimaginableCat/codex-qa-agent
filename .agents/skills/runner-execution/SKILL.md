@@ -91,6 +91,9 @@ For scenario directories:
 10. If the run is terminal without a pause-state, report the terminal status and continuation/termination semantics without asking for an operator action.
 11. Resume only when the user selected or explicitly authorized an action.
 12. Use code-analysis/debugging only after the runner result when artifacts show `FAIL`, `BLOCKED`, `ERROR`, contradictions, incomplete evidence, or the user explicitly asks for investigation.
+    For terminal `FAIL`/`ERROR`, do targeted implementation analysis before the final report unless the user explicitly asked for status-only output.
+    If only a small subset failed, inspect each failed run's `report.md`/`summary.json`/`journal.jsonl` and then the narrow implementation path tied to the failing endpoint/assertion.
+    Classify each failure as product behavior, scenario expectation defect, environment/setup issue, or unresolved evidence; do not stop at "likely" without code or artifact evidence.
 13. Return final status, continuation/termination state, key blockers/failures, artifact paths, and interpreter used.
 
 # Guided/Manual Handling

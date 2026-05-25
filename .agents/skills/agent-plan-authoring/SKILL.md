@@ -85,6 +85,7 @@ Default completion point:
 - authoring-level diagnostics were resolved or explicitly reported
 - the final bundle gate must have explicit evidence: stdout must show `Status: PASS` or JSON must contain `status=PASS`
 - if any validation command returns no stdout or an unreadable/truncated payload, do not infer success from command completion; rerun with `--output-format json` or read the persisted result artifact before reporting PASS
+- Never write an update such as "entity inventory passed" or "operation inventory passed" after a command display that shows `(no output)`. That is an unknown gate result, not `PASS`.
 - downstream compile/render/promote work is left to `test-plan-generation`
 - final responses for this skill must explicitly say that the result is an authoring bundle only:
   no runnable scenario drafts were rendered, no scenarios were promoted, and downstream generation

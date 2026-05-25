@@ -531,6 +531,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
             promote_payload = json.loads(promote_stdout.getvalue())
             self.assertEqual(review_code, 0)
             self.assertEqual(review_payload["draft_count"], 1)
+            self.assertTrue(Path(review_payload["review_result_path"]).exists())
             self.assertEqual(promote_code, 0)
             self.assertTrue(Path(promote_payload["target_path"]).exists())
 
@@ -595,6 +596,7 @@ class ScenarioDraftReviewPromotionTests(unittest.TestCase):
                 )
             review_text = review_stdout.getvalue()
             self.assertEqual(review_code, 0)
+            self.assertIn("Review result:", review_text)
             self.assertIn("Checklist:", review_text)
             self.assertIn("Remaining gaps:", review_text)
             self.assertIn("Edit targets:", review_text)

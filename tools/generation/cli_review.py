@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
+from tools.common.io import write_text_file
 from tools.common.json_safe import to_json_safe
 from tools.common.statuses import StepStatus
 from tools.generation.cli_core import GenerationCliInputError
@@ -41,12 +43,14 @@ def run_review(args: argparse.Namespace) -> dict[str, Any]:
         str(args.run_id),
         workspace_root=Path(args.workspace_root),
     )
-    return to_json_safe(
+    review_result_path = Path(review_set.artifact_dir) / "review-result.json"
+    payload = to_json_safe(
         {
             "status": StepStatus.PASS.value,
             "run_id": review_set.run_id,
             "source_id": review_set.source_id,
             "artifact_dir": review_set.artifact_dir,
+            "review_result_path": review_result_path,
             "draft_count": len(review_set.items),
             "valid_draft_count": sum(1 for item in review_set.items if item.parse_status.value == "valid"),
             "invalid_draft_count": sum(1 for item in review_set.items if item.parse_status.value == "invalid"),
@@ -80,6 +84,8 @@ def run_review(args: argparse.Namespace) -> dict[str, Any]:
             "diagnostics": [diagnostic.to_dict() for diagnostic in review_set.diagnostics],
         }
     )
+    write_text_file(review_result_path, json.dumps(payload, ensure_ascii=False, indent=2))
+    return payload
 
 
 
