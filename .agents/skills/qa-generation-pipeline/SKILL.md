@@ -148,7 +148,7 @@ Stop conditions:
   that preserves the stronger check.
 - Runner pauses in guided mode: show `operator_state`, available actions, and `pause_state_path`; wait for the operator choice.
 - Runner API step returns `404` HTML/text while `API_BASE_URL` and actor auth resolved: stop the execution path and repair the source authoring bundle. The likely defect is the authored path after `API_BASE_URL`; require `operation-inventory.yaml` route `runtime_path_evidence` proving the final external path before rerendering and re-promoting.
-- Runner terminal result: report terminal status without simulating manual decisions.
+- Runner terminal result: report terminal status without simulating manual decisions. If terminal status is `FAIL` or `ERROR`, read the failed run artifacts and perform targeted code-analysis/debugging before final classification unless the user explicitly asked for status-only output. Do not classify a mismatch as product behavior or test-plan error from HTTP status alone.
 
 # Environment Rules
 

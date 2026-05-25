@@ -61,21 +61,21 @@ Resolve `<venv-python>` before the first command. Use a workspace-root venv inte
 - Compile authoring DSL:
   `<venv-python> -m tools.generation.cli --compile-authoring-plan --authoring-plan-file <bundle>/authoring-plan.yaml --output artifacts/agent/generation --output-format text`
 - Generate from structured plan:
-  `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root .`
+  `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root . --output-format text`
 - Generate from authoring DSL:
-  `<venv-python> -m tools.generation.cli --authoring-plan-file <bundle>/authoring-plan.yaml --workspace-root .`
+  `<venv-python> -m tools.generation.cli --authoring-plan-file <bundle>/authoring-plan.yaml --workspace-root . --output-format text`
 - Prose fallback:
   `<venv-python> -m tools.generation.cli --source-id <id> --project code/<project> --prose "<text>" --workspace-root .`
 - Render drafts:
-  `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root . --render-drafts`
+  `<venv-python> -m tools.generation.cli --agent-plan-file <bundle>/agent-plan.json --workspace-root . --render-drafts --output-format text`
 - Review drafts:
-  `<venv-python> -m tools.generation.cli --review-drafts --run-id <generation-run-id> --workspace-root .`
+  `<venv-python> -m tools.generation.cli --review-drafts --run-id <generation-run-id> --workspace-root . --output-format json`
 - Promote one:
-  `<venv-python> -m tools.generation.cli --promote-draft --run-id <generation-run-id> --draft-id <draft-id> --workspace-root . --target-dir scenarios/generated`
+  `<venv-python> -m tools.generation.cli --promote-draft --run-id <generation-run-id> --draft-id <draft-id> --workspace-root . --target-dir scenarios/generated --output-format json`
 - Promote all:
-  `<venv-python> -m tools.generation.cli --promote-all-drafts --run-id <generation-run-id> --workspace-root . --target-dir scenarios/generated`
+  `<venv-python> -m tools.generation.cli --promote-all-drafts --run-id <generation-run-id> --workspace-root . --target-dir scenarios/generated --output-format json`
 - Re-promote after rerender:
-  `<venv-python> -m tools.generation.cli --promote-all-drafts --run-id <generation-run-id> --workspace-root . --target-dir scenarios/generated --purge-target-dir`
+  `<venv-python> -m tools.generation.cli --promote-all-drafts --run-id <generation-run-id> --workspace-root . --target-dir scenarios/generated --purge-target-dir --output-format json`
 - Validate promoted directory:
   `<venv-python> -m tools.generation.cli --validate-scenario-dir --path scenarios/generated/<source>-<run_id> --mode compile --output-format text`
 - Validate scenario:
@@ -85,6 +85,9 @@ Every command used as a gate must produce explicit status evidence before the wo
 truncated payload, or output that lacks `Status: ...`/JSON `status` is not a successful gate. Rerun with
 `--output-format json`, inspect the persisted result artifact, or report tooling `ERROR`/`BLOCKED` instead of
 continuing.
+
+For `--review-drafts`, use the returned `review_result_path` when stdout is long or truncated. Do not read
+generation `summary.json` as if it contained the latest review set.
 
 # Default Decisions
 

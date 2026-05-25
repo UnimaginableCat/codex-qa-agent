@@ -190,6 +190,7 @@ def _render_review_text(payload: dict[str, Any]) -> str:
         f"Status: {payload['status']}",
         f"Run ID: {payload['run_id']}",
         f"Source ID: {payload['source_id']}",
+        f"Review result: {payload.get('review_result_path') or ''}",
         f"Drafts: {payload['draft_count']}",
         f"Partial drafts: {payload.get('partial_draft_count', 0)}",
         f"Strongly supported drafts: {payload.get('strongly_supported_draft_count', 0)}",
