@@ -21,7 +21,7 @@ Prefer `scenario_runner` over manual API/DB replay when a valid scenario file or
 
 # Core Commands
 
-Apply the `AGENTS.md` workspace interpreter rule before runner execution. Resolve `<venv-python>` with the public runner CLI probe (`tools.scenario_runner.batch_cli --help` for suites, `tools.scenario_runner.cli --help` for one scenario), verify Python 3.14+, and reuse that exact interpreter.
+Apply the `AGENTS.md` workspace interpreter rule before runner execution. Resolve `<venv-python>` with the public runner CLI probe (`<candidate> -m tools.scenario_runner.batch_cli --help` for suites, `<candidate> -m tools.scenario_runner.cli --help` for one scenario), verify Python 3.14+, and reuse that exact interpreter.
 
 - Auto batch run: `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir <scenario-dir> --mode auto`
 - Guided batch run: `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir <scenario-dir>`
