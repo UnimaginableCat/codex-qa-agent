@@ -718,6 +718,47 @@ db_verifications:
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
         self.assertIn("adapter_operation_inventory_db_verification_one_row_not_case_specific", codes)
 
+    def test_validate_operation_inventory_blocks_parent_scoped_collection_with_aliased_param(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list-template-formulas
+entity_operations: []
+routes: []
+db_verifications:
+  - entity: price_list_template_variable
+    operation: verify_template_variables
+    scoped_by: parent_id
+    sql: >
+      SELECT id, code
+      FROM price_list_pricelisttemplatevariable
+      WHERE template_id = :parent_id
+      ORDER BY sort_order, id
+      LIMIT 1
+    params:
+      parent_id: "{{template_id}}"
+    expected_outcomes:
+      - one row exists
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_db_verification_one_row_not_case_specific", codes)
+
     def test_validate_operation_inventory_allows_specific_child_one_row_verifier(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

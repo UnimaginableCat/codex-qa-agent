@@ -173,13 +173,12 @@ def _collection_one_row_verification_diagnostics(
     if not has_only_parent_scope or has_row_specific_literal_filter:
         return []
 
-    parent_scoped_collection = any(column_name == parent_id_param for column_name in scoped_filters)
     suspicious_collection_shape = " order by " in normalized_sql or _looks_like_child_collection_query(
         normalized_sql,
         entity_name=entity_name,
         operation_name=operation_name,
     )
-    if not parent_scoped_collection or not suspicious_collection_shape:
+    if not suspicious_collection_shape:
         return []
 
     return [
@@ -196,6 +195,7 @@ def _collection_one_row_verification_diagnostics(
                 "entity": entity_name,
                 "operation": operation_name,
                 "scoped_by": item.get("scoped_by"),
+                "scoped_equality_columns": scoped_filters,
                 "expected_outcomes": item.get("expected_outcomes"),
             },
         )
