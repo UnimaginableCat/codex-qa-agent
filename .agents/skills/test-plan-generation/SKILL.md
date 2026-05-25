@@ -81,6 +81,11 @@ Resolve `<venv-python>` before the first command. Use a workspace-root venv inte
 - Validate scenario:
   `<venv-python> -m tools.generation.cli --validate-scenario --path scenarios/generated/<file>.md --output-format text`
 
+Every command used as a gate must produce explicit status evidence before the workflow continues. Empty stdout, a
+truncated payload, or output that lacks `Status: ...`/JSON `status` is not a successful gate. Rerun with
+`--output-format json`, inspect the persisted result artifact, or report tooling `ERROR`/`BLOCKED` instead of
+continuing.
+
 # Default Decisions
 
 - Use compiled input unless the request is too vague or the user explicitly wants prose bootstrap.
@@ -115,6 +120,15 @@ Resolve `<venv-python>` before the first command. Use a workspace-root venv inte
 - For promoted runnable API scenarios, require the source operation inventory to prove runtime path mounting when route origin is framework/app-local. Prefer `metadata.contracts.routes.runtime_path_evidence_required: true` plus route-level `runtime_path_evidence`. Method evidence from a handler/controller/view/action implementation or test proves method; route mapping sources prove mounting; neither evidence type substitutes for the other.
 - Treat `authoring_scope_role_coverage_missing` as a source authoring defect. Repair the source by adding a case that actually runs as the missing role through `metadata.default_actor` or `execute.actor`, by adding a structured `coverage_claims` actor/role claim, or by adding an explicit role waiver. Do not try to satisfy role coverage by editing case titles, objectives, tags, or broad scope prose.
 - Treat `authoring_created_entity_capture_overwrites_fixture_variable` and `authoring_created_entity_persistence_uses_fixture_id` as source authoring defects. Repair create cases with a distinct `created_*` capture and a DB verification scoped to that captured id/guid/uuid instead of reusing any predeclared fixture/input identifier.
+- Treat preflight `BLOCKED` results as environment/readiness blockers by default. Missing env files, missing env-backed
+  variables, auth profile gaps, dependencies, and missing project paths are not permission to shrink coverage, remove
+  assertions, drop request fields, or weaken DB verification. First report the blocker and the exact missing key/path.
+  Change source authoring only after the user explicitly chooses to change scope or after code/schema evidence proves
+  the authored dependency is unnecessary for the intended behavior.
+- When repairing validation blockers, preserve author intent and oracle strength. Do not remove `scoped_by` fields,
+  relationship key fields, persisted-state checks, or captures just to make validation pass. If the current DSL cannot
+  express the stronger check, keep the case blocked/deferred, add the missing capture/setup needed to support it, or
+  report the residual risk explicitly.
 - Use direct `agent_plan` editing only as a low-level escape hatch for debugging or explicit manual control.
 - Do not patch files under `scenarios/generated/` to fix generated scenario defects. Repair the source authoring bundle or compiled plan, rerender, review, and re-promote so the promoted scenario remains reproducible from generation artifacts.
 
@@ -123,6 +137,10 @@ Resolve `<venv-python>` before the first command. Use a workspace-root venv inte
 - `validate-agent-plan` is the minimum gate, not the only gate.
 - `validate-authoring-plan` is a local authoring check, not the final managed-bundle gate.
 - For managed staged bundles, `validate-authoring-bundle` is the required pre-compile and pre-generate gate; do not skip straight from edited inventories/authoring-plan into compile or generation.
+- After any source authoring, inventory, compile, or render change, assume an existing promoted target directory may be
+  stale. Before re-promoting, check whether `scenarios/generated/<source>-<run_id>/` already contains files. If it does,
+  do not predict that overwrite is safe; either stop at the promotion target-exists diagnostic or use
+  `--purge-target-dir` only as an intentional run-scoped regeneration step.
 - If later phases are requested, treat render/review/compile warnings as authoring defects to fix back in the bundle-local `authoring-plan.yaml` or compiled `agent-plan.json`, not as acceptable follow-up manual cleanup.
 - Do not treat drafts with unresolved `data_setup`, `assertion_detail`, `environment`, `auth_strategy`, or `executable_detail` gaps as close to runnable or promotable. Return to the source authoring artifact instead.
 - Do not use `--allow-known-gaps` merely because high-priority edit targets are zero. A user request that lists `promote` as a pipeline stage is not explicit acceptance of known gaps. Promotion with any review gaps requires explicit operator acceptance of the concrete findings and the CLI confirmation flag `--known-gaps-reviewed`; otherwise stop and repair the source artifacts.

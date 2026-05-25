@@ -486,10 +486,14 @@ class ScenarioRevalidationTests(unittest.TestCase):
         self.assertEqual(json_payload["preflight_status"], "failed")
         self.assertEqual(json_payload["readiness_category"], "preflight_blocked")
         self.assertTrue(json_payload["preflight_validation"]["issues"])
+        self.assertIn("validation_notes", json_payload)
+        self.assertTrue(json_payload["validation_notes"])
+        self.assertIn("Preflight blockers are environment/readiness evidence", json_payload["validation_notes"][0])
         self.assertEqual(text_code, 0)
         self.assertIn("Status: preflight_blocked", text_output)
         self.assertIn("Preflight: failed", text_output)
         self.assertIn("Preflight issues:", text_output)
+        self.assertIn("Preflight blockers are environment/readiness evidence", text_output)
 
     def test_cli_preflight_mode_explains_it_includes_environment_resolution(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -634,6 +638,53 @@ class ScenarioRevalidationTests(unittest.TestCase):
         self.assertIn("Status: PASS", text_output)
         self.assertIn("Validation notes:", text_output)
         self.assertIn("Use --mode preflight", text_output)
+
+    def test_cli_validate_scenario_dir_preflight_warns_not_to_weaken_coverage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _prepare_workspace(root, env_file=True, project=True)
+            (root / "requires-env.md").write_text(_external_variable_scenario(), encoding="utf-8")
+
+            with patch("tools.scenario_runner.orchestration.preflight.importlib.util.find_spec", return_value=object()):
+                json_stdout = io.StringIO()
+                with redirect_stdout(json_stdout):
+                    json_code = cli.main(
+                        [
+                            "--validate-scenario-dir",
+                            "--path",
+                            str(root),
+                            "--mode",
+                            "preflight",
+                            "--workspace-root",
+                            str(root),
+                        ]
+                    )
+                json_payload = json.loads(json_stdout.getvalue())
+
+                text_stdout = io.StringIO()
+                with redirect_stdout(text_stdout):
+                    text_code = cli.main(
+                        [
+                            "--validate-scenario-dir",
+                            "--path",
+                            str(root),
+                            "--mode",
+                            "preflight",
+                            "--workspace-root",
+                            str(root),
+                            "--output-format",
+                            "text",
+                        ]
+                    )
+                text_output = text_stdout.getvalue()
+
+        self.assertEqual(json_code, 1)
+        self.assertEqual(json_payload["status"], "ERROR")
+        self.assertTrue(json_payload["validation_notes"])
+        self.assertIn("Preflight blockers are environment/readiness evidence", json_payload["validation_notes"][0])
+        self.assertEqual(text_code, 1)
+        self.assertIn("Validation notes:", text_output)
+        self.assertIn("Do not remove env-backed variables", text_output)
 
 
 def _write_scenario(root: Path, content: str) -> Path:

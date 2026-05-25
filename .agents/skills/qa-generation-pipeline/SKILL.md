@@ -78,6 +78,10 @@ For review and promotion gates, prefer JSON and verify numeric counts before con
 - review: report `drafts_with_edit_targets`, `total_edit_targets`, `drafts_with_high_priority_edit_targets`, and `high_priority_edit_target_count` explicitly; do not summarize review as clean solely because `status=PASS`
 - promotion: require `status=PASS`, `promoted_count = requested_count`, `error_count = 0`, and `blocked_count = 0`
 - promotion: if review finds edit targets or a non-promotable advisory, repair source authoring/drafts before promotion; use `--allow-known-gaps --known-gaps-reviewed` only when the operator explicitly accepts the concrete review findings. A request that includes `promote` in the desired stage list is not consent to promote known gaps.
+- re-promotion: after any source/rerender change, check whether the run-scoped target directory under
+  `scenarios/generated/<source>-<run_id>/` already exists before calling promotion. If files exist, expect the default
+  promotion command to fail rather than overwrite. Use `--purge-target-dir` only for an intentional run-scoped
+  regeneration, and state that it removes the previously promoted files for that generation run before recreating them.
 
 Use guided runner mode by default. Use auto mode only when the user explicitly asks for non-interactive execution.
 
@@ -135,6 +139,13 @@ Stop conditions:
 - Promotion writes zero scenarios: stop and report `FAIL` or `BLOCKED` depending on diagnostics.
 - Promoted scenario validation fails: repair source authoring or promoted scenario only if explicitly asked.
 - Promoted scenario compile validation reports `compile_valid_but_incomplete` only because env-backed inputs are unresolved: run `--validate-scenario-dir --mode preflight` or explicitly state that runner preflight is the next readiness check before batch execution.
+- Promoted scenario preflight reports missing env files, env-backed variables, actor profiles, dependencies, or project
+  paths: classify the result as `BLOCKED` environment/readiness. Do not delete variables, request fields, setup, or
+  assertions to make preflight pass unless the user explicitly chooses to change the authored coverage scope, or direct
+  implementation/schema evidence proves the dependency was not part of the intended behavior.
+- Validation repair would weaken an oracle, DB verification scope, relationship key, capture, or persisted-state check:
+  stop and report the tradeoff instead of silently weakening coverage. Prefer adding the missing capture/setup/evidence
+  that preserves the stronger check.
 - Runner pauses in guided mode: show `operator_state`, available actions, and `pause_state_path`; wait for the operator choice.
 - Runner API step returns `404` HTML/text while `API_BASE_URL` and actor auth resolved: stop the execution path and repair the source authoring bundle. The likely defect is the authored path after `API_BASE_URL`; require `operation-inventory.yaml` route `runtime_path_evidence` proving the final external path before rerendering and re-promoting.
 - Runner terminal result: report terminal status without simulating manual decisions.
