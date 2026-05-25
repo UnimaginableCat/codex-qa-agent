@@ -12,10 +12,16 @@ from typing import Any
 from tools.common.errors import ValidationError
 from tools.common.statuses import StepStatus
 
-from .interpolator import EXACT_PLACEHOLDER_PATTERN, InterpolationError, PlaceholderInterpolator
+from .interpolator import (
+    EXACT_PLACEHOLDER_PATTERN,
+    PLACEHOLDER_PATTERN,
+    InterpolationError,
+    PlaceholderInterpolator,
+)
 from ..domain.models import ExpectationCheckResult, ScenarioStep, ScenarioStepType
 from .path_lookup import PathLookupResult as _PathLookupResult
 from .path_lookup import resolve_path
+from .path_lookup import tokenize_path
 
 _HTTP_EXPECTATION_RE = re.compile(r"^\s*HTTP\s+(\d{3})(?:\s+or\s+HTTP\s+(\d{3}))?\s*$", re.IGNORECASE)
 _RESPONSE_CONTAINS_FIELD_RE = re.compile(r"^\s*response\s+contains\s+field\s+(.+?)\s*$", re.IGNORECASE)
@@ -35,6 +41,7 @@ _DB_IS_NOT_NULL_RE = re.compile(r"^\s*(.+?)\s+is\s+not\s+null\s*$", re.IGNORECAS
 _DB_STARTS_WITH_RE = re.compile(r"^\s*(.+?)\s+starts\s+with\s+(.+?)\s*$", re.IGNORECASE)
 _COMPARISON_OPERATORS = (">=", "<=", "!=", "=", ">", "<")
 _COMPARISON_OPERATOR_CHARS = frozenset("!<=>")
+_FIELD_PATH_SEGMENT_RE = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_-]*|\d+)$")
 _VALIDATION_STATUS_PRIORITY = {
     StepStatus.PASS: 0,
     StepStatus.FAIL: 1,
@@ -165,6 +172,8 @@ class ScenarioStepValidator:
             return self._result(expectation, passed, detail)
 
         if match := _RESPONSE_CONTAINS_FIELD_RE.fullmatch(expectation):
+            if not self._is_supported_response_field_path(match.group(1)):
+                return self._unsupported_result(expectation, "API")
             field_path = self._parse_field_path(match.group(1))
             lookup = self._try_get_path(response_body, field_path)
             return self._result(
@@ -174,6 +183,8 @@ class ScenarioStepValidator:
             )
 
         if match := _RESPONSE_LENGTH_RE.fullmatch(expectation):
+            if not self._is_supported_response_field_path(match.group(1)):
+                return self._unsupported_result(expectation, "API")
             field_path = self._parse_field_path(match.group(1))
             operator = match.group(2)
             expected_length = self._parse_literal(match.group(3))
@@ -210,6 +221,8 @@ class ScenarioStepValidator:
             if comparison_rule is not None:
                 if self._is_ambiguous_root_length_comparison(comparison_rule):
                     return self._unsupported_result(expectation, "API")
+                if not self._is_supported_response_field_path(comparison_rule.left):
+                    return self._unsupported_result(expectation, "API")
                 field_path = self._parse_field_path(comparison_rule.left)
                 raw_rhs = self._raw_api_comparison_rhs(raw_expectation, comparison_rule.operator)
                 expected_value = self._parse_api_expected_value(comparison_rule.right, raw_rhs, variables)
@@ -230,6 +243,8 @@ class ScenarioStepValidator:
                 )
 
         if match := _RESPONSE_NOT_NULL_RE.fullmatch(expectation):
+            if not self._is_supported_response_field_path(match.group(1)):
+                return self._unsupported_result(expectation, "API")
             field_path = self._parse_field_path(match.group(1))
             lookup = self._try_get_path(response_body, field_path)
             return self._result(
@@ -239,6 +254,8 @@ class ScenarioStepValidator:
             )
 
         if match := _RESPONSE_EMPTY_RE.fullmatch(expectation):
+            if not self._is_supported_response_field_path(match.group(1)):
+                return self._unsupported_result(expectation, "API")
             field_path = self._parse_field_path(match.group(1))
             lookup = self._try_get_path(response_body, field_path)
             has_length = hasattr(lookup.value, "__len__") and not isinstance(lookup.value, (bool, int, float))
@@ -253,6 +270,8 @@ class ScenarioStepValidator:
             )
 
         if match := _ARRAY_CONTAINS_RE.fullmatch(expectation):
+            if not self._is_supported_response_field_path(match.group(1)):
+                return self._unsupported_result(expectation, "API")
             field_path = self._parse_field_path(match.group(1))
             expected_value = self._parse_literal(match.group(2))
             if not isinstance(response_body, list):
@@ -355,28 +374,40 @@ class ScenarioStepValidator:
 
     def _inspect_api_expectation_contract(self, expectation: str) -> ExpectationContractDiagnostic:
         normalized_expectation = self._normalize_keyword(expectation)
+        contains_field_match = _RESPONSE_CONTAINS_FIELD_RE.fullmatch(expectation)
+        length_match = _RESPONSE_LENGTH_RE.fullmatch(expectation)
+        not_null_match = _RESPONSE_NOT_NULL_RE.fullmatch(expectation)
+        empty_match = _RESPONSE_EMPTY_RE.fullmatch(expectation)
+        array_contains_match = _ARRAY_CONTAINS_RE.fullmatch(expectation)
+        response_value_match = _RESPONSE_VALUE_RE.fullmatch(expectation)
+        comparison_rule = (
+            self._split_comparison_rule(response_value_match.group(1)) if response_value_match is not None else None
+        )
         supported = any(
             (
                 _HTTP_EXPECTATION_RE.fullmatch(expectation),
                 normalized_expectation == "response json exists",
                 normalized_expectation == "response body exists",
                 normalized_expectation == "response json is an array",
-                _RESPONSE_CONTAINS_FIELD_RE.fullmatch(expectation),
-                _RESPONSE_LENGTH_RE.fullmatch(expectation),
-                _RESPONSE_NOT_NULL_RE.fullmatch(expectation),
-                _ARRAY_CONTAINS_RE.fullmatch(expectation),
-                _RESPONSE_EMPTY_RE.fullmatch(expectation),
+                contains_field_match is not None
+                and self._is_supported_response_field_path(
+                    contains_field_match.group(1), allow_placeholders=True
+                ),
+                length_match is not None
+                and self._is_supported_response_field_path(length_match.group(1), allow_placeholders=True),
+                not_null_match is not None
+                and self._is_supported_response_field_path(not_null_match.group(1), allow_placeholders=True),
+                array_contains_match is not None
+                and self._is_supported_response_field_path(
+                    array_contains_match.group(1), allow_placeholders=True
+                ),
+                empty_match is not None
+                and self._is_supported_response_field_path(empty_match.group(1), allow_placeholders=True),
                 (
-                    (_RESPONSE_VALUE_RE.fullmatch(expectation) is not None)
-                    and (
-                        (
-                            comparison_rule := self._split_comparison_rule(
-                                _RESPONSE_VALUE_RE.fullmatch(expectation).group(1)
-                            )
-                        )
-                        is not None
-                        and not self._is_ambiguous_root_length_comparison(comparison_rule)
-                    )
+                    response_value_match is not None
+                    and comparison_rule is not None
+                    and not self._is_ambiguous_root_length_comparison(comparison_rule)
+                    and self._is_supported_response_field_path(comparison_rule.left, allow_placeholders=True)
                 ),
             )
         )
@@ -597,6 +628,42 @@ class ScenarioStepValidator:
     @classmethod
     def _parse_field_path(cls, raw_field_path: str) -> str:
         return cls._strip_wrapping_quotes(raw_field_path.strip()).strip()
+
+    @classmethod
+    def _is_supported_response_field_path(cls, raw_field_path: str, *, allow_placeholders: bool = False) -> bool:
+        field_path = cls._parse_field_path(raw_field_path)
+        if not field_path or re.search(r"\s", field_path):
+            return False
+        path_segments = tokenize_path(field_path)
+        return bool(path_segments) and all(
+            cls._is_supported_response_path_segment(segment.value, segment.from_brackets, allow_placeholders)
+            for segment in path_segments
+        )
+
+    @classmethod
+    def _is_supported_response_path_segment(
+        cls,
+        raw_segment: str,
+        from_brackets: bool,
+        allow_placeholders: bool,
+    ) -> bool:
+        segment = cls._strip_wrapping_quotes(raw_segment.strip()).strip()
+        if not segment:
+            return False
+        if from_brackets:
+            if segment.isdigit():
+                return True
+            return allow_placeholders and cls._is_placeholder_compatible_path_segment(segment, replacement="0")
+        if _FIELD_PATH_SEGMENT_RE.fullmatch(segment):
+            return True
+        return allow_placeholders and cls._is_placeholder_compatible_path_segment(segment, replacement="placeholder")
+
+    @staticmethod
+    def _is_placeholder_compatible_path_segment(segment: str, *, replacement: str) -> bool:
+        if PLACEHOLDER_PATTERN.search(segment) is None:
+            return False
+        interpolated_shape = PLACEHOLDER_PATTERN.sub(replacement, segment)
+        return bool(_FIELD_PATH_SEGMENT_RE.fullmatch(interpolated_shape))
 
     @classmethod
     def _normalize_db_expectation_rule(cls, expectation: str) -> str:

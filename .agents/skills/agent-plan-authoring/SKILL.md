@@ -335,6 +335,9 @@ Do not write unsupported prose-like checks such as:
 - `response error exists`
 - `response JSON array exists`
 - `response array contains a user with ...`
+- `response contains formula item with \`unit_qty\` = \`4.0000\``
+- `response items include \`qty_calculation_mode\` = \`formula\``
+- `response contains variable with \`code\` = \`thickness_cm\``
 - `response indicates only suspended users can be activated`
 - `response email is null or omitted`
 
@@ -343,7 +346,14 @@ If a desired assertion cannot be expressed in supported DSL, prefer:
 - a simpler supported API assertion plus persisted-state DB verification
 - or split the behavior into a workflow case with stronger DB verification
 
+Do not "fix" unsupported assertion syntax by replacing the behavioral check with `response body exists` or
+`response JSON exists` unless body existence is the actual behavior under test. Preserve the oracle intent with a
+supported JSON path assertion, a DB verification, or an explicit deferred/blocker note.
+
 # CLI Flow
+
+Use the exact generation module entrypoint `-m tools.generation.cli`. Do not probe or document
+`-m tools.generation`; the package itself is not the CLI contract.
 
 - Scaffold authoring DSL bundle:
   `<venv-python> -m tools.generation.cli --init-authoring-plan --output artifacts/agent/generation --source-id <id> --project code/<project> --name "<title>" --goal "<goal>"`
@@ -394,6 +404,7 @@ If validation fails on expectation syntax, rewrite the authoring DSL itself. Do 
 - Do not perform render, review, promote, or scenario validation from this skill unless the user explicitly asks to continue into downstream work.
 - Do not compensate for missing templates, SQL, or capture targets by writing prose placeholders that the compiler must guess.
 - Do not treat a standalone schema `db-check` as part of the default controller-coverage recipe when promoted markdown scenarios are the expected downstream output.
+- Do not use broad regex rewrites such as `perl -pi`, `sed -i`, or whole-file replacements on authoring bundles to make validation pass. Use targeted edits and preserve the stronger request, assertion, capture, and DB verification contracts unless code/schema evidence proves they were wrong.
 
 # References
 
