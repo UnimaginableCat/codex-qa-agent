@@ -12,7 +12,12 @@ from typing import Any
 from tools.common.errors import ValidationError
 from tools.common.statuses import StepStatus
 
-from .interpolator import EXACT_PLACEHOLDER_PATTERN, InterpolationError, PlaceholderInterpolator
+from .interpolator import (
+    EXACT_PLACEHOLDER_PATTERN,
+    PLACEHOLDER_PATTERN,
+    InterpolationError,
+    PlaceholderInterpolator,
+)
 from ..domain.models import ExpectationCheckResult, ScenarioStep, ScenarioStepType
 from .path_lookup import PathLookupResult as _PathLookupResult
 from .path_lookup import resolve_path
@@ -385,17 +390,24 @@ class ScenarioStepValidator:
                 normalized_expectation == "response body exists",
                 normalized_expectation == "response json is an array",
                 contains_field_match is not None
-                and self._is_supported_response_field_path(contains_field_match.group(1)),
-                length_match is not None and self._is_supported_response_field_path(length_match.group(1)),
-                not_null_match is not None and self._is_supported_response_field_path(not_null_match.group(1)),
+                and self._is_supported_response_field_path(
+                    contains_field_match.group(1), allow_placeholders=True
+                ),
+                length_match is not None
+                and self._is_supported_response_field_path(length_match.group(1), allow_placeholders=True),
+                not_null_match is not None
+                and self._is_supported_response_field_path(not_null_match.group(1), allow_placeholders=True),
                 array_contains_match is not None
-                and self._is_supported_response_field_path(array_contains_match.group(1)),
-                empty_match is not None and self._is_supported_response_field_path(empty_match.group(1)),
+                and self._is_supported_response_field_path(
+                    array_contains_match.group(1), allow_placeholders=True
+                ),
+                empty_match is not None
+                and self._is_supported_response_field_path(empty_match.group(1), allow_placeholders=True),
                 (
                     response_value_match is not None
                     and comparison_rule is not None
                     and not self._is_ambiguous_root_length_comparison(comparison_rule)
-                    and self._is_supported_response_field_path(comparison_rule.left)
+                    and self._is_supported_response_field_path(comparison_rule.left, allow_placeholders=True)
                 ),
             )
         )
@@ -618,14 +630,40 @@ class ScenarioStepValidator:
         return cls._strip_wrapping_quotes(raw_field_path.strip()).strip()
 
     @classmethod
-    def _is_supported_response_field_path(cls, raw_field_path: str) -> bool:
+    def _is_supported_response_field_path(cls, raw_field_path: str, *, allow_placeholders: bool = False) -> bool:
         field_path = cls._parse_field_path(raw_field_path)
         if not field_path or re.search(r"\s", field_path):
             return False
         path_segments = tokenize_path(field_path)
         return bool(path_segments) and all(
-            bool(segment.value and _FIELD_PATH_SEGMENT_RE.fullmatch(segment.value)) for segment in path_segments
+            cls._is_supported_response_path_segment(segment.value, segment.from_brackets, allow_placeholders)
+            for segment in path_segments
         )
+
+    @classmethod
+    def _is_supported_response_path_segment(
+        cls,
+        raw_segment: str,
+        from_brackets: bool,
+        allow_placeholders: bool,
+    ) -> bool:
+        segment = cls._strip_wrapping_quotes(raw_segment.strip()).strip()
+        if not segment:
+            return False
+        if from_brackets:
+            if segment.isdigit():
+                return True
+            return allow_placeholders and cls._is_placeholder_compatible_path_segment(segment, replacement="0")
+        if _FIELD_PATH_SEGMENT_RE.fullmatch(segment):
+            return True
+        return allow_placeholders and cls._is_placeholder_compatible_path_segment(segment, replacement="placeholder")
+
+    @staticmethod
+    def _is_placeholder_compatible_path_segment(segment: str, *, replacement: str) -> bool:
+        if PLACEHOLDER_PATTERN.search(segment) is None:
+            return False
+        interpolated_shape = PLACEHOLDER_PATTERN.sub(replacement, segment)
+        return bool(_FIELD_PATH_SEGMENT_RE.fullmatch(interpolated_shape))
 
     @classmethod
     def _normalize_db_expectation_rule(cls, expectation: str) -> str:

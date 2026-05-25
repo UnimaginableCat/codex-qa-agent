@@ -186,6 +186,32 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
 
+    def test_api_expectation_field_path_placeholders_are_interpolated_before_validation(self) -> None:
+        payload = {
+            "response": {
+                "http_status": 200,
+                "body": {
+                    "items": [{"id": 1}, {"id": 2, "name": "second"}],
+                },
+            }
+        }
+
+        results = self.validator.validate(
+            self._api_step(
+                [
+                    "response items[{{idx}}].id = 2",
+                    "response items.{{idx}}.{{field_name}} = `second`",
+                ]
+            ),
+            payload,
+            variables={
+                "idx": 1,
+                "field_name": "name",
+            },
+        )
+
+        self.assertTrue(all(result.status == StepStatus.PASS for result in results), results)
+
     def test_api_scalar_equality_parses_unquoted_rhs_as_typed_literals(self) -> None:
         payload = {
             "response": {
@@ -611,6 +637,30 @@ class ScenarioStepValidatorTests(unittest.TestCase):
 
         self.assertEqual(len(diagnostics), 2)
         self.assertTrue(all(not diagnostic.supported for diagnostic in diagnostics))
+
+    def test_contract_inspection_allows_interpolated_field_paths(self) -> None:
+        diagnostics = self.validator.inspect_contract(
+            self._api_step(
+                [
+                    "response items[{{idx}}].id = 1",
+                    "response items.{{idx}}.{{field_name}} is not null",
+                    "response contains field items[{{idx}}].id",
+                    "response items[{{idx}}] length >= 1",
+                    "array contains item with {{field_name}} = 1",
+                ]
+            )
+        )
+
+        self.assertEqual(len(diagnostics), 5)
+        self.assertTrue(all(diagnostic.supported for diagnostic in diagnostics), diagnostics)
+
+    def test_contract_inspection_still_rejects_prose_with_placeholders(self) -> None:
+        diagnostics = self.validator.inspect_contract(
+            self._api_step(["response items include {{field_name}} = `formula`"])
+        )
+
+        self.assertEqual(len(diagnostics), 1)
+        self.assertFalse(diagnostics[0].supported)
 
     def test_missing_field_path_returns_structured_failure(self) -> None:
         results = self.validator.validate(
