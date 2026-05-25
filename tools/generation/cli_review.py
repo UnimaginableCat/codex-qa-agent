@@ -271,26 +271,50 @@ def _validation_notes_for_result(
                 "Run --mode preflight to verify that the selected environment file resolves all required external variables.",
             ]
     if validation_mode == "preflight" and preflight_validation is not None:
-        if getattr(preflight_validation, "preflight_status", None) == ScenarioPreflightStatus.SUCCESS:
+        preflight_status = getattr(preflight_validation, "preflight_status", None)
+        if preflight_status == ScenarioPreflightStatus.SUCCESS:
             return [
                 "Preflight mode includes environment resolution and dependency checks in addition to compile validation."
             ]
+        if preflight_status == ScenarioPreflightStatus.FAILED:
+            return _preflight_blocked_notes()
     return []
 
 
 
 def _validation_notes_for_directory(validation_mode: str, results: list[Any]) -> list[str]:
-    if validation_mode != "compile":
+    if validation_mode == "preflight":
+        for item in results:
+            preflight_validation = getattr(item, "preflight_validation", None)
+            if (
+                preflight_validation is not None
+                and getattr(preflight_validation, "preflight_status", None) == ScenarioPreflightStatus.FAILED
+            ):
+                return _preflight_blocked_notes()
         return []
-    for item in results:
-        compile_validation = getattr(item, "compile_validation", None)
-        warnings = [] if compile_validation is None else getattr(compile_validation, "warnings", [])
-        if warnings:
-            return [
-                "Compile directory validation is structural only: env-backed external inputs remain unresolved by design.",
-                "Use --mode preflight for environment-aware validation of the promoted scenario directory.",
-            ]
+    if validation_mode == "compile":
+        for item in results:
+            compile_validation = getattr(item, "compile_validation", None)
+            warnings = [] if compile_validation is None else getattr(compile_validation, "warnings", [])
+            if warnings:
+                return [
+                    "Compile directory validation is structural only: env-backed external inputs remain unresolved by design.",
+                    "Use --mode preflight for environment-aware validation of the promoted scenario directory.",
+                ]
     return []
+
+
+def _preflight_blocked_notes() -> list[str]:
+    return [
+        (
+            "Preflight blockers are environment/readiness evidence. Resolve env/config/dependencies first, "
+            "or get explicit operator approval before changing authored coverage scope."
+        ),
+        (
+            "Do not remove env-backed variables, request fields, assertions, or DB verification only to make "
+            "preflight pass unless implementation/schema evidence proves they are unnecessary."
+        ),
+    ]
 
 
 

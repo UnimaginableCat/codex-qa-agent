@@ -248,6 +248,14 @@ Do not manually patch synced route/setup/DB template sections in `authoring-plan
 
 Do not solve a persisted-state `id_field` diagnostic by changing entity identity to whichever variable is available in a case. Fix the DB verification template, `params`, `scoped_by`, captures, or entity `key_fields` instead.
 
+Do not weaken DB verification scope to make validation pass. If a relationship check should prove a specific pair such
+as `(item_id, variable_id)`, keep both scoped fields and add the missing capture/param/setup needed to support it
+instead of reducing the check to "some row exists".
+
+Do not remove env-backed variables, request fields, setup, or assertions merely because the current machine's preflight
+environment lacks a value. Missing env readiness is `BLOCKED`; changing coverage scope requires explicit user intent or
+direct code/schema evidence that the field is unnecessary for the behavior under test.
+
 If `--sync-authoring-plan` produces `route: null`, `sql: ''`, empty `expected_outcomes`, or a capture like `response.json.user_id -> user_id` that was inferred from a bare target, treat the previous inventory stage as incomplete. Return to `operation-inventory.yaml`; do not rewrite the generated authoring plan by hand.
 
 Do not delete coverage cases just to make validation pass. If a case cannot be expressed safely, keep the coverage item as an unresolved blocker/open question in the report, or repair the staged inventory/source evidence until the case is valid.
