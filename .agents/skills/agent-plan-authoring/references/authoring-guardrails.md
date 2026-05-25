@@ -39,7 +39,7 @@ Read this reference only when authoring a broad runnable bundle, fixing authorin
 
 - A reusable DB verification must be true for every case that references it. If two cases use different formulas, do not reuse one verifier with hardcoded row content such as `` `code` starts with `reserve` ``.
 - Formula-link verifications must match the formula-specific non-system variable set. For `base_qty * thickness_cm / 100 * (1 + reserve_percent / 100)`, expect `thickness_cm` and `reserve_percent`; for `base_qty * thickness_cm / 100`, expect only `thickness_cm`. Exclude system variables such as `base_qty`.
-- Do not combine `one row exists` with SQL that can return one row per related variable unless the SQL filters to exactly one expected relation. Use a case-specific verifier, a parameterized expected variable code, or separate checks for each expected variable.
+- Do not combine `one row exists` with SQL that can return one row per related variable or child record unless the SQL filters to exactly one expected relation. `LIMIT 1` does not make a parent-scoped collection query case-specific. Use a case-specific verifier, a parameterized expected child key/code, separate checks for each expected child, or an explicit aggregate/count check.
 - Do not change relationship entity identity to make a generic verifier pass. Keep the relationship's real id or natural key and repair captures, params, and expected outcomes.
 
 ## Permissions And Roles
