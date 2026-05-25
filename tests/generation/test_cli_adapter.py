@@ -634,7 +634,7 @@ db_verifications:
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
 
-    def test_validate_operation_inventory_blocks_generic_formula_link_one_row_verifier(self) -> None:
+    def test_validate_operation_inventory_blocks_generic_formula_link_one_row_verifier_with_limit_one(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             operation_inventory_path = root / "operation-inventory.yaml"
@@ -655,6 +655,7 @@ db_verifications:
       JOIN price_list_pricelisttemplatevariable v ON v.id = l.variable_id
       WHERE l.item_id = :item_id
       ORDER BY v.code
+      LIMIT 1
     params:
       item_id: "{{item_id}}"
     expected_outcomes:

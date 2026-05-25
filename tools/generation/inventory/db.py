@@ -155,7 +155,7 @@ def _formula_link_verification_diagnostics(
             " code=",
         )
     )
-    if filters_specific_variable or " limit 1" in f" {normalized_sql} ":
+    if filters_specific_variable:
         return []
     return [
         _diagnostic(
