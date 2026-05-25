@@ -27,6 +27,7 @@ Final status priority: `ERROR` > `BLOCKED` > `FAIL` > `PASS`.
 - Permission negative/default diagnostics require structured permission claims plus self-contained revoke/reset setup or executable baseline checks.
 - Created-entity capture diagnostics require distinct `created_*` captures and persisted checks scoped to those captures.
 - Workflow setup state mismatches require operation inventory repair unless same-state lifecycle semantics explicitly prove the mismatch is intentional.
+- Formula-link DB diagnostics must match the authored formula. If the formula uses two non-system variables, do not expect one row; if the formula uses only one variable, do not expect a different variable name.
 
 ## Promoted Validation And Preflight
 
@@ -39,4 +40,5 @@ Final status priority: `ERROR` > `BLOCKED` > `FAIL` > `PASS`.
 - Guided pause: show `operator_state`, available actions, and `pause_state_path`; wait for the operator.
 - Terminal `FAIL` or `ERROR`: read failed run artifacts and do targeted implementation/debug analysis before final classification unless the user requested status-only output.
 - API `404` with HTML/text body and resolved auth/base URL usually means wrong authored runtime path; repair operation inventory with mounted path evidence.
+- DB assertion mismatches on reusable relationship verifications often indicate source authoring drift. Compare the actual rows to the request formula or payload before calling it a product failure.
 - Do not classify HTTP status mismatch as product behavior or scenario defect without artifact or code evidence.

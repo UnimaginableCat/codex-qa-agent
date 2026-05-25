@@ -108,6 +108,8 @@ Core rules:
 - Use staged files in order: `entity-inventory.yaml`, `operation-inventory.yaml`, synced `authoring-plan.yaml`, then bundle validation.
 - Keep cases deterministic: supported expectation DSL, explicit captures, explicit setup, and persisted-state checks for mutating cases.
 - Prove route paths, HTTP methods, request bodies, auth profiles, variables, and DB checks with structured evidence rather than prose.
+- Keep entity identity real. Do not change an entity `id_field` to a convenient captured variable just to satisfy persisted-state validation.
+- Keep reusable DB verifications invariant or parameterized. Formula-link checks must match the non-system variables used by that case's `quantity_formula`; never hardcode one expected variable into a generic formula-link verifier.
 - Preserve coverage intent when validation fails. Add missing evidence/setup/captures or defer/report the blocker; do not weaken or delete assertions just to pass a gate.
 - Generated scenarios must be self-contained; do not rely on another scenario having run first.
 
@@ -124,6 +126,7 @@ For broad coverage, use the managed staged bundle flow one gate at a time:
 5. `--validate-authoring-bundle`
 
 Do not edit all staged files in one pass. If a later stage exposes an inventory defect, return to that inventory, validate it, sync again, and revalidate the bundle.
+After changing operation inventory, rerun sync. Do not manually mirror the changed setup operation or DB template into synced `authoring-plan.yaml` sections.
 
 Read `references/staged-authoring.md` for inventory contents, sync semantics, and repair loops.
 

@@ -634,6 +634,48 @@ db_verifications:
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
 
+    def test_validate_operation_inventory_blocks_generic_formula_link_one_row_verifier(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list-template-formulas
+entity_operations: []
+routes: []
+db_verifications:
+  - entity: price_list_template_formula_link
+    operation: verify_formula_links_created
+    scoped_by: item_id
+    sql: >
+      SELECT l.id, v.code
+      FROM price_list_pricelisttemplateitemformulavariable l
+      JOIN price_list_pricelisttemplatevariable v ON v.id = l.variable_id
+      WHERE l.item_id = :item_id
+      ORDER BY v.code
+    params:
+      item_id: "{{item_id}}"
+    expected_outcomes:
+      - one row exists
+      - "`code` starts with `reserve`"
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_formula_link_verification_not_case_specific", codes)
+
     def test_validate_operation_inventory_blocks_invalid_route_request_constraints(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

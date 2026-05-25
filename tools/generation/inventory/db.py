@@ -107,7 +107,73 @@ def _db_verification_executable_diagnostics(
                 },
             )
         )
+    diagnostics.extend(
+        _formula_link_verification_diagnostics(
+            item,
+            path=path,
+            db_verification_index=db_verification_index,
+            entity_name=entity_name,
+            operation_name=operation_name,
+            sql=sql,
+            expected_outcomes=expected_outcomes,
+        )
+    )
     return diagnostics
+
+
+def _formula_link_verification_diagnostics(
+    item: dict[str, Any],
+    *,
+    path: Path,
+    db_verification_index: int,
+    entity_name: str,
+    operation_name: str,
+    sql: str,
+    expected_outcomes: Any,
+) -> list[GenerationDiagnostic]:
+    if not isinstance(expected_outcomes, list):
+        return []
+    normalized_sql = " ".join(sql.lower().split())
+    is_formula_link_check = (
+        "pricelisttemplateitemformulavariable" in normalized_sql
+        or "formula_link" in entity_name.lower()
+        or "formula_link" in operation_name.lower()
+    )
+    if not is_formula_link_check:
+        return []
+    normalized_outcomes = [str(outcome or "").strip().lower() for outcome in expected_outcomes]
+    if "one row exists" not in normalized_outcomes:
+        return []
+    filters_specific_variable = any(
+        token in normalized_sql
+        for token in (
+            "variable_id =",
+            "variable_id=",
+            ".code =",
+            ".code=",
+            " code =",
+            " code=",
+        )
+    )
+    if filters_specific_variable or " limit 1" in f" {normalized_sql} ":
+        return []
+    return [
+        _diagnostic(
+            code="adapter_operation_inventory_formula_link_verification_not_case_specific",
+            message=(
+                "Formula-link DB verification uses 'one row exists' while its SQL can return one row per formula "
+                "variable. Filter by an expected variable or use formula-specific/parameterized checks so the "
+                "expected link set matches the authored quantity_formula."
+            ),
+            path=path,
+            details={
+                "db_verification_index": db_verification_index,
+                "entity": entity_name,
+                "operation": operation_name,
+                "expected_outcomes": item.get("expected_outcomes"),
+            },
+        )
+    ]
 
 
 def _normalized_scoped_by_fields(value: Any) -> list[str]:
