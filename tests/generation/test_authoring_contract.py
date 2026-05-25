@@ -121,6 +121,132 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
         self.assertEqual(workflow_case.workflow_steps[0].auth_strategy, ["bearer"])
         self.assertEqual(workflow_case.workflow_steps[0].metadata["default_actor"], "api-client")
 
+    def test_validate_blocks_collection_response_assertion_without_response_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="templates-plan",
+            project="code/demo",
+            title="Templates API",
+            goal="Cover template reads.",
+            scope=AuthoringScope(surface="templates"),
+            cases=[
+                AuthoringCase(
+                    id="template-detail",
+                    kind="api",
+                    objective="Read template detail.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/templates/1"),
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `template_items` length >= 1"],
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertIn("authoring_response_field_evidence_required", codes)
+
+    def test_validate_blocks_collection_response_assertion_missing_from_response_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="templates-plan",
+            project="code/demo",
+            title="Templates API",
+            goal="Cover template reads.",
+            scope=AuthoringScope(surface="templates"),
+            entities={
+                "template": AuthoringEntitySpec(
+                    operations={
+                        "detail": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="GET", path="/templates/1"),
+                            response_body_evidence={
+                                "source_role": "response_schema",
+                                "fields": ["items", "variables"],
+                            },
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="template-detail",
+                    kind="api",
+                    objective="Read template detail.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/templates/1"),
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=["response JSON exists", "response `template_items` length >= 1"],
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        diagnostic = next(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.code == "authoring_response_field_evidence_required"
+        )
+        self.assertEqual(diagnostic.details["missing_fields"], ["template_items"])
+        self.assertEqual(diagnostic.details["evidence_fields"], ["items", "variables"])
+
+    def test_validate_allows_collection_response_assertion_named_by_response_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="templates-plan",
+            project="code/demo",
+            title="Templates API",
+            goal="Cover template reads.",
+            scope=AuthoringScope(surface="templates"),
+            entities={
+                "template": AuthoringEntitySpec(
+                    operations={
+                        "detail": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="GET", path="/templates/1"),
+                            response_body_evidence={
+                                "source_role": "response_schema",
+                                "fields": ["items", "variables"],
+                            },
+                        )
+                    }
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="template-detail",
+                    kind="api",
+                    objective="Read template detail.",
+                    state_change="read_only",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="GET", path="/templates/1"),
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        business_checks=[
+                            "response JSON exists",
+                            "response `items` length >= 1",
+                            "response `variables` length >= 1",
+                        ],
+                    ),
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+
     def test_compile_propagates_setup_and_execute_step_actors(self) -> None:
         plan = AuthoringPlan(
             version=1,

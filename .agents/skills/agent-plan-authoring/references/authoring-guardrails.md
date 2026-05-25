@@ -7,6 +7,7 @@ Read this reference only when authoring a broad runnable bundle, fixing authorin
 - Route paths must be the final path after `API_BASE_URL`, not app-local framework paths. Use `runtime_path_evidence` from root URLConf, gateway routing, OpenAPI, or a runtime smoke check.
 - Action-like routes such as search, calculate, export, download, report, approve, archive, or duplicate need method-capable evidence from handlers, controllers, services, or tests. URL/router files prove mounting, not HTTP method.
 - Request bodies need field-specific schema evidence for every authored top-level key. Generic phrases such as `uses serializer` are not enough.
+- Response collection assertions need field-specific response schema evidence. If asserting ``response `items` length >= 1``, ``response `variables` length >= 1``, or another collection field, the matching operation/case must name that exact response field from serializer/OpenAPI evidence; do not invent aliases such as `template_items` when the serializer returns `items`.
 - Binary endpoints should assert `response body exists` unless the scenario includes executable content inspection.
 
 - Quote YAML scalar values that contain `:`, `{`, `}`, `#`, or inline evidence such as `path.py: SymbolName`. A parser `BLOCKED` result from unquoted evidence is an authoring error, not a reason to continue.

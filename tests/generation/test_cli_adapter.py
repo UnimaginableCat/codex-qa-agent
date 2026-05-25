@@ -1946,6 +1946,7 @@ routes:
     path: /users
     success_status: 201
     failure_statuses: [400]
+    normalized_response_fields: [id, email]
 db_verifications:
   - entity: user
     operation: verify_exists
@@ -1980,6 +1981,7 @@ db_verifications:
         self.assertEqual(create_operation["route"]["path"], "/users")
         self.assertEqual(create_operation["oracle"]["status_code"], 201)
         self.assertEqual(create_operation["request_constraints"], [{"field": "email", "format": "lowercase"}])
+        self.assertEqual(create_operation["response_body_evidence"], {"source_role": "response_schema", "fields": ["id", "email"]})
         self.assertEqual(create_operation["captures"], ["response.json.id -> user_id"])
         verify_operation = synced_user["operations"]["verify_exists"]
         self.assertEqual(verify_operation["sql"], "SELECT id FROM users WHERE id = :user_id")
