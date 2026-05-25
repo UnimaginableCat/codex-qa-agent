@@ -584,6 +584,34 @@ class ScenarioStepValidatorTests(unittest.TestCase):
         self.assertTrue(all("Unsupported expectation rule" in result.detail for result in results), results)
         self.assertTrue(all("Missing path segment" not in result.detail for result in results), results)
 
+    def test_prose_response_comparisons_are_blocked_before_runtime(self) -> None:
+        expectations = [
+            "response contains formula item with `unit_qty` = `4.0000`",
+            "response items include `qty_calculation_mode` = `formula`",
+            "response contains variable with `code` = `thickness_cm`",
+        ]
+
+        results = self.validator.validate(
+            self._api_step(expectations),
+            {"response": {"body": {"items": [{"qty_calculation_mode": "formula"}]}}},
+        )
+
+        self.assertTrue(all(result.status == StepStatus.BLOCKED for result in results), results)
+        self.assertTrue(all("Unsupported expectation rule" in result.detail for result in results), results)
+
+    def test_contract_inspection_rejects_prose_response_comparisons(self) -> None:
+        diagnostics = self.validator.inspect_contract(
+            self._api_step(
+                [
+                    "response contains formula item with `unit_qty` = `4.0000`",
+                    "response items include `qty_calculation_mode` = `formula`",
+                ]
+            )
+        )
+
+        self.assertEqual(len(diagnostics), 2)
+        self.assertTrue(all(not diagnostic.supported for diagnostic in diagnostics))
+
     def test_missing_field_path_returns_structured_failure(self) -> None:
         results = self.validator.validate(
             self._api_step(["response missing.id = 123"]),
