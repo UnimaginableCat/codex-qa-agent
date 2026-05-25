@@ -107,52 +107,21 @@ Do not edit generated reports, summaries, manifests, raw runner artifacts, or pr
 
 # Failure Policy
 
-Use the shared status model:
+Use the shared status model from `AGENTS.md`: `PASS`, `FAIL`, `BLOCKED`, `ERROR`, with priority `ERROR > BLOCKED > FAIL > PASS`.
 
-- `PASS`: stage executed and matched expectations.
-- `FAIL`: stage executed, but expectations were not met.
-- `BLOCKED`: missing config, env, auth, access, dependency, venv, or setup.
-- `ERROR`: CLI/runtime/parser/unexpected technical failure.
+Core stop rules:
 
-Final status priority:
+- Failed authoring, compile, render, review, promotion, or scenario validation gates stop the pipeline unless the user explicitly asks for diagnostic-only continuation.
+- Repair source generation artifacts instead of editing promoted markdown or generated reports.
+- Preflight/readiness blockers are environment/setup blockers, not product failures and not permission to weaken coverage.
+- Guided runner pauses require showing the real `operator_state` and waiting for an action.
+- Terminal runner `FAIL` or `ERROR` requires reading failed artifacts and targeted implementation/debug analysis unless the user requested status-only output.
 
-1. `ERROR`
-2. `BLOCKED`
-3. `FAIL`
-4. `PASS`
-
-Stop conditions:
-
-- Authoring validation fails: return to `agent-plan-authoring` and repair the staged bundle.
-- Authoring validation reports `authoring_scope_role_coverage_missing`: return to `agent-plan-authoring` and add a real structured case for the missing role, add a structured coverage claim, or add an explicit role waiver. Do not remove roles from scope or add role words to titles/objectives merely to pass validation.
-- Authoring validation reports `authoring_permission_actor_identity_binding_required`: return to `agent-plan-authoring` and bind the granted subject to the executing actor through current-actor capture, actor-scoped env fixture evidence, or structured `metadata.identity_resolution.actor_binding`. Do not accept first-row management-list captures as proof, and do not overwrite an actor-scoped subject variable with a first-row/list capture before the grant or revoke step.
-- Authoring validation reports `authoring_request_body_field_evidence_required` or `authoring_request_body_schema_source_required`: return to `agent-plan-authoring` and replace generic serializer/schema prose with field-specific, schema-backed `request_body_evidence.required`, `fields`, `properties`, or `request_constraints` matching every authored top-level body key. Do not satisfy this with `source_ref` paths, service-layer notes, unrelated metadata strings that happen to contain a field name, or a separate generic schema marker next to non-schema field lists; put explicit `source_role: request_schema` or an inline schema-shaped contract such as `schema`, `properties`, or `request_body_schema` on the same evidence item that names the fields.
-- Authoring validation reports `authoring_permission_negative_case_state_setup_required` or `authoring_permission_negative_case_baseline_check_required`: return to `agent-plan-authoring` and express the denial/default as structured `metadata.coverage_claims.permissions` mapping or list, then add self-contained revoke/reset setup or an executable baseline setup step. Do not satisfy this with prose, metadata-only `stable_permission_fixture` / `permission_baseline_checked`, another scenario reference, actor metadata, or a bare expected `403`.
-- Authoring validation reports `authoring_created_entity_capture_overwrites_fixture_variable` or `authoring_created_entity_persistence_uses_fixture_id`: return to `agent-plan-authoring` and keep created ids in `created_*` captures with matching persisted-state checks.
-- Authoring validation emits `authoring_workflow_setup_state_mismatch`: stop and repair authoring unless a same-state lifecycle contract in `operation-inventory.yaml` explicitly proves that the mismatch is the intended behavior.
-- Render has deferred execution-critical cases: repair source authoring before promotion.
-- Review says drafts are not promotable: repair source authoring or selected draft source.
-- Review reports `data_setup_unresolved` for indexed response paths: repair source authoring with an assertion/setup/fixture contract for the exact collection path. Do not treat unrelated earlier workflow steps, auth checks, or generic reads as proof of non-empty response data.
-- Review reports stateful preconditions such as "before this case runs": repair authoring so the setup is self-contained, uses a dedicated fixture, or remains deferred.
-- Review or compile reports unsupported step fields: repair source authoring or rendering support; do not patch runner semantics during scenario execution. Step-level `Actor:` is supported and should be preserved for multi-actor workflows.
-- Promotion detects placeholder or mismatched `context.json` metadata: rerun/fix the managed generation step; do not edit `context.json` or `manifest.json` by hand.
-- Promotion writes zero scenarios: stop and report `FAIL` or `BLOCKED` depending on diagnostics.
-- Promoted scenario validation fails: repair source authoring or promoted scenario only if explicitly asked.
-- Promoted scenario compile validation reports `compile_valid_but_incomplete` only because env-backed inputs are unresolved: run `--validate-scenario-dir --mode preflight` or explicitly state that runner preflight is the next readiness check before batch execution.
-- Promoted scenario preflight reports missing env files, env-backed variables, actor profiles, dependencies, or project
-  paths: classify the result as `BLOCKED` environment/readiness. Do not delete variables, request fields, setup, or
-  assertions to make preflight pass unless the user explicitly chooses to change the authored coverage scope, or direct
-  implementation/schema evidence proves the dependency was not part of the intended behavior.
-- Validation repair would weaken an oracle, DB verification scope, relationship key, capture, or persisted-state check:
-  stop and report the tradeoff instead of silently weakening coverage. Prefer adding the missing capture/setup/evidence
-  that preserves the stronger check.
-- Runner pauses in guided mode: show `operator_state`, available actions, and `pause_state_path`; wait for the operator choice.
-- Runner API step returns `404` HTML/text while `API_BASE_URL` and actor auth resolved: stop the execution path and repair the source authoring bundle. The likely defect is the authored path after `API_BASE_URL`; require `operation-inventory.yaml` route `runtime_path_evidence` proving the final external path before rerendering and re-promoting.
-- Runner terminal result: report terminal status without simulating manual decisions. If terminal status is `FAIL` or `ERROR`, read the failed run artifacts and perform targeted code-analysis/debugging before final classification unless the user explicitly asked for status-only output. Do not classify a mismatch as product behavior or test-plan error from HTTP status alone.
+Read `references/failure-policy.md` when a gate fails or when deciding whether to repair authoring, classify readiness, or investigate product behavior.
 
 # Environment Rules
 
-Use the workspace-root venv interpreter for CLI stages. Resolve it once with the public CLI needed by the current stage, such as `<candidate> -m tools.generation.cli --help`, `<candidate> -m tools.scenario_runner.batch_cli --help`, or `<candidate> -m tools.scenario_runner.cli --help`. Store the first passing candidate and reuse that exact interpreter across the pipeline instead of hard-coding a later candidate. Do not use internal helper modules as readiness probes; `(no output)` from a probe is unknown readiness, not PASS and not proof that the root venv is absent. For runner execution, follow `runner-execution` strictly: the workspace venv must exist, satisfy Python 3.14+, and have required dependencies. Do not use target project venvs under `code/<project>` for workspace tooling, and do not silently fall back to system `python`, `python3`, `py`, or `uv run` for scenario execution. A root venv may have a symlinked executable that resolves outside the workspace; do not downgrade readiness from that path alone if the workspace CLI guard accepts the active venv prefix.
+Apply the `AGENTS.md` workspace interpreter rule for every stage. Resolve `<venv-python>` once with the public CLI needed by the current stage, reuse that interpreter across the pipeline, and rely on `runner-execution` for runner-specific readiness.
 
 For generation-only stages, if the workspace-root venv is missing or cannot run the generation CLI, report tooling readiness as `BLOCKED` instead of inventing output.
 
@@ -176,4 +145,5 @@ When execution was not requested, explicitly state where the pipeline stopped an
 
 # References
 
-Read `references/pipeline-commands.md` when exact command sequencing or artifact mapping is needed.
+- `references/pipeline-commands.md`: exact command sequencing and artifact map.
+- `references/failure-policy.md`: detailed stop/repair/classification rules.
