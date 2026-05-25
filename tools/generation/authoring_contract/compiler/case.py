@@ -14,6 +14,7 @@ from ..case_diagnostics.lifecycle import (
 from ..case_diagnostics.permission import _permission_state_contract_diagnostics
 from ..case_diagnostics.readiness import _readiness_metadata_diagnostics
 from ..case_diagnostics.request_constraints import _request_constraint_diagnostics
+from ..case_diagnostics.response_fields import _response_field_contract_diagnostics
 from ..case_diagnostics.variables import _env_backed_id_equality_diagnostics
 from ..case_diagnostics.visibility import _visibility_claim_diagnostics
 from ..diagnostics import authoring_diagnostic, derive_authoring_status
@@ -101,6 +102,7 @@ def compile_case(
             setup_steps=setup_steps,
         )
     )
+    diagnostics.extend(_response_field_contract_diagnostics(authoring_plan, case, case_ref))
     diagnostics.extend(
         _db_string_placeholder_quoting_diagnostics(
             authoring_plan=authoring_plan,

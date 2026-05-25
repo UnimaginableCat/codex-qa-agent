@@ -136,6 +136,11 @@ def _sync_route_operation_from_inventory(
         request_headers=dict(operation_item.get("request_headers") or operation_item.get("headers") or existing_operation.request_headers),
         request_params=dict(operation_item.get("request_params") or operation_item.get("params") or existing_operation.request_params),
         request_body=operation_item.get("request_body", existing_operation.request_body),
+        response_body_evidence=_response_body_evidence_from_inventory(
+            operation_item=operation_item,
+            route_spec=route_spec,
+            fallback=existing_operation.response_body_evidence,
+        ),
         request_constraints=_dict_list_from_payload(
             operation_item.get("request_constraints"),
             fallback=existing_operation.request_constraints,
@@ -165,6 +170,7 @@ def _sync_db_operation_from_inventory(
         request_headers=dict(existing_operation.request_headers),
         request_params=dict(existing_operation.request_params),
         request_body=existing_operation.request_body,
+        response_body_evidence=existing_operation.response_body_evidence,
         request_constraints=list(existing_operation.request_constraints),
         auth_strategy=list(existing_operation.auth_strategy),
         oracle=existing_operation.oracle,
@@ -226,6 +232,37 @@ def _capture_rules_from_inventory(value: Any, *, fallback: list[str]) -> list[st
             rules.append(f"response.json.{normalized} -> {normalized}")
     return rules
 
+
+
+def _response_body_evidence_from_inventory(
+    *,
+    operation_item: dict[str, Any],
+    route_spec: dict[str, Any] | None,
+    fallback: Any,
+) -> Any:
+    for source in (operation_item, route_spec or {}):
+        for key in (
+            "response_body_evidence",
+            "response_body_schema",
+            "response_schema",
+            "response_evidence",
+            "response_serializer_evidence",
+        ):
+            value = source.get(key)
+            if _value_has_evidence(value):
+                return value
+        normalized_fields = _string_list_from_payload(source.get("normalized_response_fields"), fallback=[])
+        if normalized_fields:
+            return {"source_role": "response_schema", "fields": normalized_fields}
+    return fallback
+
+
+def _value_has_evidence(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (dict, list)):
+        return bool(value)
+    return False
 
 
 def _string_list_from_payload(value: Any, *, fallback: list[str]) -> list[str]:

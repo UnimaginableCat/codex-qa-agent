@@ -123,6 +123,7 @@ Each case should contain:
 - For successful mutating workflows, include persisted-state verification.
 - Use `observable_outcomes[]` for human-readable behavior and `expected_outcomes[]` for runner-compatible assertions.
 - For DB steps, use `one row exists` only when the SQL is row-specific. A parent-scoped collection query such as `WHERE template_id = :template_id` must either filter the exact child row (`code = ...`, child id, etc.), split expected children into separate verifiers, or use an explicit aggregate/count check.
+- For response collection assertions, require response-schema evidence naming the exact field. If a serializer returns `items`, do not author or preserve ``response `template_items` length >= 1``; fix the source assertion/evidence before render or promotion.
 - Treat `agent-plan.json` as execution-ready source material. Do not rely on later render/review phases to hand-fix core DSL or workflow-shape issues.
 - For normalized outputs, separate raw input variables from expected output variables. Example: keep a mixed-case email input variable and a lower-cased expected email variable instead of asserting normalized output against the raw input placeholder.
 - Do not use raw placeholders in expectations when the API is expected to trim, lowercase, derive, or otherwise transform the submitted value.

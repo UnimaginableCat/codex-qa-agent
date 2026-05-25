@@ -42,6 +42,8 @@ AUTHORING_BLOCKING_CODES = {
     "authoring_request_body_evidence_required",
     "authoring_request_body_schema_source_required",
     "authoring_request_body_field_evidence_required",
+    "authoring_response_field_evidence_required",
+    "authoring_response_field_schema_source_required",
     "authoring_env_id_equality_type_ambiguous",
     "authoring_stage_inventory_missing",
     "authoring_stage_inventory_invalid",
