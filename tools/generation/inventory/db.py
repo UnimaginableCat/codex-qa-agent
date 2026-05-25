@@ -165,7 +165,7 @@ def _collection_one_row_verification_diagnostics(
     ]
     if not scoped_filters:
         return []
-    if any(column_name == "id" for column_name in scoped_filters):
+    if any(column_name == "id" for column_name in scoped_filters) and not _has_joined_query_shape(normalized_sql):
         return []
 
     has_only_parent_scope = all(parameter_name == parent_id_param for _, parameter_name in equality_filters)
@@ -226,6 +226,13 @@ def _has_row_specific_literal_filter(normalized_sql: str) -> bool:
             normalized_sql,
         )
     )
+
+
+def _has_joined_query_shape(normalized_sql: str) -> bool:
+    if " join " in normalized_sql:
+        return True
+    from_match = re.search(r"\bfrom\s+(?P<from_clause>.+?)\s+where\b", normalized_sql)
+    return bool(from_match and "," in from_match.group("from_clause"))
 
 
 def _looks_like_child_collection_query(
