@@ -24,6 +24,8 @@ Read this reference when compile, render, review, promotion, scenario validation
 - Prose expectations such as `contains ... with`, `items include`, or `contains variable/item with` are source defects. Rewrite as supported JSON paths, array membership support, or DB verification.
 - Indexed assertions need matching non-empty collection proof for every indexed level.
 - Created entity captures must not overwrite fixture variables. Use `created_*` captures and DB checks scoped to the captured id.
+- Formula-link DB failures where actual rows match the formula but the scenario expected a hardcoded variable or row count are source authoring defects. Repair the source bundle with formula-specific or parameterized link verifications, then rerender, review, and re-promote.
+- Do not hot-fix synced setup operations or DB templates directly in promoted markdown or synced `authoring-plan.yaml` sections. Repair the staged inventory, rerun sync if applicable, and regenerate downstream artifacts.
 
 ## Environment And Fixtures
 

@@ -17,6 +17,7 @@ Each gate needs explicit `Status: PASS` or JSON `status=PASS`. Empty stdout is u
 Record entities, id fields, key fields, normalized fields, states, allowed transitions, and shared auth/header contracts.
 
 Keep real entity identities. If an entity is naturally keyed, keep the real `id_field` and model the natural identity with `key_fields`; do not replace `id_field` with a convenient fixture variable.
+Validation pressure is not evidence. Do not change `id_field` from a real relationship id to a case-local capture such as `item_id` only because persisted-state validation asks for a scoped id.
 
 ## Operation Inventory
 
@@ -31,6 +32,7 @@ Important fields:
 - DB verification `sql`, `params`, `scoped_by`, `expected_outcomes`, and `column_types`
 
 If a later case needs a DB check, define the reusable verification here instead of improvising in the case.
+Reusable DB checks must stay invariant. If two formulas use different variable sets, define separate or parameterized DB verifications instead of hardcoding one expected variable in a generic verifier.
 
 ## Sync And Case Authoring
 
@@ -39,6 +41,7 @@ After inventories validate, sync the authoring plan. The sync step hydrates scop
 If sync output has `route: null`, empty SQL, empty expected outcomes, or inferred capture placeholders, the previous inventory is incomplete. Fix the inventory and sync again.
 
 Do not manually patch synced route/setup/DB template sections in `authoring-plan.yaml`. Fix the source inventory first, then rerun sync.
+After adding, removing, or renaming an operation in `operation-inventory.yaml`, do not mirror it by hand into `authoring-plan.yaml`. Validate the inventory, rerun `--sync-authoring-plan`, and then edit only authored cases.
 
 ## Repair Loop
 
