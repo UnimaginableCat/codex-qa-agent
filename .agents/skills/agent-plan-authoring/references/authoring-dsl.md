@@ -256,6 +256,8 @@ Supported DB checks include:
 - `` `created_at` is not null ``
 - `` `email` starts with `autotest.` ``
 
+Use `one row exists` only for row-specific SQL. If the query is scoped only by a parent id and can return multiple child rows, for example template variables by `template_id`, filter the expected child row or use a count/aggregate assertion instead.
+
 Avoid unsupported prose-like checks such as:
 
 - `response error exists`

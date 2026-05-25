@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -118,7 +119,134 @@ def _db_verification_executable_diagnostics(
             expected_outcomes=expected_outcomes,
         )
     )
+    diagnostics.extend(
+        _collection_one_row_verification_diagnostics(
+            item,
+            path=path,
+            db_verification_index=db_verification_index,
+            entity_name=entity_name,
+            operation_name=operation_name,
+            scoped_by=scoped_by,
+            sql=sql,
+            expected_outcomes=expected_outcomes,
+        )
+    )
     return diagnostics
+
+
+def _collection_one_row_verification_diagnostics(
+    item: dict[str, Any],
+    *,
+    path: Path,
+    db_verification_index: int,
+    entity_name: str,
+    operation_name: str,
+    scoped_by: list[str],
+    sql: str,
+    expected_outcomes: Any,
+) -> list[GenerationDiagnostic]:
+    if not isinstance(expected_outcomes, list):
+        return []
+    normalized_outcomes = [str(outcome or "").strip().lower() for outcome in expected_outcomes]
+    if "one row exists" not in normalized_outcomes:
+        return []
+    normalized_sql = " ".join(sql.lower().split())
+    if not normalized_sql.startswith("select ") or re.search(r"\bcount\s*\(", normalized_sql):
+        return []
+    if len(scoped_by) != 1:
+        return []
+
+    parent_id_param = scoped_by[0]
+    equality_filters = _sql_equality_filters(normalized_sql)
+    scoped_filters = [
+        column_name
+        for column_name, parameter_name in equality_filters
+        if parameter_name == parent_id_param
+    ]
+    if not scoped_filters:
+        return []
+    if any(column_name == "id" for column_name in scoped_filters):
+        return []
+
+    has_only_parent_scope = all(parameter_name == parent_id_param for _, parameter_name in equality_filters)
+    has_row_specific_literal_filter = _has_row_specific_literal_filter(normalized_sql)
+    if not has_only_parent_scope or has_row_specific_literal_filter:
+        return []
+
+    parent_scoped_collection = any(column_name == parent_id_param for column_name in scoped_filters)
+    suspicious_collection_shape = " order by " in normalized_sql or _looks_like_child_collection_query(
+        normalized_sql,
+        entity_name=entity_name,
+        operation_name=operation_name,
+    )
+    if not parent_scoped_collection or not suspicious_collection_shape:
+        return []
+
+    return [
+        _diagnostic(
+            code="adapter_operation_inventory_db_verification_one_row_not_case_specific",
+            message=(
+                "DB verification uses 'one row exists' with a parent-scoped collection query. "
+                "Filter to the specific child row being asserted, split expected child rows into separate "
+                "verifications, or use an explicit aggregate/count check. LIMIT 1 does not prove the expected row."
+            ),
+            path=path,
+            details={
+                "db_verification_index": db_verification_index,
+                "entity": entity_name,
+                "operation": operation_name,
+                "scoped_by": item.get("scoped_by"),
+                "expected_outcomes": item.get("expected_outcomes"),
+            },
+        )
+    ]
+
+
+_SQL_EQUALITY_FILTER_RE = re.compile(r"(?:^|[\s(])(?P<left>[\w.\"\[\]]+)\s*=\s*:(?P<param>[a-zA-Z_]\w*)")
+
+
+def _sql_equality_filters(normalized_sql: str) -> list[tuple[str, str]]:
+    return [
+        (_sql_column_name(match.group("left")), match.group("param"))
+        for match in _SQL_EQUALITY_FILTER_RE.finditer(normalized_sql)
+    ]
+
+
+def _sql_column_name(value: str) -> str:
+    normalized = value.strip().strip('"[]')
+    if "." in normalized:
+        normalized = normalized.rsplit(".", 1)[-1]
+    return normalized.strip().strip('"[]')
+
+
+def _has_row_specific_literal_filter(normalized_sql: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:^|[\s(])(?:[\w.\"\[\]]+\.)?(?:code|name|type|kind|key|external_id)\s*=\s*('[^']+'|\"[^\"]+\"|\d+)",
+            normalized_sql,
+        )
+    )
+
+
+def _looks_like_child_collection_query(
+    normalized_sql: str,
+    *,
+    entity_name: str,
+    operation_name: str,
+) -> bool:
+    collection_tokens = (
+        "variable",
+        "formula",
+        "link",
+        "item",
+        "permission",
+        "member",
+        "role",
+        "tag",
+        "attribute",
+    )
+    haystack = " ".join((normalized_sql, entity_name.lower(), operation_name.lower()))
+    return any(token in haystack for token in collection_tokens)
 
 
 def _formula_link_verification_diagnostics(
