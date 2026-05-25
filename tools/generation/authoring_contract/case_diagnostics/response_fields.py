@@ -11,6 +11,12 @@ from ..diagnostics import authoring_diagnostic
 from ..models import AuthoringCase, AuthoringPlan
 
 
+_RESPONSE_LENGTH_ASSERTION_RE = re.compile(
+    r"\bresponse\s+(?:`(?P<quoted_path>[^`]+)`|(?P<plain_path>[A-Za-z_][A-Za-z0-9_.\[\]{}]*))\s+length\b",
+    re.IGNORECASE,
+)
+
+
 def _response_field_contract_diagnostics(
     authoring_plan: AuthoringPlan,
     case: AuthoringCase,
@@ -79,20 +85,20 @@ def _asserted_collection_response_fields(case: AuthoringCase) -> set[str]:
     checks = [] if case.oracle is None else case.oracle.business_checks
     fields: set[str] = set()
     for check in checks:
-        match = re.search(r"\bresponse\s+`(?P<path>[^`]+)`\s+length\b", str(check), re.IGNORECASE)
+        match = _RESPONSE_LENGTH_ASSERTION_RE.search(str(check))
         if not match:
             continue
-        root = _root_response_field(match.group("path"))
+        root = _root_response_field(match.group("quoted_path") or match.group("plain_path") or "")
         if root and root != "id":
             fields.add(root)
     return fields
 
 
 def _root_response_field(path: str) -> str:
-    parts = [part.strip().lower() for part in str(path or "").split(".") if part.strip()]
+    parts = [part.strip().lower() for part in re.split(r"[.\[]", str(path or "")) if part.strip()]
     if not parts:
         return ""
-    return parts[0]
+    return parts[0].strip("`] ")
 
 
 def _response_body_evidence_values(authoring_plan: AuthoringPlan, case: AuthoringCase) -> list[Any]:
