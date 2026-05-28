@@ -58,6 +58,7 @@ Do not rewrite scenario SQL manually unless absolutely necessary.
 
 If the execution tool supports adapting named parameters to the underlying database driver format, use that capability.
 If the execution tool does not support the scenario's parameter style, report this as a tooling limitation instead of silently changing scenario semantics.
+When using named params inside SQL string-building functions such as `CONCAT`, `CONCAT_WS`, or `FORMAT`, cast them explicitly (`CAST(:name AS text)` or `:name::text`) so PostgreSQL can infer parameter types.
 
 # Validation rules
 

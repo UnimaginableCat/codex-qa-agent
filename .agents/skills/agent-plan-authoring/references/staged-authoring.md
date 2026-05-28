@@ -34,6 +34,7 @@ Important fields:
 
 If a later case needs a DB check, define the reusable verification here instead of improvising in the case.
 Reusable DB checks must stay invariant. If two formulas use different variable sets, define separate or parameterized DB verifications instead of hardcoding one expected variable in a generic verifier.
+When a DB verification builds an expected string with SQL functions such as `CONCAT`, cast named params inside the function, for example `CAST(:code AS text)` or `:code::text`; untyped params in these functions can fail at runtime in PostgreSQL.
 
 ## Sync And Case Authoring
 

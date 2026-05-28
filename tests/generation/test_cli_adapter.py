@@ -877,6 +877,97 @@ db_verifications:
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
 
+    def test_validate_operation_inventory_blocks_untyped_param_inside_concat(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list-template-formulas
+entity_operations: []
+routes: []
+db_verifications:
+  - entity: price_list_template_item
+    operation: verify_formula_expression
+    scoped_by: item_id
+    sql: >
+      SELECT id
+      FROM price_list_pricelisttemplateitem
+      WHERE id = :item_id
+        AND quantity_formula = CONCAT('base_qty * ', :thickness_code, ' / 100')
+    params:
+      item_id: "{{item_id}}"
+      thickness_code: "{{thickness_code}}"
+    expected_outcomes:
+      - one row exists
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        diagnostics = payload["diagnostics"]
+        codes = {diagnostic["code"] for diagnostic in diagnostics}
+        self.assertIn("adapter_operation_inventory_db_sql_untyped_string_function_param", codes)
+        diagnostic = next(
+            diagnostic
+            for diagnostic in diagnostics
+            if diagnostic["code"] == "adapter_operation_inventory_db_sql_untyped_string_function_param"
+        )
+        self.assertEqual(diagnostic["details"]["params"], [{"function": "concat", "param": "thickness_code"}])
+
+    def test_validate_operation_inventory_allows_cast_param_inside_concat(self) -> None:
+        for sql_expression in (
+            "quantity_formula = CONCAT('base_qty * ', CAST(:thickness_code AS text), ' / 100')",
+            "quantity_formula = CONCAT('base_qty * ', :thickness_code::text, ' / 100')",
+        ):
+            with self.subTest(sql_expression=sql_expression), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                operation_inventory_path = root / "operation-inventory.yaml"
+                operation_inventory_path.write_text(
+                    f"""version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list-template-formulas
+entity_operations: []
+routes: []
+db_verifications:
+  - entity: price_list_template_item
+    operation: verify_formula_expression
+    scoped_by: item_id
+    sql: >
+      SELECT id
+      FROM price_list_pricelisttemplateitem
+      WHERE id = :item_id
+        AND {sql_expression}
+    params:
+      item_id: "{{{{item_id}}}}"
+      thickness_code: "{{{{thickness_code}}}}"
+    expected_outcomes:
+      - one row exists
+""",
+                    encoding="utf-8",
+                )
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = cli.main(
+                        ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                    )
+                payload = json.loads(stdout.getvalue())
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["status"], "PASS")
+
     def test_validate_operation_inventory_blocks_invalid_route_request_constraints(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

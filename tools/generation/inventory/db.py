@@ -120,6 +120,16 @@ def _db_verification_executable_diagnostics(
         )
     )
     diagnostics.extend(
+        _sql_untyped_string_function_param_diagnostics(
+            item,
+            path=path,
+            db_verification_index=db_verification_index,
+            entity_name=entity_name,
+            operation_name=operation_name,
+            sql=sql,
+        )
+    )
+    diagnostics.extend(
         _collection_one_row_verification_diagnostics(
             item,
             path=path,
@@ -132,6 +142,150 @@ def _db_verification_executable_diagnostics(
         )
     )
     return diagnostics
+
+
+def _sql_untyped_string_function_param_diagnostics(
+    item: dict[str, Any],
+    *,
+    path: Path,
+    db_verification_index: int,
+    entity_name: str,
+    operation_name: str,
+    sql: str,
+) -> list[GenerationDiagnostic]:
+    untyped_params: list[dict[str, str]] = []
+    for function_name, call_text in _sql_string_function_calls(sql):
+        for param_name in _named_sql_params(call_text):
+            if _sql_param_is_explicitly_cast(call_text, param_name):
+                continue
+            untyped_params.append({"function": function_name, "param": param_name})
+
+    if not untyped_params:
+        return []
+
+    return [
+        _diagnostic(
+            code="adapter_operation_inventory_db_sql_untyped_string_function_param",
+            message=(
+                "DB verification SQL uses named params inside string-building SQL functions without explicit "
+                "casts. PostgreSQL can fail with 'could not determine data type of parameter'. Cast each param "
+                "inside CONCAT/CONCAT_WS/FORMAT, for example CAST(:name AS text) or :name::text."
+            ),
+            path=path,
+            details={
+                "db_verification_index": db_verification_index,
+                "entity": entity_name,
+                "operation": operation_name,
+                "params": untyped_params,
+                "expected_outcomes": item.get("expected_outcomes"),
+            },
+        )
+    ]
+
+
+def _sql_string_function_calls(sql: str) -> list[tuple[str, str]]:
+    calls: list[tuple[str, str]] = []
+    index = 0
+    length = len(sql)
+    while index < length:
+        match = re.search(r"\b(concat_ws|concat|format)\s*\(", sql[index:], flags=re.IGNORECASE)
+        if match is None:
+            break
+        function_name = match.group(1).lower()
+        open_paren_index = index + match.end() - 1
+        close_paren_index = _matching_sql_paren(sql, open_paren_index)
+        if close_paren_index is None:
+            break
+        calls.append((function_name, sql[open_paren_index + 1:close_paren_index]))
+        index = close_paren_index + 1
+    return calls
+
+
+def _matching_sql_paren(sql: str, open_paren_index: int) -> int | None:
+    depth = 0
+    index = open_paren_index
+    length = len(sql)
+    while index < length:
+        if sql.startswith("--", index):
+            newline_index = sql.find("\n", index)
+            if newline_index == -1:
+                return None
+            index = newline_index + 1
+            continue
+        if sql.startswith("/*", index):
+            closing_index = sql.find("*/", index + 2)
+            if closing_index == -1:
+                return None
+            index = closing_index + 2
+            continue
+        current_char = sql[index]
+        if current_char in {"'", '"'}:
+            index = _consume_sql_quoted(sql, index, current_char)
+            continue
+        if current_char == "(":
+            depth += 1
+        elif current_char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
+def _named_sql_params(sql: str) -> list[str]:
+    params: list[str] = []
+    index = 0
+    length = len(sql)
+    while index < length:
+        if sql.startswith("--", index):
+            newline_index = sql.find("\n", index)
+            if newline_index == -1:
+                break
+            index = newline_index + 1
+            continue
+        if sql.startswith("/*", index):
+            closing_index = sql.find("*/", index + 2)
+            if closing_index == -1:
+                break
+            index = closing_index + 2
+            continue
+        current_char = sql[index]
+        if current_char in {"'", '"'}:
+            index = _consume_sql_quoted(sql, index, current_char)
+            continue
+        if sql.startswith("::", index):
+            index += 2
+            continue
+        if current_char == ":":
+            match = re.match(r":([A-Za-z_]\w*)", sql[index:])
+            if match:
+                params.append(match.group(1))
+                index += len(match.group(0))
+                continue
+        index += 1
+    return params
+
+
+def _consume_sql_quoted(sql: str, start_index: int, quote_char: str) -> int:
+    index = start_index + 1
+    length = len(sql)
+    while index < length:
+        if sql[index] == quote_char:
+            index += 1
+            if index < length and sql[index] == quote_char:
+                index += 1
+                continue
+            break
+        index += 1
+    return index
+
+
+def _sql_param_is_explicitly_cast(sql: str, param_name: str) -> bool:
+    name = re.escape(param_name)
+    return bool(
+        re.search(rf"\bcast\s*\(\s*:{name}\s+as\s+[^)]+\)", sql, flags=re.IGNORECASE)
+        or re.search(rf":{name}\s*::\s*[a-zA-Z_][\w.]*", sql, flags=re.IGNORECASE)
+    )
 
 
 def _collection_one_row_verification_diagnostics(
