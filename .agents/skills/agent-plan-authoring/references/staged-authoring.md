@@ -27,6 +27,7 @@ Important fields:
 
 - `captures` in the form `response.json.<field> -> <variable>`
 - `method_evidence` for action-like routes
+- `success_status` plus `success_status_evidence` for mutating/action-like routes; method evidence does not prove `200` vs `201`
 - `runtime_path_evidence` for final external paths after `API_BASE_URL`
 - `target_state`, `precondition_state`, and same-state lifecycle contracts when relevant
 - DB verification `sql`, `params`, `scoped_by`, `expected_outcomes`, and `column_types`

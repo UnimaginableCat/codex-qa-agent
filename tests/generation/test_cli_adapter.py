@@ -1049,6 +1049,9 @@ routes:
     method_evidence:
       source_ref: code/demo/views.py
       evidence: Search route is handled by PriceListSearchView.get
+    success_status_evidence:
+      source_ref: code/demo/views.py
+      status_source: PriceListSearchView.get returns HTTP 200 for successful searches.
 db_verifications: []
 """,
                 encoding="utf-8",
@@ -1063,6 +1066,146 @@ db_verifications: []
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["status"], "PASS")
+
+    def test_validate_operation_inventory_blocks_action_like_route_without_success_status_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: POST
+    path: /api/price_list/{{price_list_id}}/templates/{{template_id}}/duplicate/
+    success_status: 201
+    method_evidence:
+      source_ref: code/demo/views.py
+      source_type: handler
+      evidence: DuplicateView.post handles POST requests.
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_route_success_status_evidence_missing", codes)
+
+    def test_validate_operation_inventory_blocks_action_like_route_without_success_status(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: POST
+    path: /api/price_list/{{price_list_id}}/templates/{{template_id}}/duplicate/
+    method_evidence:
+      source_ref: code/demo/views.py
+      source_type: handler
+      evidence: DuplicateView.post handles POST requests.
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_success_status_missing", codes)
+
+    def test_validate_operation_inventory_blocks_success_status_evidence_for_different_status(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entities:
+  - name: price_list
+    id_field: price_list_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list
+entity_operations: []
+routes:
+  - method: POST
+    path: /api/price_list/{{price_list_id}}/templates/{{template_id}}/duplicate/
+    success_status: 201
+    method_evidence:
+      source_ref: code/demo/views.py
+      source_type: handler
+      evidence: DuplicateView.post handles POST requests.
+    success_status_evidence:
+      source_ref: code/demo/views.py
+      status_source: DuplicateView.post returns HTTP 200.
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_route_success_status_evidence_missing", codes)
 
     def test_validate_operation_inventory_rejects_route_mapping_source_as_method_evidence(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1198,6 +1341,9 @@ routes:
       source_ref: code/demo/http_endpoints
       source_role: method_handler
       evidence: publish endpoint is implemented by DocumentPublishHandler.patch
+    success_status_evidence:
+      source_ref: code/demo/http_endpoints
+      status_source: DocumentPublishHandler.patch returns HTTP 200 when publish succeeds.
 db_verifications: []
 metadata:
   contracts:
@@ -1247,6 +1393,9 @@ routes:
         evidence: maps export/ to PriceListExportView
       - source_ref: code/demo/views.py
         evidence: PriceListExportView.post handles export
+    success_status_evidence:
+      source_ref: code/demo/views.py
+      status_source: PriceListExportView.post returns Response with HTTP 200.
 db_verifications: []
 metadata:
   contracts:
@@ -1686,6 +1835,9 @@ routes:
   - method: POST
     path: /api/price_list/{{{{price_list_id}}}}/export/
     success_status: 200
+    success_status_evidence:
+      source_ref: code/demo/views.py
+      status_source: PriceListExportView.post returns HTTP 200.
 db_verifications: []
 metadata:
   contracts:
@@ -1945,6 +2097,9 @@ routes:
   - method: POST
     path: /users
     success_status: 201
+    success_status_evidence:
+      source_ref: code/demo/users.py
+      status_source: UserCreateView.post returns HTTP 201 for created users.
     failure_statuses: [400]
     normalized_response_fields: [id, email]
 db_verifications:

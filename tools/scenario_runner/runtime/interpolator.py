@@ -33,10 +33,35 @@ class PlaceholderInterpolator:
         if isinstance(value, str):
             return self._interpolate_string(value, variables)
         if isinstance(value, dict):
-            return {key: self.interpolate(item, variables) for key, item in value.items()}
+            return self._interpolate_mapping(value, variables)
         if isinstance(value, list):
             return [self.interpolate(item, variables) for item in value]
         return value
+
+    def _interpolate_mapping(self, value: dict[Any, Any], variables: dict[str, Any]) -> dict[Any, Any]:
+        interpolated: dict[Any, Any] = {}
+        for key, item in value.items():
+            interpolated_key = self._interpolate_mapping_key(key, variables)
+            if interpolated_key in interpolated:
+                raise InterpolationError(
+                    f"Interpolated mapping key collision for '{interpolated_key}'."
+                )
+            interpolated[interpolated_key] = self.interpolate(item, variables)
+        return interpolated
+
+    def _interpolate_mapping_key(self, key: Any, variables: dict[str, Any]) -> Any:
+        if not isinstance(key, str):
+            return key
+        interpolated_key = self._interpolate_string(key, variables)
+        if isinstance(interpolated_key, (dict, list, tuple, set)):
+            raise InterpolationError(
+                "Mapping key placeholder resolves to a non-scalar value and cannot be used as a key."
+            )
+        if interpolated_key is None:
+            return ""
+        if not isinstance(interpolated_key, str):
+            return str(interpolated_key)
+        return interpolated_key
 
     def _interpolate_string(self, value: str, variables: dict[str, Any]) -> Any:
         exact_match = EXACT_PLACEHOLDER_PATTERN.fullmatch(value)

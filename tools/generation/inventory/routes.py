@@ -16,13 +16,19 @@ from tools.generation.inventory.common import (
 
 
 _ALLOWED_SAME_STATE_BEHAVIORS = {"reject", "idempotent_success"}
+_MUTATING_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _ACTION_LIKE_ROUTE_SEGMENTS = {
+    "add",
+    "add-item",
     "calculate",
+    "create",
     "download",
+    "duplicate",
     "export",
     "export-excel",
     "import",
     "report",
+    "reorder",
     "search",
     "upload",
 }
@@ -66,8 +72,10 @@ def _route_inventory_diagnostics(
     *,
     path: Path,
     require_method_evidence: bool = False,
+    require_success_status_evidence: bool = False,
     require_runtime_path_evidence: bool = False,
     require_action_like_method_evidence: bool = True,
+    require_action_like_status_evidence: bool = True,
 ) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     for index, item in enumerate(items, start=1):
@@ -93,6 +101,20 @@ def _route_inventory_diagnostics(
                     or (
                         require_action_like_method_evidence
                         and _is_action_like_route_path(str(item.get("path") or ""))
+                    )
+                ),
+            )
+        )
+        diagnostics.extend(
+            _route_success_status_evidence_diagnostics(
+                item,
+                path=path,
+                route_index=index,
+                required=(
+                    require_success_status_evidence
+                    or (
+                        require_action_like_status_evidence
+                        and _requires_success_status_evidence(item)
                     )
                 ),
             )
@@ -135,6 +157,18 @@ def _route_required_contract_diagnostics(
                 message="Route success_status must be an integer.",
                 path=path,
                 details={"route_index": route_index},
+            )
+        )
+    if item.get("success_status") is None and _requires_success_status_evidence(item):
+        diagnostics.append(
+            _diagnostic(
+                code="adapter_operation_inventory_success_status_missing",
+                message=(
+                    "Mutating or action-like routes must declare success_status explicitly so generated cases do "
+                    "not infer HTTP success codes from method or endpoint naming."
+                ),
+                path=path,
+                details={"route_index": route_index, "method": method, "path": route_path},
             )
         )
     failure_statuses = item.get("failure_statuses", [])
@@ -181,6 +215,41 @@ def _route_method_evidence_diagnostics(
             ),
             path=path,
             details={"route_index": route_index, "method": item.get("method"), "path": item.get("path")},
+        )
+    ]
+
+
+def _route_success_status_evidence_diagnostics(
+    item: dict[str, Any],
+    *,
+    path: Path,
+    route_index: int,
+    required: bool,
+) -> list[GenerationDiagnostic]:
+    success_status = item.get("success_status")
+    if success_status is None or not isinstance(success_status, int):
+        return []
+    if not required or _has_success_status_evidence(
+        item.get("success_status_evidence") or item.get("status_evidence"),
+        status=success_status,
+    ):
+        return []
+    return [
+        _diagnostic(
+            code="adapter_operation_inventory_route_success_status_evidence_missing",
+            message=(
+                "Route success_status evidence is required for mutating/action-like endpoints or by "
+                "metadata.contracts.routes.success_status_evidence_required. Record structured evidence from "
+                "handler/controller/view/service code, tests, OpenAPI, or docs that explicitly mentions the "
+                "declared HTTP success status. Do not infer 201 from POST, create, duplicate, or endpoint names."
+            ),
+            path=path,
+            details={
+                "route_index": route_index,
+                "method": item.get("method"),
+                "path": item.get("path"),
+                "success_status": success_status,
+            },
         )
     ]
 
@@ -389,6 +458,40 @@ def _has_method_evidence(value: Any, *, method: Any) -> bool:
     return False
 
 
+def _has_success_status_evidence(value: Any, *, status: int) -> bool:
+    if isinstance(value, str):
+        return False
+    if isinstance(value, list):
+        return any(_has_success_status_evidence(item, status=status) for item in value)
+    if isinstance(value, dict):
+        source_ref = str(value.get("source_ref") or value.get("source") or "").strip()
+        if not source_ref or _is_route_mapping_source(source_ref):
+            return False
+        explicit_status = value.get("status")
+        if explicit_status is None:
+            explicit_status = value.get("success_status")
+        if explicit_status == status or str(explicit_status).strip() == str(status):
+            return True
+        evidence_text = " ".join(
+            str(value.get(key) or "").strip()
+            for key in (
+                "status_source",
+                "status_evidence",
+                "response_status",
+                "expected_status",
+                "evidence",
+            )
+        )
+        return _status_evidence_mentions_declared_status(evidence_text, status)
+    return False
+
+
+def _status_evidence_mentions_declared_status(evidence_text: str, status: int) -> bool:
+    if not evidence_text.strip():
+        return False
+    return bool(re.search(rf"(?<!\d){re.escape(str(status))}(?!\d)", evidence_text))
+
+
 def _method_evidence_source_can_prove_method(value: dict[str, Any], source_ref: str) -> bool:
     if _is_route_mapping_source(source_ref):
         return False
@@ -520,3 +623,10 @@ def _is_action_like_route_path(route_path: str) -> bool:
         if tokens & _ACTION_LIKE_ROUTE_SEGMENTS:
             return True
     return False
+
+
+def _requires_success_status_evidence(item: dict[str, Any]) -> bool:
+    method = str(item.get("method") or "").strip().upper()
+    if method in _MUTATING_HTTP_METHODS:
+        return True
+    return _is_action_like_route_path(str(item.get("path") or ""))

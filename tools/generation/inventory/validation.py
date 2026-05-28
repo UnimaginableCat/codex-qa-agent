@@ -74,8 +74,10 @@ def _validate_operation_inventory_file(path: Path) -> tuple[dict[str, Any] | Non
             _list_payload_items(payload, "routes"),
             path=path,
             require_method_evidence=_route_method_evidence_required(payload),
+            require_success_status_evidence=_route_success_status_evidence_required(payload),
             require_runtime_path_evidence=_route_runtime_path_evidence_required(payload),
             require_action_like_method_evidence=not _route_method_evidence_explicitly_disabled(payload),
+            require_action_like_status_evidence=not _route_success_status_evidence_explicitly_disabled(payload),
         )
     )
     diagnostics.extend(
@@ -140,6 +142,22 @@ def _route_runtime_path_evidence_required(payload: dict[str, Any]) -> bool:
     return False
 
 
+def _route_success_status_evidence_required(payload: dict[str, Any]) -> bool:
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    contracts = metadata.get("contracts")
+    if not isinstance(contracts, dict):
+        return False
+    routes = contracts.get("routes")
+    if not isinstance(routes, dict):
+        return False
+    for key in ("success_status_evidence_required", "status_evidence_required", "require_status_evidence"):
+        if key in routes:
+            return _parse_bool(routes.get(key)) is True
+    return False
+
+
 def _route_method_evidence_explicitly_disabled(payload: dict[str, Any]) -> bool:
     metadata = payload.get("metadata")
     if not isinstance(metadata, dict):
@@ -151,6 +169,22 @@ def _route_method_evidence_explicitly_disabled(payload: dict[str, Any]) -> bool:
     if not isinstance(routes, dict):
         return False
     for key in ("method_evidence_required", "require_method_evidence"):
+        if key in routes and _parse_bool(routes.get(key)) is False:
+            return True
+    return False
+
+
+def _route_success_status_evidence_explicitly_disabled(payload: dict[str, Any]) -> bool:
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    contracts = metadata.get("contracts")
+    if not isinstance(contracts, dict):
+        return False
+    routes = contracts.get("routes")
+    if not isinstance(routes, dict):
+        return False
+    for key in ("success_status_evidence_required", "status_evidence_required", "require_status_evidence"):
         if key in routes and _parse_bool(routes.get(key)) is False:
             return True
     return False
