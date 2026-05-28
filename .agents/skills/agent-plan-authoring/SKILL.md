@@ -108,6 +108,7 @@ Core rules:
 - Use staged files in order: `entity-inventory.yaml`, `operation-inventory.yaml`, synced `authoring-plan.yaml`, then bundle validation.
 - Keep cases deterministic: supported expectation DSL, explicit captures, explicit setup, and persisted-state checks for mutating cases.
 - Prove route paths, HTTP methods, request bodies, auth profiles, variables, and DB checks with structured evidence rather than prose.
+- Prove every mutating/action-like route `success_status` with structured `success_status_evidence`; do not infer `201` from POST/create/duplicate naming or from method evidence.
 - Keep entity identity real. Do not change an entity `id_field` to a convenient captured variable just to satisfy persisted-state validation.
 - Keep reusable DB verifications invariant or parameterized. Formula-link checks must match the non-system variables used by that case's `quantity_formula`; never hardcode one expected variable into a generic formula-link verifier.
 - Preserve coverage intent when validation fails. Add missing evidence/setup/captures or defer/report the blocker; do not weaken or delete assertions just to pass a gate.

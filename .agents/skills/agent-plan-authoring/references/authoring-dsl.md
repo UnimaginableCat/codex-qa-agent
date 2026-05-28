@@ -164,6 +164,7 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
    - setup operations
    - effect states
    - route to success/failure HTTP status expectations
+   - `success_status_evidence` for mutating/action-like routes; evidence must cite code/docs/tests and explicitly mention the declared HTTP status
    - lifecycle route target state
    - same-state lifecycle behavior, status, and evidence when reissuing the same command matters; set route `same_state_contract_required: true` only when missing same-state semantics should block authoring
    - DB verification templates
@@ -175,6 +176,7 @@ Use strict sequential authoring. Do not fill all three staged files in one pass.
    - do not manually repeat inventory-backed entity/operation templates unless the sync output shows missing executable details
 4. write `authoring-plan.yaml`
    - cases should reference the first two inventories instead of inventing lifecycle and status assumptions ad hoc
+   - do not infer `201` from POST/create/duplicate naming; if status evidence proves `200`, author `200`
    - when a request body needs a target member/user GUID, make the case a workflow and capture that GUID in a setup API/DB step instead of adding another env-backed `*_MEMBER_GUID`. If the GUID is actor-scoped env evidence for a grant-then-act workflow, do not overwrite that same variable with `partner_permissions.0.*`, `members.0.*`, or another first-row/list capture before the grant/revoke.
    - for action-like requests with bodies, make request body evidence field-specific. Use `request_body_evidence.required`, `fields`, `properties`, or `request_constraints` to name every authored top-level body key; broad prose such as `uses serializer` is not enough, and metadata strings such as `source_ref` paths are not field evidence.
    - for response collection assertions, make response evidence field-specific. Use `response_body_evidence`, `response_schema`, `response_serializer_evidence`, route `normalized_response_fields`, or case metadata to name the exact returned field from serializer/OpenAPI evidence; `items` and `template_items` are different contracts.

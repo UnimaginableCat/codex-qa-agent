@@ -110,6 +110,7 @@ Core rules:
 
 - Preserve first-class `scenario_variables[]`, workflow steps, captures, DB verification, actor profiles, and author intent from source artifacts.
 - If compile/render/review/preflight reveals a source defect, repair the bundle under `artifacts/agent/generation/<run_id>/` and rerun gates.
+- If operation inventory lacks `success_status_evidence` for a mutating/action-like route, repair the source bundle before compile/render; method evidence is not status evidence.
 - Do not patch `scenarios/generated/` as the primary fix; promoted scenarios must be reproducible from generation artifacts.
 - Treat review edit targets, unsupported checks, deferred executable cases, and unresolved data setup as blockers to clean promotion.
 - Treat preflight blockers as readiness issues, not permission to shrink coverage.
@@ -121,6 +122,7 @@ Read `references/repair-policy.md` when diagnosing review, promotion, validation
 - `validate-authoring-bundle` is the managed staged-bundle gate before compile/generate.
 - `validate-agent-plan` is necessary but not sufficient for promoted runnable scenarios.
 - Review is clean only when status is PASS, drafts are valid, deferred count is zero, and `total_edit_targets = 0`.
+- Review/promotion do not override missing or contradictory source status evidence; fix the authoring bundle instead of accepting a plausible HTTP expectation.
 - Promotion is clean only when all requested drafts are promoted with zero errors and zero blocked items.
 - Before re-promoting an existing run-scoped directory, use `--purge-target-dir` only for intentional regeneration.
 

@@ -22,10 +22,41 @@ from tools.scenario_runner.orchestration.preflight import PreflightCheckResult, 
 from tools.scenario_runner.orchestration.services import ScenarioRunnerService
 from tools.scenario_runner.parser import MarkdownScenarioParser
 from tools.scenario_runner.runtime.executors import ApiStepExecutor, DbStepExecutor
-from tools.scenario_runner.runtime.interpolator import PlaceholderInterpolator
+from tools.scenario_runner.runtime.interpolator import InterpolationError, PlaceholderInterpolator
 
 
 class ScenarioVariableTests(unittest.TestCase):
+    def test_interpolator_resolves_placeholders_in_mapping_keys(self) -> None:
+        interpolated = PlaceholderInterpolator().interpolate(
+            {
+                "template_inputs": [
+                    {
+                        "variable_values": {
+                            "{{thickness_code}}": "{{thickness_value}}",
+                            "static_{{suffix}}": "kept",
+                        }
+                    }
+                ]
+            },
+            {
+                "thickness_code": "tpl_var_abc123",
+                "thickness_value": "7",
+                "suffix": "key",
+            },
+        )
+
+        self.assertEqual(
+            interpolated["template_inputs"][0]["variable_values"],
+            {"tpl_var_abc123": "7", "static_key": "kept"},
+        )
+
+    def test_interpolator_blocks_mapping_key_collisions_after_interpolation(self) -> None:
+        with self.assertRaisesRegex(InterpolationError, "mapping key collision"):
+            PlaceholderInterpolator().interpolate(
+                {"{{first_key}}": "first", "{{second_key}}": "second"},
+                {"first_key": "same", "second_key": "same"},
+            )
+
     def test_variables_section_is_parsed_preserved_and_not_unknown(self) -> None:
         with TemporaryDirectory() as tmp:
             scenario_path = self._write_scenario(
