@@ -90,7 +90,21 @@ def _route_inventory_diagnostics(
             )
             continue
 
-        diagnostics.extend(_route_required_contract_diagnostics(item, path=path, route_index=index))
+        status_evidence_required = (
+            require_success_status_evidence
+            or (
+                require_action_like_status_evidence
+                and _requires_success_status_evidence(item)
+            )
+        )
+        diagnostics.extend(
+            _route_required_contract_diagnostics(
+                item,
+                path=path,
+                route_index=index,
+                require_success_status=status_evidence_required,
+            )
+        )
         diagnostics.extend(
             _route_method_evidence_diagnostics(
                 item,
@@ -110,13 +124,7 @@ def _route_inventory_diagnostics(
                 item,
                 path=path,
                 route_index=index,
-                required=(
-                    require_success_status_evidence
-                    or (
-                        require_action_like_status_evidence
-                        and _requires_success_status_evidence(item)
-                    )
-                ),
+                required=status_evidence_required,
             )
         )
         diagnostics.extend(
@@ -137,6 +145,7 @@ def _route_required_contract_diagnostics(
     *,
     path: Path,
     route_index: int,
+    require_success_status: bool,
 ) -> list[GenerationDiagnostic]:
     diagnostics: list[GenerationDiagnostic] = []
     method = str(item.get("method") or "").strip()
@@ -159,13 +168,13 @@ def _route_required_contract_diagnostics(
                 details={"route_index": route_index},
             )
         )
-    if item.get("success_status") is None and _requires_success_status_evidence(item):
+    if item.get("success_status") is None and require_success_status:
         diagnostics.append(
             _diagnostic(
                 code="adapter_operation_inventory_success_status_missing",
                 message=(
-                    "Mutating or action-like routes must declare success_status explicitly so generated cases do "
-                    "not infer HTTP success codes from method or endpoint naming."
+                    "Routes covered by success status evidence requirements must declare success_status explicitly "
+                    "so generated cases do not infer HTTP success codes from method or endpoint naming."
                 ),
                 path=path,
                 details={"route_index": route_index, "method": method, "path": route_path},

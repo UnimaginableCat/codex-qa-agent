@@ -1158,6 +1158,51 @@ db_verifications: []
         codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
         self.assertIn("adapter_operation_inventory_success_status_missing", codes)
 
+    def test_validate_operation_inventory_blocks_ordinary_route_without_success_status_when_status_evidence_required(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: items-api
+project: code/demo
+surface: items
+entities:
+  - name: item
+    id_field: item_id
+""",
+                encoding="utf-8",
+            )
+            operation_inventory_path = root / "operation-inventory.yaml"
+            operation_inventory_path.write_text(
+                """version: 1
+source_id: items-api
+project: code/demo
+surface: items
+entity_operations: []
+routes:
+  - method: GET
+    path: /api/items
+db_verifications: []
+metadata:
+  contracts:
+    routes:
+      success_status_evidence_required: true
+""",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cli.main(
+                    ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "BLOCKED")
+        codes = {diagnostic["code"] for diagnostic in payload["diagnostics"]}
+        self.assertIn("adapter_operation_inventory_success_status_missing", codes)
+
     def test_validate_operation_inventory_blocks_success_status_evidence_for_different_status(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
