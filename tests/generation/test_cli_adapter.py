@@ -968,6 +968,50 @@ db_verifications:
             self.assertEqual(exit_code, 0)
             self.assertEqual(payload["status"], "PASS")
 
+    def test_validate_operation_inventory_ignores_string_function_text_inside_quotes_and_comments(self) -> None:
+        for sql_suffix in (
+            "AND quantity_formula = 'CONCAT(:thickness_code)'",
+            "-- CONCAT(:thickness_code) is expected text\n        AND quantity_formula = 'fixed'",
+            "/* CONCAT(:thickness_code) is expected text */ AND quantity_formula = 'fixed'",
+        ):
+            with self.subTest(sql_suffix=sql_suffix), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                operation_inventory_path = root / "operation-inventory.yaml"
+                operation_inventory_path.write_text(
+                    f"""version: 1
+source_id: price-list-api
+project: code/demo
+surface: price-list-template-formulas
+entity_operations: []
+routes: []
+db_verifications:
+  - entity: price_list_template_item
+    operation: verify_formula_expression
+    scoped_by: item_id
+    sql: >
+      SELECT id
+      FROM price_list_pricelisttemplateitem
+      WHERE id = :item_id
+        {sql_suffix}
+    params:
+      item_id: "{{{{item_id}}}}"
+      thickness_code: "{{{{thickness_code}}}}"
+    expected_outcomes:
+      - one row exists
+""",
+                    encoding="utf-8",
+                )
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = cli.main(
+                        ["--validate-operation-inventory", "--operation-inventory-file", str(operation_inventory_path)]
+                    )
+                payload = json.loads(stdout.getvalue())
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["status"], "PASS")
+
     def test_validate_operation_inventory_blocks_invalid_route_request_constraints(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

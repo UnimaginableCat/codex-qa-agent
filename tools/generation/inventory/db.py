@@ -188,17 +188,53 @@ def _sql_string_function_calls(sql: str) -> list[tuple[str, str]]:
     index = 0
     length = len(sql)
     while index < length:
-        match = re.search(r"\b(concat_ws|concat|format)\s*\(", sql[index:], flags=re.IGNORECASE)
-        if match is None:
-            break
-        function_name = match.group(1).lower()
-        open_paren_index = index + match.end() - 1
+        if sql.startswith("--", index):
+            newline_index = sql.find("\n", index)
+            if newline_index == -1:
+                break
+            index = newline_index + 1
+            continue
+        if sql.startswith("/*", index):
+            closing_index = sql.find("*/", index + 2)
+            if closing_index == -1:
+                break
+            index = closing_index + 2
+            continue
+        current_char = sql[index]
+        if current_char in {"'", '"'}:
+            index = _consume_sql_quoted(sql, index, current_char)
+            continue
+        if not (current_char == "_" or current_char.isalpha()):
+            index += 1
+            continue
+
+        identifier_match = re.match(r"[A-Za-z_]\w*", sql[index:])
+        if identifier_match is None:
+            index += 1
+            continue
+        function_name = identifier_match.group(0).lower()
+        identifier_end = index + len(identifier_match.group(0))
+        if function_name not in {"concat", "concat_ws", "format"}:
+            index = identifier_end
+            continue
+
+        open_paren_index = _skip_sql_whitespace(sql, identifier_end)
+        if open_paren_index >= length or sql[open_paren_index] != "(":
+            index = identifier_end
+            continue
         close_paren_index = _matching_sql_paren(sql, open_paren_index)
         if close_paren_index is None:
             break
         calls.append((function_name, sql[open_paren_index + 1:close_paren_index]))
         index = close_paren_index + 1
     return calls
+
+
+def _skip_sql_whitespace(sql: str, index: int) -> int:
+    length = len(sql)
+    while index < length and sql[index].isspace():
+        index += 1
+    return index
 
 
 def _matching_sql_paren(sql: str, open_paren_index: int) -> int | None:
