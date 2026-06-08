@@ -75,7 +75,15 @@ _RISKY_BEHAVIOR_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bnot\s+appl(?:y|ied|ies)\b", re.IGNORECASE),
     re.compile(r"\bpreserv(?:e|es|ed|ing)\b", re.IGNORECASE),
     re.compile(r"\bremap(?:s|ped|ping)?\b", re.IGNORECASE),
-    re.compile(r"\bclear(?:s|ed|ing)?\b.*\bdefaults?\b", re.IGNORECASE),
+    re.compile(r"\bclear(?:s|ed|ing)?\b", re.IGNORECASE),
+    re.compile(r"\bnull(?:s|ed|ing)\b", re.IGNORECASE),
+    re.compile(r"\bset(?:s|ting)?\b.{0,80}\bnull\b", re.IGNORECASE),
+    re.compile(r"\bnulls?\s+out\b|\bnull\s+out\b", re.IGNORECASE),
+)
+
+_DUPLICATE_BEHAVIOR_PATTERN = re.compile(
+    r"\bduplicat(?:e|es|ed|ing)\b|\b(?:copy|copies|copied|copying)\b|\bclone(?:s|d|ing)?\b",
+    re.IGNORECASE,
 )
 
 
@@ -96,9 +104,25 @@ def _risky_behavior_claims(case: AuthoringCase) -> list[str]:
         normalized = str(text or "").strip()
         if not normalized:
             continue
-        if any(pattern.search(normalized) for pattern in _RISKY_BEHAVIOR_PATTERNS):
+        if any(pattern.search(normalized) for pattern in _RISKY_BEHAVIOR_PATTERNS) or _duplicate_behavior_applies(
+            case,
+            normalized,
+        ):
             claims.append(f"{source}: {normalized}")
     return claims
+
+
+def _duplicate_behavior_applies(case: AuthoringCase, text: str) -> bool:
+    if _DUPLICATE_BEHAVIOR_PATTERN.search(text) is None:
+        return False
+    state_change = str(case.state_change or "").strip().lower()
+    if state_change == "mutate":
+        return True
+    if case.execute is not None and case.execute.route is not None:
+        route_text = f"{case.execute.route.method} {case.execute.route.path}"
+        if _DUPLICATE_BEHAVIOR_PATTERN.search(route_text):
+            return True
+    return False
 
 
 def _metadata_text_items(value: Any, *, prefix: str = "metadata") -> list[tuple[str, str]]:

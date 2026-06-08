@@ -1154,6 +1154,115 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
             )
         )
 
+    def test_validate_blocks_duplicate_copy_behavior_without_behavior_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="category-plan",
+            project="code/demo",
+            title="Category duplication",
+            goal="Cover category duplicate behavior.",
+            scope=AuthoringScope(surface="categories"),
+            entities={
+                "category_children": AuthoringEntitySpec(
+                    id_field="duplicated_category_id",
+                    operations={
+                        "verify_child_rows_copied": AuthoringEntityOperation(
+                            sql=(
+                                "SELECT (COUNT(*) = 2) AS child_rows_copied "
+                                "FROM category_children WHERE category_id = :duplicated_category_id"
+                            ),
+                            params={"duplicated_category_id": "{{duplicated_category_id}}"},
+                            expected_outcomes=["`child_rows_copied` = `true`"],
+                            column_types={"child_rows_copied": "boolean"},
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="duplicate-category-copies-child-rows",
+                    kind="api",
+                    title="Duplicate category copies child rows",
+                    objective="Verify duplicate category copies child rows into the cloned category graph.",
+                    state_change="mutate",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/categories/{{category_id}}/duplicate")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        captures=["response.json.id -> duplicated_category_id"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="category_children",
+                            operation="verify_child_rows_copied",
+                        ),
+                    ),
+                    scenario_variables=["category_id = literal:10"],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_behavior_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_blocks_clear_null_behavior_without_behavior_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="profile-plan",
+            project="code/demo",
+            title="Profile update",
+            goal="Cover profile clear behavior.",
+            scope=AuthoringScope(surface="profiles"),
+            entities={
+                "profile": AuthoringEntitySpec(
+                    id_field="profile_id",
+                    operations={
+                        "verify_middle_name_cleared": AuthoringEntityOperation(
+                            sql="SELECT id FROM profiles WHERE id = :profile_id AND middle_name IS NULL",
+                            params={"profile_id": "{{profile_id}}"},
+                            expected_outcomes=["one row exists"],
+                            column_types={"id": "integer"},
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="clear-middle-name",
+                    kind="api",
+                    title="Clear middle name",
+                    objective="Verify update clears middle_name by nulling the field.",
+                    state_change="update",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="PATCH", path="/profiles/{{profile_id}}"),
+                        body={"middle_name": None},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="profile",
+                            operation="verify_middle_name_cleared",
+                        ),
+                    ),
+                    scenario_variables=["profile_id = literal:10"],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_behavior_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_required_permission_state_blocks_api_case_without_setup(self) -> None:
         plan = AuthoringPlan(
             version=1,
