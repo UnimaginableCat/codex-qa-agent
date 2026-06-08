@@ -2268,6 +2268,13 @@ entity_operations:
       path: /users
     request_body:
       email: "{{submitted_email}}"
+    request_body_evidence:
+      source_ref: code/demo/serializers/user.py
+      source_role: request_schema
+      fields: [email]
+    behavior_evidence:
+      source_ref: code/demo/services/user_create_service.py
+      evidence: Create service stores active users during create.
     request_constraints:
       - field: email
         format: lowercase
@@ -2315,6 +2322,21 @@ db_verifications:
         self.assertEqual(create_operation["route"]["method"], "POST")
         self.assertEqual(create_operation["route"]["path"], "/users")
         self.assertEqual(create_operation["oracle"]["status_code"], 201)
+        self.assertEqual(
+            create_operation["request_body_evidence"],
+            {
+                "source_ref": "code/demo/serializers/user.py",
+                "source_role": "request_schema",
+                "fields": ["email"],
+            },
+        )
+        self.assertEqual(
+            create_operation["behavior_evidence"],
+            {
+                "source_ref": "code/demo/services/user_create_service.py",
+                "evidence": "Create service stores active users during create.",
+            },
+        )
         self.assertEqual(create_operation["request_constraints"], [{"field": "email", "format": "lowercase"}])
         self.assertEqual(create_operation["response_body_evidence"], {"source_role": "response_schema", "fields": ["id", "email"]})
         self.assertEqual(create_operation["captures"], ["response.json.id -> user_id"])
@@ -2323,6 +2345,82 @@ db_verifications:
         self.assertEqual(verify_operation["expected_outcomes"], ["one row exists"])
         self.assertEqual(verify_operation["column_types"], {"id": "uuid"})
         self.assertEqual(sync_payload["authoring_plan"]["cases"], [])
+
+    def test_sync_authoring_plan_preserves_existing_actor_when_inventory_has_placeholder_actor(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "artifacts" / "agent" / "generation"
+
+            init_stdout = io.StringIO()
+            with redirect_stdout(init_stdout):
+                cli.main(
+                    [
+                        "--init-authoring-plan",
+                        "--output",
+                        str(output_root),
+                        "--source-id",
+                        "users-api",
+                        "--project",
+                        "code/demo",
+                        "--name",
+                        "Users API",
+                        "--goal",
+                        "Cover user API behavior.",
+                    ]
+                )
+            bundle_dir = Path(json.loads(init_stdout.getvalue())["bundle_dir"])
+            (bundle_dir / "authoring-plan.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+title: Users API
+goal: Cover users API.
+scope:
+  surface: users-controller
+defaults:
+  environment: env/demo.env
+  auth: basic
+  actor: founder
+  headers: {}
+entities:
+  user:
+    id_field: user_id
+cases: []
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "entity-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entities:
+  - name: user
+    id_field: user_id
+auth_contract:
+  actor: api-client
+""",
+                encoding="utf-8",
+            )
+            (bundle_dir / "operation-inventory.yaml").write_text(
+                """version: 1
+source_id: users-api
+project: code/demo
+surface: users-controller
+entity_operations: []
+routes: []
+db_verifications: []
+""",
+                encoding="utf-8",
+            )
+
+            sync_stdout = io.StringIO()
+            with redirect_stdout(sync_stdout):
+                sync_exit_code = cli.main(["--sync-authoring-plan", "--path", str(bundle_dir)])
+            sync_payload = json.loads(sync_stdout.getvalue())
+
+        self.assertEqual(sync_exit_code, 0)
+        self.assertEqual(sync_payload["authoring_plan"]["defaults"]["actor"], "founder")
 
     def test_sync_authoring_plan_preserves_existing_str_enum_cases(self) -> None:
         with TemporaryDirectory() as tmp:

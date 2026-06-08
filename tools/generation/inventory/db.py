@@ -377,7 +377,9 @@ def _collection_one_row_verification_diagnostics(
             message=(
                 "DB verification uses 'one row exists' with a parent-scoped collection query. "
                 "Filter to the specific child row being asserted, split expected child rows into separate "
-                "verifications, or use an explicit aggregate/count check. LIMIT 1 does not prove the expected row."
+                "verifications, or use a runner-supported aggregate check such as SELECT (COUNT(*) = 1) AS "
+                "matching_row_present with expected_outcomes: `matching_row_present` = `true`. LIMIT 1 does "
+                "not prove the expected row."
             ),
             path=path,
             details={

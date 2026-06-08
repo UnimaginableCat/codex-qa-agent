@@ -5,6 +5,7 @@ from __future__ import annotations
 from tools.generation.domain.models import AgentPlannedTestCaseInput, GenerationDiagnostic, PlannedWorkflowStep
 
 from ..case_diagnostics.boundary import _boundary_case_diagnostics
+from ..case_diagnostics.behavior import _behavior_evidence_diagnostics
 from ..case_diagnostics.db_expectations import _db_string_placeholder_quoting_diagnostics
 from ..case_diagnostics.email import _normalized_email_expectation_diagnostics
 from ..case_diagnostics.lifecycle import (
@@ -111,6 +112,7 @@ def compile_case(
             persisted_verification=persisted_verification,
         )
     )
+    diagnostics.extend(_behavior_evidence_diagnostics(authoring_plan=authoring_plan, case=case, case_ref=case_ref))
     diagnostics.extend(_workflow_setup_state_mismatch_diagnostics(case=case, case_ref=case_ref))
     diagnostics.extend(_workflow_same_state_contract_warning(case=case, case_ref=case_ref))
 

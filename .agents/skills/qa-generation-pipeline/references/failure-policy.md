@@ -28,6 +28,7 @@ Final status priority: `ERROR` > `BLOCKED` > `FAIL` > `PASS`.
 - Created-entity capture diagnostics require distinct `created_*` captures and persisted checks scoped to those captures.
 - Workflow setup state mismatches require operation inventory repair unless same-state lifecycle semantics explicitly prove the mismatch is intentional.
 - Formula-link DB diagnostics must match the authored formula. If the formula uses two non-system variables, do not expect one row; if the formula uses only one variable, do not expect a different variable name.
+- Risky behavior diagnostics require route/state-specific evidence. If a case claims defaults are applied/not applied, duplicated, remapped, cleared, or preserved, repair the source with matching handler/service/test evidence instead of carrying a plausible expectation into runner execution.
 
 ## Promoted Validation And Preflight
 
@@ -41,4 +42,5 @@ Final status priority: `ERROR` > `BLOCKED` > `FAIL` > `PASS`.
 - Terminal `FAIL` or `ERROR`: read failed run artifacts and do targeted implementation/debug analysis before final classification unless the user requested status-only output.
 - API `404` with HTML/text body and resolved auth/base URL usually means wrong authored runtime path; repair operation inventory with mounted path evidence.
 - DB assertion mismatches on reusable relationship verifications often indicate source authoring drift. Compare the actual rows to the request formula or payload before calling it a product failure.
+- DB assertion mismatches for default/omitted-field behavior should be triaged as possible oracle drift first. Compare runner rows with the create/update/duplicate service path that actually executed before classifying the product.
 - Do not classify HTTP status mismatch as product behavior or scenario defect without artifact or code evidence.
