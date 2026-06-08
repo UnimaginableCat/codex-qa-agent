@@ -162,6 +162,7 @@ class AuthoringOracle:
     business_checks: list[str] = field(default_factory=list)
     captures: list[str] = field(default_factory=list)
     persisted_state: AuthoringPersistedStateRef | None = None
+    behavior_evidence: Any = None
 
     def to_dict(self) -> dict[str, Any]:
         return to_json_safe(asdict(self))
@@ -179,6 +180,11 @@ class AuthoringOracle:
                 if not isinstance(persisted_payload, dict)
                 else AuthoringPersistedStateRef.from_dict(persisted_payload)
             ),
+            behavior_evidence=(
+                payload.get("behavior_evidence")
+                or payload.get("expected_behavior_evidence")
+                or payload.get("oracle_evidence")
+            ),
         )
 
 
@@ -190,6 +196,7 @@ class AuthoringEntityOperation:
     request_body: Any = None
     request_body_evidence: Any = None
     response_body_evidence: Any = None
+    behavior_evidence: Any = None
     request_constraints: list[dict[str, Any]] = field(default_factory=list)
     auth_strategy: list[str] = field(default_factory=list)
     oracle: AuthoringOracle | None = None
@@ -240,6 +247,11 @@ class AuthoringEntityOperation:
                 or payload.get("response_schema")
                 or payload.get("response_evidence")
                 or payload.get("response_serializer_evidence")
+            ),
+            behavior_evidence=(
+                payload.get("behavior_evidence")
+                or payload.get("expected_behavior_evidence")
+                or payload.get("business_behavior_evidence")
             ),
             request_constraints=[
                 dict(item) for item in payload.get("request_constraints", []) if isinstance(item, dict)

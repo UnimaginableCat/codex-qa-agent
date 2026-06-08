@@ -930,6 +930,339 @@ class AuthoringPlanCompilerTests(unittest.TestCase):
             )
         )
 
+    def test_validate_blocks_risky_default_behavior_without_behavior_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list position defaults",
+            goal="Cover position attribute default behavior.",
+            scope=AuthoringScope(surface="position-defaults"),
+            entities={
+                "position_attribute_value": AuthoringEntitySpec(
+                    id_field="position_id",
+                    operations={
+                        "verify_default_not_applied_to_omitted_position_attribute": AuthoringEntityOperation(
+                            sql=(
+                                "SELECT id FROM position_attribute_values "
+                                "WHERE position_id = :position_id AND attribute_id = :material_attr_id"
+                            ),
+                            params={
+                                "position_id": "{{position_id}}",
+                                "material_attr_id": "{{material_attr_id}}",
+                            },
+                            expected_outcomes=["no rows exist"],
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="position-creation-does-not-apply-omitted-default",
+                    kind="api",
+                    title="Position creation does not apply omitted default",
+                    objective=(
+                        "Verify a category attribute default does not create a position value "
+                        "when the position omits that attribute."
+                    ),
+                    state_change="create",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/positions"),
+                        body={"category_id": "{{category_id}}", "attributes": []},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> position_id"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="position_attribute_value",
+                            operation="verify_default_not_applied_to_omitted_position_attribute",
+                        ),
+                    ),
+                    scenario_variables=[
+                        "category_id = literal:10",
+                        "material_attr_id = literal:20",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_behavior_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_allows_risky_default_behavior_with_matching_create_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list position defaults",
+            goal="Cover position attribute default behavior.",
+            scope=AuthoringScope(surface="position-defaults"),
+            entities={
+                "position": AuthoringEntitySpec(
+                    operations={
+                        "create": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/positions"),
+                            behavior_evidence={
+                                "source_ref": "services/price_list_position_attribute_value_create_service.py",
+                                "evidence": (
+                                    "Create service merges omitted attributes with defaults during position create."
+                                ),
+                            },
+                        )
+                    }
+                ),
+                "position_attribute_value": AuthoringEntitySpec(
+                    id_field="position_id",
+                    operations={
+                        "verify_default_applied_to_omitted_position_attribute": AuthoringEntityOperation(
+                            sql=(
+                                "SELECT (COUNT(*) = 1) AS default_value_applied "
+                                "FROM position_attribute_values "
+                                "WHERE position_id = :position_id AND attribute_id = :material_attr_id"
+                            ),
+                            params={
+                                "position_id": "{{position_id}}",
+                                "material_attr_id": "{{material_attr_id}}",
+                            },
+                            expected_outcomes=["`default_value_applied` = `true`"],
+                            column_types={"default_value_applied": "boolean"},
+                        )
+                    },
+                ),
+            },
+            cases=[
+                AuthoringCase(
+                    id="position-creation-applies-omitted-default",
+                    kind="api",
+                    title="Position creation applies omitted default",
+                    objective=(
+                        "Verify a category attribute default creates a position value "
+                        "when the position omits that attribute."
+                    ),
+                    state_change="create",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/positions"),
+                        body={"category_id": "{{category_id}}", "attributes": []},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> position_id"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="position_attribute_value",
+                            operation="verify_default_applied_to_omitted_position_attribute",
+                        ),
+                    ),
+                    scenario_variables=[
+                        "category_id = literal:10",
+                        "material_attr_id = literal:20",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.PASS)
+        self.assertFalse(
+            any(
+                diagnostic.code.startswith("authoring_behavior_evidence")
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_blocks_update_evidence_for_risky_create_behavior(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="price-list-plan",
+            project="code/demo",
+            title="Price list position defaults",
+            goal="Cover position attribute default behavior.",
+            scope=AuthoringScope(surface="position-defaults"),
+            entities={
+                "position": AuthoringEntitySpec(
+                    operations={
+                        "create": AuthoringEntityOperation(
+                            route=AuthoringRoute(method="POST", path="/positions"),
+                            behavior_evidence={
+                                "source_ref": "services/price_list_position_attribute_value_update_service.py",
+                                "evidence": "Update service does not apply defaults to omitted attributes.",
+                            },
+                        )
+                    }
+                ),
+                "position_attribute_value": AuthoringEntitySpec(
+                    id_field="position_id",
+                    operations={
+                        "verify_default_not_applied_to_omitted_position_attribute": AuthoringEntityOperation(
+                            sql=(
+                                "SELECT id FROM position_attribute_values "
+                                "WHERE position_id = :position_id AND attribute_id = :material_attr_id"
+                            ),
+                            params={
+                                "position_id": "{{position_id}}",
+                                "material_attr_id": "{{material_attr_id}}",
+                            },
+                            expected_outcomes=["no rows exist"],
+                        )
+                    },
+                ),
+            },
+            cases=[
+                AuthoringCase(
+                    id="position-creation-does-not-apply-omitted-default",
+                    kind="api",
+                    title="Position creation does not apply omitted default",
+                    objective=(
+                        "Verify a category attribute default does not create a position value "
+                        "when the position omits that attribute."
+                    ),
+                    state_change="create",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="POST", path="/positions"),
+                        body={"category_id": "{{category_id}}", "attributes": []},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=201,
+                        captures=["response.json.id -> position_id"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="position_attribute_value",
+                            operation="verify_default_not_applied_to_omitted_position_attribute",
+                        ),
+                    ),
+                    scenario_variables=[
+                        "category_id = literal:10",
+                        "material_attr_id = literal:20",
+                    ],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_behavior_evidence_mismatch"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_blocks_duplicate_copy_behavior_without_behavior_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="category-plan",
+            project="code/demo",
+            title="Category duplication",
+            goal="Cover category duplicate behavior.",
+            scope=AuthoringScope(surface="categories"),
+            entities={
+                "category_children": AuthoringEntitySpec(
+                    id_field="duplicated_category_id",
+                    operations={
+                        "verify_child_rows_copied": AuthoringEntityOperation(
+                            sql=(
+                                "SELECT (COUNT(*) = 2) AS child_rows_copied "
+                                "FROM category_children WHERE category_id = :duplicated_category_id"
+                            ),
+                            params={"duplicated_category_id": "{{duplicated_category_id}}"},
+                            expected_outcomes=["`child_rows_copied` = `true`"],
+                            column_types={"child_rows_copied": "boolean"},
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="duplicate-category-copies-child-rows",
+                    kind="api",
+                    title="Duplicate category copies child rows",
+                    objective="Verify duplicate category copies child rows into the cloned category graph.",
+                    state_change="mutate",
+                    execute=AuthoringExecute(route=AuthoringRoute(method="POST", path="/categories/{{category_id}}/duplicate")),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        captures=["response.json.id -> duplicated_category_id"],
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="category_children",
+                            operation="verify_child_rows_copied",
+                        ),
+                    ),
+                    scenario_variables=["category_id = literal:10"],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_behavior_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
+    def test_validate_blocks_clear_null_behavior_without_behavior_evidence(self) -> None:
+        plan = AuthoringPlan(
+            version=1,
+            source_id="profile-plan",
+            project="code/demo",
+            title="Profile update",
+            goal="Cover profile clear behavior.",
+            scope=AuthoringScope(surface="profiles"),
+            entities={
+                "profile": AuthoringEntitySpec(
+                    id_field="profile_id",
+                    operations={
+                        "verify_middle_name_cleared": AuthoringEntityOperation(
+                            sql="SELECT id FROM profiles WHERE id = :profile_id AND middle_name IS NULL",
+                            params={"profile_id": "{{profile_id}}"},
+                            expected_outcomes=["one row exists"],
+                            column_types={"id": "integer"},
+                        )
+                    },
+                )
+            },
+            cases=[
+                AuthoringCase(
+                    id="clear-middle-name",
+                    kind="api",
+                    title="Clear middle name",
+                    objective="Verify update clears middle_name by nulling the field.",
+                    state_change="update",
+                    execute=AuthoringExecute(
+                        route=AuthoringRoute(method="PATCH", path="/profiles/{{profile_id}}"),
+                        body={"middle_name": None},
+                    ),
+                    oracle=AuthoringOracle(
+                        status_code=200,
+                        persisted_state=AuthoringPersistedStateRef(
+                            entity="profile",
+                            operation="verify_middle_name_cleared",
+                        ),
+                    ),
+                    scenario_variables=["profile_id = literal:10"],
+                )
+            ],
+        )
+
+        result = AuthoringPlanCompiler().validate(plan)
+
+        self.assertEqual(result.status, StepStatus.BLOCKED)
+        self.assertTrue(
+            any(
+                diagnostic.code == "authoring_behavior_evidence_required"
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_required_permission_state_blocks_api_case_without_setup(self) -> None:
         plan = AuthoringPlan(
             version=1,

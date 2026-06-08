@@ -136,10 +136,20 @@ def _sync_route_operation_from_inventory(
         request_headers=dict(operation_item.get("request_headers") or operation_item.get("headers") or existing_operation.request_headers),
         request_params=dict(operation_item.get("request_params") or operation_item.get("params") or existing_operation.request_params),
         request_body=operation_item.get("request_body", existing_operation.request_body),
+        request_body_evidence=_request_body_evidence_from_inventory(
+            operation_item=operation_item,
+            route_spec=route_spec,
+            fallback=existing_operation.request_body_evidence,
+        ),
         response_body_evidence=_response_body_evidence_from_inventory(
             operation_item=operation_item,
             route_spec=route_spec,
             fallback=existing_operation.response_body_evidence,
+        ),
+        behavior_evidence=_behavior_evidence_from_inventory(
+            operation_item=operation_item,
+            route_spec=route_spec,
+            fallback=existing_operation.behavior_evidence,
         ),
         request_constraints=_dict_list_from_payload(
             operation_item.get("request_constraints"),
@@ -170,7 +180,13 @@ def _sync_db_operation_from_inventory(
         request_headers=dict(existing_operation.request_headers),
         request_params=dict(existing_operation.request_params),
         request_body=existing_operation.request_body,
+        request_body_evidence=existing_operation.request_body_evidence,
         response_body_evidence=existing_operation.response_body_evidence,
+        behavior_evidence=_evidence_from_payload(
+            verification_item,
+            fallback=existing_operation.behavior_evidence,
+            keys=("behavior_evidence", "expected_behavior_evidence", "business_behavior_evidence"),
+        ),
         request_constraints=list(existing_operation.request_constraints),
         auth_strategy=list(existing_operation.auth_strategy),
         oracle=existing_operation.oracle,
@@ -195,7 +211,13 @@ def _sync_defaults_from_entity_inventory(
     entity_inventory: dict[str, Any],
 ) -> AuthoringDefaults:
     auth_contract = entity_inventory.get("auth_contract") if isinstance(entity_inventory.get("auth_contract"), dict) else {}
-    actor = str(auth_contract.get("actor") or existing_defaults.actor or "")
+    auth_actor = str(auth_contract.get("actor") or "").strip()
+    existing_actor = str(existing_defaults.actor or "").strip()
+    actor = (
+        existing_actor
+        if auth_actor == "api-client" and existing_actor and existing_actor != "api-client"
+        else (auth_actor or existing_actor)
+    )
     return AuthoringDefaults(
         environment=existing_defaults.environment,
         auth=existing_defaults.auth,
@@ -234,6 +256,30 @@ def _capture_rules_from_inventory(value: Any, *, fallback: list[str]) -> list[st
 
 
 
+def _request_body_evidence_from_inventory(
+    *,
+    operation_item: dict[str, Any],
+    route_spec: dict[str, Any] | None,
+    fallback: Any,
+) -> Any:
+    for source in (operation_item, route_spec or {}):
+        value = _evidence_from_payload(
+            source,
+            fallback=None,
+            keys=(
+                "request_body_evidence",
+                "request_body_schema",
+                "request_schema",
+                "request_evidence",
+                "request_serializer_evidence",
+                "serializer_evidence",
+            ),
+        )
+        if _value_has_evidence(value):
+            return value
+    return fallback
+
+
 def _response_body_evidence_from_inventory(
     *,
     operation_item: dict[str, Any],
@@ -241,19 +287,52 @@ def _response_body_evidence_from_inventory(
     fallback: Any,
 ) -> Any:
     for source in (operation_item, route_spec or {}):
-        for key in (
-            "response_body_evidence",
-            "response_body_schema",
-            "response_schema",
-            "response_evidence",
-            "response_serializer_evidence",
-        ):
-            value = source.get(key)
-            if _value_has_evidence(value):
-                return value
+        value = _evidence_from_payload(
+            source,
+            fallback=None,
+            keys=(
+                "response_body_evidence",
+                "response_body_schema",
+                "response_schema",
+                "response_evidence",
+                "response_serializer_evidence",
+            ),
+        )
+        if _value_has_evidence(value):
+            return value
         normalized_fields = _string_list_from_payload(source.get("normalized_response_fields"), fallback=[])
         if normalized_fields:
             return {"source_role": "response_schema", "fields": normalized_fields}
+    return fallback
+
+
+def _behavior_evidence_from_inventory(
+    *,
+    operation_item: dict[str, Any],
+    route_spec: dict[str, Any] | None,
+    fallback: Any,
+) -> Any:
+    for source in (operation_item, route_spec or {}):
+        value = _evidence_from_payload(
+            source,
+            fallback=None,
+            keys=("behavior_evidence", "expected_behavior_evidence", "business_behavior_evidence"),
+        )
+        if _value_has_evidence(value):
+            return value
+    return fallback
+
+
+def _evidence_from_payload(
+    payload: dict[str, Any],
+    *,
+    fallback: Any,
+    keys: tuple[str, ...],
+) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if _value_has_evidence(value):
+            return value
     return fallback
 
 
