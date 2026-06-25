@@ -85,6 +85,9 @@ Every command used as a gate must produce explicit status evidence before the wo
 truncated payload, or output that lacks `Status: ...`/JSON `status` is not a successful gate. Rerun with
 `--output-format json`, inspect the persisted result artifact, or report tooling `ERROR`/`BLOCKED` instead of
 continuing.
+Do not rely on exit code 0 alone. In the work log, `(no output)` is unknown status, not a quiet pass. Prefer one gate
+per command while repairing or validating source artifacts so the observed status and counts cannot be attributed to the
+wrong stage.
 
 For `--review-drafts`, use the returned `review_result_path` when stdout is long or truncated. Do not read
 generation `summary.json` as if it contained the latest review set.
@@ -93,6 +96,9 @@ generation `summary.json` as if it contained the latest review set.
 
 - Use compiled input unless the request is too vague or the user explicitly wants prose bootstrap.
 - Expect `artifacts/agent/generation/<run_id>/authoring-plan.yaml` or compiled `agent-plan.json` from the same bundle as the normal input.
+- When the user names an existing bundle or asks to continue a known run, reuse that bundle. For a new broad coverage
+  request, avoid mutating a historical bundle that already has promoted scenarios or runner artifacts; create a new
+  staged bundle or explicitly clone/extend the existing source and state the reason.
 - Route decomposition-first requests back to `agent-plan-authoring`.
 - Validate authoring or compiled input before generation when the agent edited source artifacts.
 - Stop at `NormalizedTestPlan` unless the user asked for downstream phases.

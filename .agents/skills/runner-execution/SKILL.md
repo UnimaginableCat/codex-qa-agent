@@ -30,6 +30,9 @@ Apply the `AGENTS.md` workspace interpreter rule before runner execution. Resolv
 - Inspect pause: `<venv-python> -m tools.scenario_runner.cli --inspect-pause <pause-state.json>`
 - Resume: `<venv-python> -m tools.scenario_runner.cli --resume <pause-state.json> --action <action_id>`
 
+Do not append generation CLI flags to runner commands. In particular, `tools.scenario_runner.batch_cli` supports
+`--scenario-dir` and `--mode`; it does not support `--output-format`.
+
 Do not silently fall back to project venvs, system `python`, `python3`, `py`, or `uv run`. If the workspace-root venv is missing, too old, or lacks dependencies, report the run as environment/tooling `BLOCKED` unless the user explicitly authorizes a non-workspace fallback.
 
 # Execution Policy
@@ -41,6 +44,13 @@ Use the runner as the first source of execution truth for runnable scenarios.
 - Auto mode: use for explicitly non-interactive or compatibility-focused runs.
 - Guided mode: use as the default for scenario runs when the user did not request auto/non-interactive mode.
 - Manual/resume mode: use only when inspecting an existing pause-state or continuing with an explicit operator action.
+- For long-running batch runs, preserve one active runner process and wait for that process or its artifacts. Do not
+  launch a second identical `batch_cli` command unless the first command has terminally ended or artifact inspection
+  proves it never started.
+- If batch stdout is missing, empty, or truncated, recover evidence from persisted batch artifacts under
+  `artifacts/agent/scenario-batches/<batch-id>/` when a batch id/path is known. If no batch id is visible, inspect recent
+  batch manifests and summaries that match the scenario directory before deciding whether the run is unknown, blocked, or
+  safe to rerun. Do not rerun with unsupported output flags.
 
 Guided/manual mode does not mean asking the operator before every scenario step. Ask the operator only when runner output contains a real pause/decision artifact, such as `operator_state.resumable=true`, `pause_state_path`, and an active decision point with available actions.
 
