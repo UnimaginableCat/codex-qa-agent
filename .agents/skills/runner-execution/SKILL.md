@@ -41,6 +41,9 @@ Use the runner as the first source of execution truth for runnable scenarios.
 - Auto mode: use for explicitly non-interactive or compatibility-focused runs.
 - Guided mode: use as the default for scenario runs when the user did not request auto/non-interactive mode.
 - Manual/resume mode: use only when inspecting an existing pause-state or continuing with an explicit operator action.
+- For long-running batch runs, preserve one active runner process and wait for that process or its artifacts. Do not
+  launch a second identical `batch_cli` command unless the first command has terminally ended or artifact inspection
+  proves it never started.
 
 Guided/manual mode does not mean asking the operator before every scenario step. Ask the operator only when runner output contains a real pause/decision artifact, such as `operator_state.resumable=true`, `pause_state_path`, and an active decision point with available actions.
 

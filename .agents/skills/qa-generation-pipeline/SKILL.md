@@ -47,6 +47,17 @@ Use the minimum path needed:
 
 Always identify the target project under `code/` before authoring or execution. If the project is ambiguous, make the smallest reasonable assumption and state it.
 
+## Bundle Selection
+
+Treat the generation run id as an audit identity. Reusing an existing bundle is appropriate when the user points to that
+bundle, when continuing an incomplete pipeline, or when repairing the same active run before the final answer.
+
+For a new broad coverage request, do not silently mutate a historical bundle that already has promoted scenarios or
+runner execution artifacts just because its `source_id` is similar. Prefer a new staged bundle, or explicitly state that
+you are cloning/extending an existing source bundle and why. In-place edits plus `--purge-target-dir` are reserved for
+intentional regeneration of the same active run; before doing that, state the previous promoted count and that the
+run-scoped promoted directory will be replaced.
+
 # Stage Gates
 
 Do not continue past a failed gate unless the user explicitly asks for diagnostic-only continuation.
@@ -71,6 +82,10 @@ Required gates:
    `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir scenarios/generated/<source>-<run_id>`
 
 For every gate, inspect an explicit status from stdout or a persisted artifact. If a command returns no stdout, do not infer `PASS`; rerun with JSON/text output, check the exit code, or read the relevant result artifact before continuing.
+Exit code 0 alone is not gate evidence. A transcript line such as `(no output)` means the gate status is unknown until
+you rerun the same gate with `--output-format json` or read a persisted result containing `status=PASS`. Keep a small
+stage ledger as you work: gate name, observed status, key counts, and artifact path. Do not batch-chain multiple gates
+in one shell command when that would make it unclear which gate produced which status.
 
 For review and promotion gates, prefer JSON and verify numeric counts before continuing:
 
