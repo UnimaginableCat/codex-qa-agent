@@ -81,11 +81,18 @@ Required gates:
 8. Execution gate:
    `<venv-python> -m tools.scenario_runner.batch_cli --scenario-dir scenarios/generated/<source>-<run_id>`
 
-For every gate, inspect an explicit status from stdout or a persisted artifact. If a command returns no stdout, do not infer `PASS`; rerun with JSON/text output, check the exit code, or read the relevant result artifact before continuing.
-Exit code 0 alone is not gate evidence. A transcript line such as `(no output)` means the gate status is unknown until
-you rerun the same gate with `--output-format json` or read a persisted result containing `status=PASS`. Keep a small
-stage ledger as you work: gate name, observed status, key counts, and artifact path. Do not batch-chain multiple gates
-in one shell command when that would make it unclear which gate produced which status.
+For generation gates, inspect an explicit status from stdout or a persisted artifact. If a `tools.generation.cli`
+command returns no stdout, do not infer `PASS`; rerun that generation CLI command with JSON/text output, check the exit
+code, or read the relevant generation result artifact before continuing. Exit code 0 alone is not gate evidence. A
+transcript line such as `(no output)` means the gate status is unknown until you rerun the generation gate with
+`--output-format json` or read a persisted result containing `status=PASS`.
+
+The execution gate is different: `tools.scenario_runner.batch_cli` does not support `--output-format`. If a batch run has
+no visible stdout yet, keep waiting for the active process or inspect persisted batch artifacts such as
+`artifacts/agent/scenario-batches/<batch-id>/summary.json`, `report.md`, and `manifest.json`. Do not retry `batch_cli`
+with generation-only flags. Keep a small stage ledger as you work: gate name, observed status, key counts, and artifact
+path. Do not batch-chain multiple gates in one shell command when that would make it unclear which gate produced which
+status.
 
 For review and promotion gates, prefer JSON and verify numeric counts before continuing:
 
