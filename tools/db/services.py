@@ -69,7 +69,10 @@ class DatabaseQueryService:
                 **env.connection_kwargs(),
             ) as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(prepared_sql.sql, prepared_sql.params)
+                    if prepared_sql.params:
+                        cursor.execute(prepared_sql.sql, prepared_sql.params)
+                    else:
+                        cursor.execute(prepared_sql.sql)
                     rows = list(cursor.fetchall())
 
             return ExecutionResult(

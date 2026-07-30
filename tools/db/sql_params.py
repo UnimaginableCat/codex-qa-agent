@@ -16,7 +16,13 @@ class PreparedSql:
 
 
 class NamedSqlParamConverter:
-    """Converts readable :named params into psycopg-compatible placeholders."""
+    """Converts readable :named params into psycopg-compatible placeholders.
+
+    Psycopg treats every percent sign as parameter syntax whenever params are
+    supplied, even when the percent appears inside a SQL string literal. Source
+    SQL remains standard SQL; this adapter escapes its literal percent signs
+    while preserving the placeholders it inserts.
+    """
 
     def prepare(self, sql: str, params: dict[str, Any] | list[Any]) -> PreparedSql:
         converted_sql, placeholder_names = self._convert_placeholders(sql)
@@ -48,18 +54,18 @@ class NamedSqlParamConverter:
             if sql.startswith("--", index):
                 newline_index = sql.find("\n", index)
                 if newline_index == -1:
-                    parts.append(sql[index:])
+                    parts.append(self._escape_literal_percents(sql[index:]))
                     break
-                parts.append(sql[index:newline_index + 1])
+                parts.append(self._escape_literal_percents(sql[index:newline_index + 1]))
                 index = newline_index + 1
                 continue
 
             if sql.startswith("/*", index):
                 closing_index = sql.find("*/", index + 2)
                 if closing_index == -1:
-                    parts.append(sql[index:])
+                    parts.append(self._escape_literal_percents(sql[index:]))
                     break
-                parts.append(sql[index:closing_index + 2])
+                parts.append(self._escape_literal_percents(sql[index:closing_index + 2]))
                 index = closing_index + 2
                 continue
 
@@ -67,12 +73,12 @@ class NamedSqlParamConverter:
 
             if current_char == "'":
                 quoted_text, index = self._consume_quoted(sql, index, "'")
-                parts.append(quoted_text)
+                parts.append(self._escape_literal_percents(quoted_text))
                 continue
 
             if current_char == '"':
                 quoted_identifier, index = self._consume_quoted(sql, index, '"')
-                parts.append(quoted_identifier)
+                parts.append(self._escape_literal_percents(quoted_identifier))
                 continue
 
             if sql.startswith("::", index):
@@ -88,10 +94,14 @@ class NamedSqlParamConverter:
                     index = next_index
                     continue
 
-            parts.append(current_char)
+            parts.append(self._escape_literal_percents(current_char))
             index += 1
 
         return "".join(parts), placeholder_names
+
+    @staticmethod
+    def _escape_literal_percents(value: str) -> str:
+        return value.replace("%", "%%")
 
     @staticmethod
     def _consume_quoted(sql: str, start_index: int, quote_char: str) -> tuple[str, int]:
