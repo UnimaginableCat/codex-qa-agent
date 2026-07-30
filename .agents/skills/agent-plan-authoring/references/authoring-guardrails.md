@@ -26,6 +26,7 @@ Read this reference only when authoring a broad runnable bundle, fixing authorin
 - Keep variables in first-class `scenario_variables[]` using supported prefixes: `env:`, `generated:`, `template:`, `derived:`, or `literal:`.
 - Quote whole YAML variable entries, for example `"name = template:qa-{{run_suffix}}"`.
 - Separate submitted values from normalized expected values, for example `submitted_email` and `expected_email = derived:submitted_email|lower`.
+- For an integer request field backed by env or literal text, declare a raw variable and derive the typed value, for example `"price_list_id_raw = env:PRICE_LIST_ID"` plus `"price_list_id = derived:price_list_id_raw|int"`.
 - Use `defaults.actor`, `metadata.default_actor`, `setup[].actor`, and `execute.actor` for actor profiles. Do not encode actor selection in free-form prose.
 - Do not author bearer headers for projects that use basic auth profiles; use `defaults.auth: basic` and actor-scoped env keys.
 

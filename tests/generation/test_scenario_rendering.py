@@ -136,6 +136,7 @@ class ScenarioRenderingTests(unittest.TestCase):
             scenario_variables=[
                 "run_suffix = generated:run_suffix",
                 "internal_api_token = env:INTERNAL_API_TOKEN",
+                "price_list_id_raw = env:PRICE_LIST_ID",
             ],
             test_cases=[
                 PlannedTestCase(
@@ -146,6 +147,7 @@ class ScenarioRenderingTests(unittest.TestCase):
                     scenario_variables=[
                         "primary_email = template:autotest.{{run_suffix}}@example.com",
                         "internal_api_token = env:INTERNAL_API_TOKEN",
+                        "price_list_id = derived:price_list_id_raw|int",
                     ],
                     metadata={"default_actor": "api-client"},
                 )
@@ -158,7 +160,9 @@ class ScenarioRenderingTests(unittest.TestCase):
         self.assertIn("## Variables", draft.markdown)
         self.assertIn("- run_suffix = generated:run_suffix", draft.markdown)
         self.assertIn("- internal_api_token = env:INTERNAL_API_TOKEN", draft.markdown)
+        self.assertIn("- price_list_id_raw = env:PRICE_LIST_ID", draft.markdown)
         self.assertIn("- primary_email = template:autotest.{{run_suffix}}@example.com", draft.markdown)
+        self.assertIn("- price_list_id = derived:price_list_id_raw|int", draft.markdown)
         self.assertIn("- actor = literal:api-client", draft.markdown)
         self.assertEqual(draft.markdown.count("internal_api_token = env:INTERNAL_API_TOKEN"), 1)
         with TemporaryDirectory() as tmp:
@@ -168,8 +172,19 @@ class ScenarioRenderingTests(unittest.TestCase):
 
         self.assertEqual(
             [variable.name for variable in scenario.variables],
-            ["run_suffix", "internal_api_token", "primary_email", "actor"],
+            [
+                "run_suffix",
+                "internal_api_token",
+                "price_list_id_raw",
+                "primary_email",
+                "price_list_id",
+                "actor",
+            ],
         )
+        price_list_id = next(
+            variable for variable in scenario.variables if variable.name == "price_list_id"
+        )
+        self.assertEqual(price_list_id.transforms, ["int"])
 
     def test_renderer_allows_case_variable_to_override_plan_variable_by_name(self) -> None:
         plan = NormalizedTestPlan(

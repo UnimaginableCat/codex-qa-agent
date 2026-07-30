@@ -12,7 +12,15 @@ Variables must be machine-readable. Supported forms:
 - `name = template:AUTOTEST {{run_suffix}}`
 - `name = derived:run_suffix|lower`
 - `name = derived:raw_name|trim|upper`
+- `name = derived:raw_integer|int`
 - `name = literal:Fixed literal`
+
+Use a raw variable plus `|int` when an env-backed or literal value must be sent as a JSON number:
+
+- `price_list_id_raw = env:PRICE_LIST_ID`
+- `price_list_id = derived:price_list_id_raw|int`
+
+The `int` transform accepts a base-10 integer. Put it last when the final value must remain numeric. A non-integer source blocks variable resolution before the API or DB step runs.
 
 Do not treat prose as a value. Examples that must block:
 

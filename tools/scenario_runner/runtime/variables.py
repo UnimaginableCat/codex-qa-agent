@@ -18,6 +18,7 @@ from ..domain.models import RunContext, ScenarioDefinition, ScenarioVariableDefi
 _GENERATED_TEMPLATE_FALLBACKS = {
     "generated_price_list_name": "AUTOTEST Attributes Flow {{run_suffix}}",
 }
+_BASE10_INTEGER_RE = re.compile(r"^[+-]?[0-9]+$")
 
 
 class VariableResolutionError(ValidationError):
@@ -316,8 +317,34 @@ def _apply_transform(variable_name: str, value: Any, transform: str) -> Any:
         return "" if value is None else str(value).lower()
     if transform == "upper":
         return "" if value is None else str(value).upper()
+    if transform == "int":
+        return _convert_to_int(variable_name, value)
     raise VariableResolutionError(
         f"Variable '{variable_name}' uses unsupported transform '{transform}'."
+    )
+
+
+def _convert_to_int(variable_name: str, value: Any) -> int:
+    if isinstance(value, bool):
+        raise _int_conversion_error(variable_name)
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        raise _int_conversion_error(variable_name)
+
+    normalized = value.strip()
+    if _BASE10_INTEGER_RE.fullmatch(normalized) is None:
+        raise _int_conversion_error(variable_name)
+    try:
+        return int(normalized, 10)
+    except (ValueError, OverflowError) as exc:
+        raise _int_conversion_error(variable_name) from exc
+
+
+def _int_conversion_error(variable_name: str) -> VariableResolutionError:
+    return VariableResolutionError(
+        f"Variable '{variable_name}' could not be converted to int; "
+        "expected a base-10 integer value."
     )
 
 

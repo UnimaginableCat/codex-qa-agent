@@ -30,7 +30,7 @@ TRANSFORM_EXPRESSION_RE = re.compile(
     r"^(?P<transform>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*"
     r"(?P<source>\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}|[A-Za-z_][A-Za-z0-9_]*)$"
 )
-SUPPORTED_TRANSFORMS = {"lower", "upper", "trim"}
+SUPPORTED_TRANSFORMS = {"int", "lower", "upper", "trim"}
 SUPPORTED_GENERATED_VALUES = {
     "numeric_suffix",
     "numeric_timestamp_suffix",

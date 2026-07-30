@@ -61,6 +61,20 @@ class VariableParsingTests(unittest.TestCase):
             "autotest.primary.{{email_suffix}}@example.com",
         )
 
+    def test_parse_integer_transform_for_env_backed_value(self) -> None:
+        result = parse_variables_section(
+            [
+                "- target_price_list_id_raw = env:PRICE_LIST_ID",
+                "- target_price_list_id = derived:target_price_list_id_raw|trim|int",
+            ],
+            error_type=ScenarioParseError,
+        )
+
+        self.assertEqual(result.errors, [])
+        self.assertEqual(result.definitions[1].source, ScenarioVariableSource.DERIVED)
+        self.assertEqual(result.definitions[1].source_name, "target_price_list_id_raw")
+        self.assertEqual(result.definitions[1].transforms, ["trim", "int"])
+
     def test_table_and_best_effort_parsing_preserve_warnings(self) -> None:
         result = parse_variables_section(
             [
