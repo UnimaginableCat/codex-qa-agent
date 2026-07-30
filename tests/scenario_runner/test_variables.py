@@ -506,6 +506,104 @@ class ScenarioVariableTests(unittest.TestCase):
         )
         self.assertEqual(executor.step_payload["body"]["displayName"], executor.run_variables["primary_display_name"])
 
+    def test_integer_transform_preserves_numeric_type_in_exact_request_placeholder(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "PRICE_LIST_ID=20474\n")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Integer Variable
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - target_price_list_id_raw = env:PRICE_LIST_ID
+                - target_price_list_id = derived:target_price_list_id_raw|int
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: copy category
+                Method: POST
+                Path: /price-lists/{{target_price_list_id}}/copy-to
+                Body:
+                ```json
+                {
+                  "target_price_list_id": "{{target_price_list_id}}",
+                  "reference": "price-list-{{target_price_list_id}}"
+                }
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.PASS)
+        self.assertEqual(executor.run_variables["target_price_list_id"], 20474)
+        self.assertIsInstance(executor.run_variables["target_price_list_id"], int)
+        self.assertEqual(executor.step_payload["path"], "/price-lists/20474/copy-to")
+        self.assertEqual(executor.step_payload["body"]["target_price_list_id"], 20474)
+        self.assertIsInstance(executor.step_payload["body"]["target_price_list_id"], int)
+        self.assertEqual(executor.step_payload["body"]["reference"], "price-list-20474")
+
+    def test_integer_transform_blocks_non_integer_env_value_before_execution(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare_env(root, "PRICE_LIST_ID=20.5\n")
+            scenario_path = self._write_scenario(
+                root,
+                """
+                # Scenario: Invalid Integer Variable
+
+                ## Project
+                code/demo
+
+                ## Environment
+                env/demo.env
+
+                ## Variables
+                - target_price_list_id_raw = env:PRICE_LIST_ID
+                - target_price_list_id = derived:target_price_list_id_raw|int
+
+                ## Steps
+
+                ### Step 1
+                Type: api
+                Name: copy category
+                Method: POST
+                Path: /price-lists/copy-to
+                Body:
+                ```json
+                {"target_price_list_id": "{{target_price_list_id}}"}
+                ```
+                """,
+            )
+            scenario = MarkdownScenarioParser().parse(scenario_path)
+            executor = _CapturingExecutorFactory()
+            service = ScenarioRunnerService(
+                step_executor_factory=executor,
+                preflight_checker=_PassingPreflightChecker(),
+            )
+
+            summary = service.run(scenario, workspace_root=root)
+
+        self.assertEqual(summary.final_status, StepStatus.BLOCKED)
+        self.assertEqual(executor.execute_count, 0)
+        self.assertIn("could not be converted to int", summary.steps[0].message)
+        self.assertNotIn("20.5", summary.steps[0].message)
+
     def test_generated_numeric_suffix_resolves_to_digits_only(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -60,13 +60,16 @@ Supported formats:
 - `name = template:prefix-{{run_suffix}}`
 - `name = derived:source_variable|lower`
 - `name = derived:source_variable|trim|upper`
+- `name = derived:source_variable|int`
 - `name = literal:Fixed literal`
 
-Supported derived transforms are `lower`, `upper`, and `trim`.
+Supported derived transforms are `lower`, `upper`, `trim`, and `int`. The `int` transform accepts a base-10 integer value and preserves it as a JSON number when used as an exact placeholder. Put `int` last when the final value must remain numeric.
 
 Good:
 - `email_suffix = derived:run_suffix|lower`
 - `primary_email = template:autotest.primary.{{email_suffix}}@example.com`
+- `price_list_id_raw = env:PRICE_LIST_ID`
+- `price_list_id = derived:price_list_id_raw|int`
 
 Bad:
 - `email_suffix = the lowercase form of run_suffix`
